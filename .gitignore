@@ -1,0 +1,43 @@
+# Binaries
+otui
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Environment variable files
+.env
+
+# Output
+*.out
+*.log
+
+# Update Github script
+update-github.sh
+
+# Go workspace file
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Backup files
+*.backup
+*.bak
+*.old
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp Dir
+temp/
+context/

@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OTUI - A Minimalist Agentic TUI</title>
+    <meta name="description" content="An opinionated agentic TUI with a built-in MCP plugin system.">
+    <link rel="icon" type="image/png" href="icon.png">
+    
+    <!-- Open Graph / Social Media Card -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="OTUI - A Minimalist Agentic TUI">
+    <meta property="og:description" content="An opinionated agentic TUI with a built-in MCP plugin system.">
+    <meta property="og:image" content="https://hkdb.github.io/otui/social-card.png">
+    <meta property="og:url" content="https://hkdb.github.io/otui/">
+    
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="OTUI - A Minimalist Agentic TUI">
+    <meta name="twitter:description" content="An opinionated agentic TUI with a built-in MCP plugin system.">
+    <meta name="twitter:image" content="https://hkdb.github.io/otui/social-card.png">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            overflow-x: hidden;
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+            scroll-behavior: smooth;
+        }
+
+        html::-webkit-scrollbar {
+            display: none;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+            background: linear-gradient(135deg, #0a0a0f 0%, #151520 50%, #0a0a0f 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 40px 0;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 900px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 30px;
+        }
+
+        .hero-section {
+            min-height: 100vh;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+            position: relative;
+        }
+
+        .scroll-indicator {
+            position: absolute;
+            bottom: 100px;
+            left: 0;
+            right: -8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .scroll-text {
+            font-size: 14px;
+            color: #8b949e;
+            font-weight: 600;
+            letter-spacing: 2px;
+        }
+
+        .arrow-down {
+            width: 30px;
+            height: 30px;
+            border-left: 2px solid #8b949e;
+            border-bottom: 2px solid #8b949e;
+            transform: rotate(-45deg);
+            animation: bounce 2s infinite;
+        }
+
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% {
+                transform: translateY(0) rotate(-45deg);
+            }
+            40% {
+                transform: translateY(-10px) rotate(-45deg);
+            }
+            60% {
+                transform: translateY(-5px) rotate(-45deg);
+            }
+        }
+
+        .screenshot-container {
+            text-align: center;
+        }
+
+        .screenshot {
+            max-width: 100%;
+            height: auto;
+            margin-bottom: 10px;
+            margin-left: 4px;
+            filter: drop-shadow(0 4px 20px rgba(0, 0, 0, 0.5));
+        }
+
+        .version {
+            font-size: 12px;
+            color: #fff;
+            margin-top: -5px;
+        }
+
+        .ascii-logo {
+            font-family: monospace;
+            font-size: 14px;
+            line-height: 1.2;
+            color: #c9d1d9;
+            white-space: pre;
+            text-align: center;
+            margin: -180px 0 20px -3px;
+        }
+
+        .tagline {
+            font-size: 20px;
+            line-height: 1.6;
+            text-align: center;
+            color: #c9d1d9;
+            margin-bottom: 10px;
+            max-width: 700px;
+        }
+
+        .install-section {
+            width: 100%;
+            max-width: 550px;
+        }
+
+        .install-instruction {
+            font-size: 14px;
+            color: #8b949e;
+            margin-bottom: 5px;
+            text-align: center;
+        }
+
+        .code-block {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 20px;
+            position: relative;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            color: #66cf20;
+            overflow-x: auto;
+            display: flex;
+            align-items: center;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+
+        .code-block::-webkit-scrollbar {
+            display: none;
+        }
+
+        .copy-button {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            right: 10px;
+            background: #30363d;
+            color: #8b949e;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        .copy-button:hover {
+            background: #3d444d;
+            color: #c9d1d9;
+        }
+
+        .copy-button.copied {
+            background: #3d444d;
+            color: #58a6ff;
+        }
+
+        .features-section {
+            width: 100%;
+            max-width: 800px;
+            margin-top: 30px;
+            margin-left: 6px;
+            margin-right: -8px;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .feature-item {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 20px;
+            transition: all 0.3s;
+        }
+
+        .feature-item:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+
+        .feature-icon {
+            font-size: 24px;
+            margin-right: 10px;
+        }
+
+        .feature-title {
+            font-weight: 600;
+            color: #fff;
+            display: inline;
+        }
+
+        .feature-description {
+            color: #c9d1d9;
+            margin-top: 8px;
+            line-height: 1.5;
+            font-size: 14px;
+        }
+
+        .github-hero-link {
+            margin-top: 40px;
+            display: block;
+            line-height: 0;
+        }
+
+        .github-hero-icon {
+            width: 50px;
+            transition: opacity 0.2s;
+            display: block;
+        }
+
+        .github-hero-icon:hover {
+            opacity: 0.8;
+        }
+
+        .footer {
+            margin-top: 60px;
+            margin-bottom: 40px;
+            text-align: center;
+            font-size: 14px;
+            color: #8b949e;
+        }
+
+        .footer a {
+            color: #8b949e;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .footer a:hover {
+            color: #c9d1d9;
+        }
+
+        @media (max-width: 768px) {
+            .features-grid {
+                grid-template-columns: 1fr;
+                padding: 0 25px;
+            }
+
+            .features-section {
+                margin-left: 0;
+            }
+
+            .screenshot {
+                max-width: 90%;
+            }
+
+            .tagline {
+                font-size: 16px;
+                max-width: 280px;
+            }
+
+            .install-instruction {
+                font-size: 11px;
+            }
+
+            .install-section {
+                padding: 0 20px;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .code-block {
+                font-size: 11px;
+                padding: 15px 25px;
+                white-space: nowrap;
+                max-width: 290px;
+            }
+
+            .copy-button {
+                font-size: 10px;
+                padding: 6px 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="hero-section">
+            <pre class="ascii-logo"> ░▒▓██████▓▒░▒▓████████▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░ 
+░▒▓█▓▒░░▒▓█▓▒░ ░▒▓█▓▒░   ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░ 
+░▒▓█▓▒░░▒▓█▓▒░ ░▒▓█▓▒░   ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░ 
+░▒▓█▓▒░░▒▓█▓▒░ ░▒▓█▓▒░   ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░ 
+░▒▓█▓▒░░▒▓█▓▒░ ░▒▓█▓▒░   ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░ 
+░▒▓█▓▒░░▒▓█▓▒░ ░▒▓█▓▒░   ░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░ 
+ ░▒▓██████▓▒░  ░▒▓█▓▒░    ░▒▓██████▓▒░░▒▓█▓▒░ </pre>
+
+            <p class="tagline">
+                An opinionated agentic TUI with a built-in MCP plugin system.
+            </p>
+
+            <div class="screenshot-container">
+                <img src="otui-ss.png" alt="OTUI Screenshot" class="screenshot">
+            </div>
+
+            <div class="install-section">
+                <p class="install-instruction">To install, copy and paste this command into your terminal:</p>
+                <div class="code-block">
+                    <button class="copy-button" onclick="copyToClipboard()">Copy</button>
+                    <code id="install-command">curl -sL https://hkdb.github.io/otui/get.sh | bash</code>
+                </div>
+            </div>
+
+            <a href="https://github.com/hkdb/otui" target="_blank" class="github-hero-link">
+                <img src="github.png" alt="GitHub" class="github-hero-icon">
+            </a>
+            <div class="version">v0.01.00</div>
+
+            <a href="#features" class="scroll-indicator">
+                <div class="scroll-text">FEATURES</div>
+                <div class="arrow-down"></div>
+            </a>
+        </div>
+
+        <div class="features-section" id="features">
+            <div class="features-grid">
+                <div class="feature-item">
+                    <div><span class="feature-icon">🏗️</span><span class="feature-title">Effortless Setup</span></div>
+                    <p class="feature-description">Single command install & 3 configs in a welcome screen on first launch</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">💫</span><span class="feature-title">Minimalist UI</span></div>
+                    <p class="feature-description">Clean, distraction-free interface</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">🚀</span><span class="feature-title">Performance</span></div>
+                    <p class="feature-description">Designed to be blazingly fast and responsive</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">👻</span><span class="feature-title">Terminal Transparency</span></div>
+                    <p class="feature-description">Respects your terminal's transparency settings</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">⌨️</span><span class="feature-title">Keyboard-driven</span></div>
+                    <p class="feature-description">Everything is keyboard only except to copy via text selection</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">🖱</span><span class="feature-title">Native Text Selection</span></div>
+                    <p class="feature-description">Highlight and copy any part of the LLM response</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">✏️</span><span class="feature-title">Text Editor Integration</span></div>
+                    <p class="feature-description">Toggle your favorite text editor to compose your more complex prompts</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">🚰</span><span class="feature-title">Streaming Responses</span></div>
+                    <p class="feature-description">Real-time AI responses with typewriter effect</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">⚓</span><span class="feature-title">Markdown Rendering</span></div>
+                    <p class="feature-description">Custom performance focused, minimalistic markdown rendering</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">📦</span><span class="feature-title">Multiple Models</span></div>
+                    <p class="feature-description">Effortlessly switch between models</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">🎬</span><span class="feature-title">Multiple Sessions</span></div>
+                    <p class="feature-description">Use different sessions to encapsulate different context and tasks</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">🗃</span><span class="feature-title">Session History</span></div>
+                    <p class="feature-description">Conversations are automatically saved and ready to continue where you left off</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">🔍</span><span class="feature-title">Session Search</span></div>
+                    <p class="feature-description">Search and find past conversations easily</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">🛣️</span><span class="feature-title">Session Import/Export</span></div>
+                    <p class="feature-description">Easily bring sessions to another machine or share context with others</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">✍🏼</span><span class="feature-title">System Prompts</span></div>
+                    <p class="feature-description">Configure system prompts profile-wide or per session</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">🧳</span><span class="feature-title">Portable</span></div>
+                    <p class="feature-description">Migrate everything to a new system or switch between user profiles easily</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">🖧</span><span class="feature-title">Profile Sync</span></div>
+                    <p class="feature-description">Sync profiles and sessions between devices with any file sync provider</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">💻</span><span class="feature-title">Cross Platform</span></div>
+                    <p class="feature-description">Runs on Linux, FreeBSD, Mac, and Windows</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">🔧</span><span class="feature-title">MCP Plugins</span></div>
+                    <p class="feature-description">Automatic & Guided download + installations of MCP Plugins</p>
+                </div>
+
+                <div class="feature-item">
+                    <div><span class="feature-icon">🛸</span><span class="feature-title">MCP Registry</span></div>
+                    <p class="feature-description">A growing list of MCP server plugins to explore</p>
+                </div>
+            </div>
+        </div>
+
+        <footer class="footer">
+            An Open Source Project @ <a href="https://github.com/hkdb/otui" target="_blank">hkdb/otui</a>
+        </footer>
+    </div>
+
+    <script>
+        function copyToClipboard() {
+            const code = document.getElementById('install-command').textContent;
+            const button = document.querySelector('.copy-button');
+            
+            navigator.clipboard.writeText(code).then(() => {
+                button.textContent = 'Copied!';
+                button.classList.add('copied');
+                
+                setTimeout(() => {
+                    button.textContent = 'Copy';
+                    button.classList.remove('copied');
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                button.textContent = 'Failed';
+                setTimeout(() => {
+                    button.textContent = 'Copy';
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>
