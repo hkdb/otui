@@ -11,14 +11,13 @@ const GitHubURL = "github.com/hkdb/otui"
 func renderAboutModal(width, height int, version, license string) string {
 	var sb strings.Builder
 
-	titleStyle := lipgloss.NewStyle().
+	asciiStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("10")).
-		Bold(true)
+		Bold(true).
+		Align(lipgloss.Center)
 
-	for _, line := range strings.Split(ASCIIArt, "\n") {
-		sb.WriteString(titleStyle.Render(line))
-		sb.WriteString("\n")
-	}
+	sb.WriteString(asciiStyle.Render(" " + ASCIIArt))
+	sb.WriteString("\n")
 
 	sb.WriteString("\n\n")
 

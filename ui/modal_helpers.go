@@ -19,9 +19,17 @@ const (
 // RenderAcknowledgeModal renders a modal that requires only acknowledgement (Enter to dismiss)
 // Used for informational messages, warnings, and errors that don't need user confirmation
 func RenderAcknowledgeModal(title, message string, modalType ModalType, width, height int) string {
+	// Guard clause: prevent rendering in tiny terminals
+	if width < 20 || height < 10 {
+		return "Terminal too small"
+	}
+
 	modalWidth := 60
 	if width < modalWidth+10 {
 		modalWidth = width - 10
+		if modalWidth < 10 {
+			modalWidth = 10
+		}
 	}
 
 	// Determine title color based on modal type
@@ -120,10 +128,18 @@ func RenderPluginSystemModal(state PluginSystemState, width, height int) string 
 
 // renderSpinner renders a simple one-line spinner modal (no borders)
 func renderSpinner(message, spinnerView string, width, height int) string {
+	// Guard clause: prevent rendering in tiny terminals
+	if width < 20 || height < 10 {
+		return "Terminal too small"
+	}
+
 	content := spinnerView + " " + message
 	modalWidth := 40
 	if width < modalWidth+10 {
 		modalWidth = width - 10
+		if modalWidth < 10 {
+			modalWidth = 10
+		}
 	}
 	paddedContent := lipgloss.NewStyle().
 		Width(modalWidth).
@@ -134,9 +150,17 @@ func renderSpinner(message, spinnerView string, width, height int) string {
 
 // renderUnresponsiveWarning renders the unresponsive plugins warning modal (borderless three-section)
 func renderUnresponsiveWarning(plugins []string, errorMsg string, width, height int) string {
+	// Guard clause: prevent rendering in tiny terminals
+	if width < 20 || height < 10 {
+		return "Terminal too small"
+	}
+
 	modalWidth := 55
 	if width < modalWidth+10 {
 		modalWidth = width - 10
+		if modalWidth < 10 {
+			modalWidth = 10
+		}
 	}
 
 	// Build message lines
@@ -191,12 +215,20 @@ func renderUnresponsiveWarning(plugins []string, errorMsg string, width, height 
 // footer should be pre-formatted using FormatFooter() or a simple string
 // desiredWidth: preferred modal width (0 = default 60)
 func RenderThreeSectionModal(title string, messageLines []string, footer string, modalType ModalType, desiredWidth, width, height int) string {
+	// Guard clause: prevent rendering in tiny terminals
+	if width < 20 || height < 10 {
+		return "Terminal too small"
+	}
+
 	modalWidth := desiredWidth
 	if modalWidth == 0 {
 		modalWidth = 60 // default width
 	}
 	if width < modalWidth+10 {
 		modalWidth = width - 10
+		if modalWidth < 10 {
+			modalWidth = 10
+		}
 	}
 
 	// Determine title color based on modal type
@@ -217,6 +249,9 @@ func RenderThreeSectionModal(title string, messageLines []string, footer string,
 		leftPad = 0 // Safety check for very long titles
 	}
 	rightPad := modalWidth - titleVisualWidth - leftPad
+	if rightPad < 0 {
+		rightPad = 0 // Safety check for very long titles
+	}
 	centeredTitle := strings.Repeat(" ", leftPad) + title + strings.Repeat(" ", rightPad)
 
 	titleSection := lipgloss.NewStyle().
@@ -262,9 +297,17 @@ func RenderThreeSectionModal(title string, messageLines []string, footer string,
 // RenderPluginOperationModal renders the plugin enable/disable operation modal
 // Shows spinner during operation, success message, or error
 func RenderPluginOperationModal(phase string, spinnerView string, pluginName string, errorMsg string, width, height int) string {
+	// Guard clause: prevent rendering in tiny terminals
+	if width < 20 || height < 10 {
+		return "Terminal too small"
+	}
+
 	modalWidth := 50
 	if width < modalWidth+10 {
 		modalWidth = width - 10
+		if modalWidth < 10 {
+			modalWidth = 10
+		}
 	}
 
 	var content string
@@ -395,12 +438,12 @@ func wordWrap(text string, width int) string {
 
 		currentLine := words[0]
 		for _, word := range words[1:] {
-			if len(currentLine)+1+len(word) <= width {
-				currentLine += " " + word
-			} else {
+			if len(currentLine)+1+len(word) > width {
 				result.WriteString(currentLine + "\n")
 				currentLine = word
+				continue
 			}
+			currentLine += " " + word
 		}
 		result.WriteString(currentLine)
 

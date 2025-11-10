@@ -66,8 +66,10 @@ func (c *Client) ChatWithTools(ctx context.Context, messages []api.Message, tool
 }
 
 type ModelInfo struct {
-	Name string
-	Size int64
+	Name         string // Display name (stripped for OpenRouter)
+	Size         int64
+	Provider     string // Provider ID: "ollama", "openrouter", "anthropic"
+	InternalName string // Full API name (e.g., "meta-llama/llama-3.2-90b" for OpenRouter)
 }
 
 func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
@@ -79,8 +81,10 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	models := make([]ModelInfo, len(resp.Models))
 	for i, model := range resp.Models {
 		models[i] = ModelInfo{
-			Name: model.Name,
-			Size: model.Size,
+			Name:         model.Name,
+			Size:         model.Size,
+			Provider:     "ollama",
+			InternalName: model.Name, // Ollama uses same name for display and API
 		}
 	}
 

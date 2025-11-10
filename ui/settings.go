@@ -18,7 +18,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"otui/config"
 	"otui/mcp"
-	"otui/ollama"
+	"otui/provider"
 	"otui/storage"
 )
 
@@ -32,6 +32,8 @@ type dataDirectoryLoadedMsg struct {
 	configLoaded   bool
 	ollamaHost     string
 	defaultModel   string
+	systemPrompt   string
+	pluginsEnabled bool
 	err            error
 }
 
@@ -40,32 +42,90 @@ type settingsSaveMsg struct {
 	err     error
 }
 
+type dataDirectoryNotFoundMsg struct {
+	path string
+}
+
 func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if config.DebugLog != nil {
+		config.DebugLog.Printf("[Settings] ========== handleSettingsInput CALLED ==========")
+		config.DebugLog.Printf("[Settings] Message type: %T", msg)
+		config.DebugLog.Printf("[Settings] providerSettingsState.visible = %v", a.providerSettingsState.visible)
+	}
+
+	// Route to provider settings sub-screen if visible (keyboard input only)
+	if a.providerSettingsState.visible {
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("[Settings] Routing to provider settings handler")
+		}
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			return a.handleProviderSettingsInput(msg)
+		}
+		return a, nil
+	}
+
+	// Handle provider save messages regardless of visibility (fixes race condition where
+	// user presses Alt+Enter then immediately Esc before message arrives)
 	switch msg := msg.(type) {
-	case ollamaValidationMsg:
-		// Update validation state for Ollama Host field
-		for i := range a.settingsFields {
-			if a.settingsFields[i].Type == SettingTypeOllamaHost {
-				if msg.success {
-					a.settingsFields[i].Validation = FieldValidationSuccess
-					a.settingsFields[i].ErrorMsg = ""
-				} else {
-					a.settingsFields[i].Validation = FieldValidationError
-					if msg.err != nil {
-						a.settingsFields[i].ErrorMsg = msg.err.Error()
-					} else {
-						a.settingsFields[i].ErrorMsg = "Failed to connect"
-					}
+	case providerFieldSavedMsg:
+		// Handle save result (single field - legacy)
+		switch {
+		case msg.success:
+			// Update config in memory
+			a.dataModel.Config = msg.cfg
+		case !msg.success:
+			// Show error (for now, just ignore - could add error display later)
+			a.providerSettingsState.saveError = msg.err.Error()
+		}
+		return a, nil
+	case providerFieldsSavedMsg:
+		// Handle batch save result (all providers' fields)
+		switch {
+		case msg.success:
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("[Settings] ========== providerFieldsSavedMsg SUCCESS ==========")
+			}
+
+			// Update config in memory
+			a.dataModel.Config = msg.cfg
+
+			// Refresh provider settings cache (only if map exists - screen may be closed)
+			if a.providerSettingsState.currentFieldsMap != nil {
+				for _, providerID := range providerTabs {
+					a.providerSettingsState.currentFieldsMap[providerID] = a.providerSettingsState.getProviderFields(providerID, msg.cfg)
 				}
 			}
+
+			// Re-initialize providers and fetch models (shared helper with debug logging)
+			return a, a.refreshProvidersAndModels()
+		case !msg.success:
+			// Show error
+			a.providerSettingsState.saveError = msg.err.Error()
 		}
+		return a, nil
+	}
+
+	switch msg := msg.(type) {
+	case dataDirectoryNotFoundMsg:
+		// Data directory doesn't exist - show confirmation modal
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("[Settings] Showing new data dir confirmation for: %s", msg.path)
+		}
+		a.settingsDataDirNotFound = true
+		a.settingsNewDataDirPath = msg.path
 		return a, nil
 
 	case dataDirectoryLoadedMsg:
 		if msg.err != nil {
-			// Show error
+			// Show error and clear dependent fields
 			a.settingsFields[0].Validation = FieldValidationError
 			a.settingsFields[0].ErrorMsg = msg.err.Error()
+			a.settingsFields[1].Value = ""
+			a.settingsFields[2].Value = ""
+			a.settingsFields[3].Value = ""
+			a.settingsFields[4].Value = ""
+			a.settingsLoadedInfo = ""
 			return a, nil
 		}
 
@@ -73,14 +133,21 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.settingsFields[0].Validation = FieldValidationNone
 
 		if msg.configLoaded {
-			// Update other fields
+			// Update ALL fields from new data directory config
 			a.settingsFields[1].Value = msg.ollamaHost
 			a.settingsFields[2].Value = msg.defaultModel
+			a.settingsFields[3].Value = msg.systemPrompt
+			a.settingsFields[4].Value = boolToString(msg.pluginsEnabled)
 			a.settingsLoadedInfo = "ℹ Loaded config from data directory"
 			a.settingsHasChanges = true
 			// Trigger validation of new Ollama host
 			return a, validateOllamaHostCmd(msg.ollamaHost)
 		} else {
+			// No config found - clear all dependent fields
+			a.settingsFields[1].Value = ""
+			a.settingsFields[2].Value = ""
+			a.settingsFields[3].Value = ""
+			a.settingsFields[4].Value = ""
 			a.settingsLoadedInfo = ""
 		}
 
@@ -93,194 +160,194 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+		// ========== DATA DIRECTORY CHANGE & PLUGIN LIFECYCLE ORCHESTRATION ==========
+		//
+		// Flow for handling data directory changes with plugins:
+		//
+		// SCENARIO 1: Switch from data dir A (plugins enabled) → data dir B (plugins disabled)
+		//   1. STEP 1 (line 126-154): Shutdown plugins from old data dir, return early with modal
+		//   2. pluginSystemOperationMsg handler (appview_update.go:1283): Destroy manager, dismiss modal
+		//   3. User manually saves settings again (or shutdown completes and auto-continues)
+		//   4. STEP 2 (line 159-256): Validate and switch to new data dir
+		//   5. STEP 5 (line 324): Fetch session list, load first session
+		//   6. sessionLoadedMsg handler: Plugins not enabled, nothing to do ✓
+		//
+		// SCENARIO 2: Switch from data dir A (plugins disabled) → data dir B (plugins enabled)
+		//   1. STEP 1 (line 126-154): No plugins running, skip
+		//   2. STEP 2 (line 159-256): Validate and switch to new data dir, clear session to nil
+		//   3. STEP 3 (line 260-305): Condition FALSE (data dir changed), skip plugin enabling
+		//   4. STEP 5 (line 324): Fetch session list, load first session
+		//   5. sessionLoadedMsg handler (appview_update.go:~1512): Create manager, start plugins ✓
+		//
+		// SCENARIO 3: Just toggle plugins (no data dir change)
+		//   1. STEP 1 (line 126-154): If disabling, shutdown and return
+		//   2. STEP 2 (line 159-256): Skip (data dir didn't change)
+		//   3. STEP 3 (line 260-305): If enabling, create manager and start plugins ✓
+		//   4. STEP 5 (line 324): Fetch session list (refresh)
+		//
+		// NOTE: This orchestration logic lives in UI because Bubbletea has no controller layer.
+		//       Business logic (shutdown, startup, manager lifecycle) is in model/ and mcp/ packages.
+		//       UI just orchestrates: "when to call what, in what order" (Update pattern).
+		//
+		// ============================================================================
+
 		// Preserve current state for rollback
 		oldDataDir := a.dataModel.Config.DataDir()
 		oldHost := a.dataModel.Config.OllamaURL()
 		oldPluginsEnabled := a.dataModel.Config.PluginsEnabled
-		currentModel := a.dataModel.OllamaClient.GetModel()
+		currentModel := a.dataModel.Provider.GetModel()
 
-		// Reload config after successful save
-		cfg, err := config.Load()
+		// Get the new data dir from system config (to check if it changed)
+		// Config will be loaded in ApplyDataDirSwitch() after switching
+		// (may prompt for passphrase if new data dir is SSH-encrypted)
+		systemCfg, err := config.LoadSystemConfig()
 		if err != nil {
-			a.settingsSaveError = fmt.Sprintf("Failed to reload config: %v", err)
+			a.settingsSaveError = fmt.Sprintf("Failed to load system config: %v", err)
 			return a, nil
 		}
+		newDataDir := config.ExpandPath(systemCfg.DataDirectory)
 
-		a.dataModel.Config = cfg
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("[Settings Save] === ENTRY === oldDataDir=%s, newDataDir=%s, oldPlugins=%v",
+				oldDataDir, newDataDir, oldPluginsEnabled)
+		}
 
-		// Handle plugins_enabled toggle
-		if cfg.PluginsEnabled != oldPluginsEnabled {
-			if cfg.PluginsEnabled {
-				// ENABLING: Force manager recreation to pick up new config
-				// This fixes stale config after reload (disable → quit → launch → enable)
-				if a.dataModel.MCPManager != nil {
-					a.dataModel.MCPManager = nil
-				}
+		// STEP 1: Handle plugin shutdown based on scenario
+		// For plugin state changes, we need to check current config since we haven't reloaded yet
+		// (Data dir changes are handled by switchDataDirectory which loads config after switch)
 
-				// Ensure manager exists, then start plugins
-				if err := a.ensureMCPManager(); err != nil {
-					if config.DebugLog != nil {
-						config.DebugLog.Printf("[Settings] Plugin system enable FAILED: cannot recreate manager: %v", err)
-					}
-					// Show error modal
-					a.showSettings = false
-					a.settingsHasChanges = false
-					a.showAcknowledgeModal = true
-					a.acknowledgeModalTitle = "⚠️  Plugin System Error"
-					a.acknowledgeModalMsg = fmt.Sprintf("Failed to enable plugin system:\n\n%v\n\nPlugin infrastructure may be corrupted. Try restarting OTUI.", err)
-					a.acknowledgeModalType = ModalTypeError
-					return a, nil
-				}
-
+		// SCENARIO B: Just disabling plugins (no data dir change) - show modal and return
+		// Note: We use oldDataDir == newDataDir comparison since config not reloaded yet
+		if !a.dataModel.Config.PluginsEnabled && oldPluginsEnabled && oldDataDir == newDataDir {
+			if a.dataModel.MCPManager != nil {
 				if config.DebugLog != nil {
-					config.DebugLog.Printf("[Settings] Plugin system enabling - showing startup modal")
+					config.DebugLog.Printf("[Settings] Plugin system disabling (no data dir change) - showing shutdown modal")
 				}
 
 				// Close settings modal
 				a.showSettings = false
 				a.settingsHasChanges = false
 
-				// Show startup modal
+				// Show shutdown modal
 				a.pluginSystemState = PluginSystemState{
 					Active:    true,
-					Operation: "starting",
+					Operation: "stopping",
 					Phase:     "waiting",
 					Spinner:   spinner.New(),
 					StartTime: time.Now(),
 				}
 				a.pluginSystemState.Spinner.Spinner = spinner.Dot
-				a.pluginSystemState.Spinner.Style = lipgloss.NewStyle().Foreground(successColor)
 
+				if config.DebugLog != nil {
+					config.DebugLog.Printf("[Settings Save] === EARLY RETURN for plugin shutdown (no data dir change) ===")
+				}
 				return a, tea.Batch(
 					a.pluginSystemState.Spinner.Tick,
-					startPluginSystemCmd(a.dataModel.MCPManager, a.dataModel.CurrentSession),
+					stopPluginSystemCmd(a.dataModel.MCPManager),
 				)
-			} else {
-				// DISABLING: Show modal, shutdown plugins
-				if a.dataModel.MCPManager != nil {
-					if config.DebugLog != nil {
-						config.DebugLog.Printf("[Settings] Plugin system disabling - showing shutdown modal")
-					}
-
-					// Close settings modal
-					a.showSettings = false
-					a.settingsHasChanges = false
-
-					// Show shutdown modal
-					a.pluginSystemState = PluginSystemState{
-						Active:    true,
-						Operation: "stopping",
-						Phase:     "waiting",
-						Spinner:   spinner.New(),
-						StartTime: time.Now(),
-					}
-					a.pluginSystemState.Spinner.Spinner = spinner.Dot
-
-					return a, tea.Batch(
-						a.pluginSystemState.Spinner.Tick,
-						stopPluginSystemCmd(a.dataModel.MCPManager),
-					)
-				}
 			}
 		}
 
-		// Only update client if HOST changed
-		if cfg.OllamaURL() != oldHost {
-			newClient, err := ollama.NewClient(cfg.OllamaURL(), currentModel)
-			if err == nil {
-				a.dataModel.OllamaClient = newClient
+		// STEP 2: Handle data directory change (if any)
+		// Delegated to switchDataDirectory() helper which orchestrates all 6 steps
+		// Config will be loaded AFTER switch (may prompt for passphrase)
+		if newDataDir != oldDataDir {
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("[Settings] Data directory changed: %s → %s", oldDataDir, newDataDir)
 			}
+
+			// Close settings modal
+			a.showSettings = false
+			a.settingsHasChanges = false
+
+			// Call helper that orchestrates all 6 steps
+			return a, a.switchDataDirectory(newDataDir)
 		}
 
-		// If data directory changed, validate and refresh ALL components
-		if cfg.DataDir() != oldDataDir {
-			// Try to create new session storage
-			newStorage, err := storage.NewSessionStorage(cfg.DataDir())
-			if err != nil {
-				// ROLLBACK: Restore old data dir
-				oldCfg := &config.SystemConfig{DataDirectory: oldDataDir}
-				_ = config.SaveSystemConfig(oldCfg)
-				a.dataModel.Config, _ = config.Load()
-
-				a.settingsSaveError = fmt.Sprintf("Failed to initialize session storage:\n%v\n\nReverted to previous data directory.", err)
-				return a, nil
-			}
-
-			// Try to create new plugin storage
-			newPluginStorage, err := storage.NewPluginStorage(cfg.DataDir())
-			if err != nil {
-				// ROLLBACK: Restore old data dir
-				oldCfg := &config.SystemConfig{DataDirectory: oldDataDir}
-				_ = config.SaveSystemConfig(oldCfg)
-				a.dataModel.Config, _ = config.Load()
-
-				a.settingsSaveError = fmt.Sprintf("Failed to initialize plugin storage:\n%v\n\nReverted to previous data directory.", err)
-				return a, nil
-			}
-
-			// Try to load plugins config
-			newPluginsConfig, err := config.LoadPluginsConfig(cfg.DataDir())
-			if err != nil {
-				// ROLLBACK: Restore old data dir
-				oldCfg := &config.SystemConfig{DataDirectory: oldDataDir}
-				_ = config.SaveSystemConfig(oldCfg)
-				a.dataModel.Config, _ = config.Load()
-
-				a.settingsSaveError = fmt.Sprintf("Failed to load plugins config:\n%v\n\nReverted to previous data directory.", err)
-				return a, nil
-			}
-
-			// Try to create new registry
-			newRegistry, err := mcp.NewRegistry(cfg.DataDir())
-			if err != nil {
-				// ROLLBACK: Restore old data dir
-				oldCfg := &config.SystemConfig{DataDirectory: oldDataDir}
-				_ = config.SaveSystemConfig(oldCfg)
-				a.dataModel.Config, _ = config.Load()
-
-				a.settingsSaveError = fmt.Sprintf("Failed to initialize plugin registry:\n%v\n\nReverted to previous data directory.", err)
-				return a, nil
-			}
-
-			// ALL validations passed - commit changes
+		// Data dir didn't change - update session storage
+		newStorage, err := storage.NewSessionStorage(newDataDir)
+		if err == nil {
 			a.dataModel.SessionStorage = newStorage
 			a.dataModel.SearchIndex = storage.NewSearchIndex(newStorage)
+		}
 
-			// Update plugin components
-			newInstaller := mcp.NewInstaller(newPluginStorage, newPluginsConfig, cfg.DataDir())
-			a.pluginManagerState.pluginState.Registry = newRegistry
-			a.pluginManagerState.pluginState.Installer = newInstaller
-
-			// Reset plugin manager UI state
-			a.pluginManagerState.selection.selectedPluginIdx = 0
-			a.pluginManagerState.selection.scrollOffset = 0
-			a.pluginManagerState.selection.filterMode = false
-			a.pluginManagerState.selection.filterInput.SetValue("")
-			a.pluginManagerState.selection.filteredPlugins = nil
-			a.pluginManagerState.selection.viewMode = "curated"
-
-			// Re-initialize debug log for new data directory
-			if config.Debug {
-				config.InitDebugLog(cfg.DataDir())
+		// STEP 3: Handle plugin enabling (only if data dir didn't change)
+		// If data dir changed, plugins will start after session loads (see sessionLoadedMsg handler)
+		// Use current config since we haven't reloaded yet (only reload happens during data dir switch)
+		newPluginsEnabled := a.dataModel.Config.PluginsEnabled
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("[Settings Save] Checking plugin enable: oldPlugins=%v, newPlugins=%v, dataDirSame=%v, condition=%v",
+				oldPluginsEnabled, newPluginsEnabled, newDataDir == oldDataDir, !oldPluginsEnabled && newPluginsEnabled && newDataDir == oldDataDir)
+		}
+		if !oldPluginsEnabled && newPluginsEnabled && newDataDir == oldDataDir {
+			// ENABLING: Force manager recreation to pick up new config
+			// This fixes stale config after reload (disable → quit → launch → enable)
+			if a.dataModel.MCPManager != nil {
+				a.dataModel.MCPManager = nil
 			}
 
-			// Clear current session
-			a.dataModel.Messages = []Message{}
-			a.setCurrentSession(nil) // Clear and sync with MCP manager
-			a.dataModel.SessionDirty = false
-			a.dataModel.NeedsInitialRender = false
-		} else {
-			// Data dir didn't change, just update session storage
-			newStorage, err := storage.NewSessionStorage(cfg.DataDir())
+			// Ensure manager exists, then start plugins
+			if err := a.ensureMCPManager(); err != nil {
+				if config.DebugLog != nil {
+					config.DebugLog.Printf("[Settings] Plugin system enable FAILED: cannot recreate manager: %v", err)
+				}
+				// Show error modal
+				a.showSettings = false
+				a.settingsHasChanges = false
+				a.showAcknowledgeModal = true
+				a.acknowledgeModalTitle = "⚠️  Plugin System Error"
+				a.acknowledgeModalMsg = fmt.Sprintf("Failed to enable plugin system:\n\n%v\n\nPlugin infrastructure may be corrupted. Try restarting OTUI.", err)
+				a.acknowledgeModalType = ModalTypeError
+				return a, nil
+			}
+
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("[Settings] Plugin system enabling - showing startup modal")
+			}
+
+			// Close settings modal
+			a.showSettings = false
+			a.settingsHasChanges = false
+
+			// Show startup modal
+			a.pluginSystemState = PluginSystemState{
+				Active:    true,
+				Operation: "starting",
+				Phase:     "waiting",
+				Spinner:   spinner.New(),
+				StartTime: time.Now(),
+			}
+			a.pluginSystemState.Spinner.Spinner = spinner.Dot
+			a.pluginSystemState.Spinner.Style = lipgloss.NewStyle().Foreground(successColor)
+
+			return a, tea.Batch(
+				a.pluginSystemState.Spinner.Tick,
+				startPluginSystemCmd(a.dataModel.MCPManager, a.dataModel.CurrentSession),
+			)
+		}
+
+		// STEP 4: Handle other config changes (Ollama host, etc.)
+		// Only update provider if HOST changed
+		// Use current config since we're not reloading (only happens during data dir switch)
+		if a.dataModel.Config.OllamaURL() != oldHost {
+			providerCfg := provider.Config{
+				Type:    provider.ProviderTypeOllama,
+				BaseURL: a.dataModel.Config.OllamaURL(),
+				Model:   currentModel,
+			}
+			newProvider, err := provider.NewProvider(providerCfg)
 			if err == nil {
-				a.dataModel.SessionStorage = newStorage
-				a.dataModel.SearchIndex = storage.NewSearchIndex(newStorage)
+				a.dataModel.Provider = newProvider
 			}
 		}
 
+		// STEP 5: Close settings and fetch session list
 		a.showSettings = false
 		a.settingsHasChanges = false
 		a.settingsSaveError = ""
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("[Settings Save] === NORMAL RETURN === fetching session list")
+		}
 		return a, a.dataModel.FetchSessionList()
 
 	case tea.KeyMsg:
@@ -324,6 +391,75 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a AppView) handleSettingsNavigationMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Handle new data directory confirmation modal (y/n)
+	if a.settingsDataDirNotFound {
+		switch msg.String() {
+		case "y", "Y":
+			// User confirmed - create new data directory via restart
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("[Settings] User confirmed new data dir creation: %s", a.settingsNewDataDirPath)
+			}
+
+			a.settingsDataDirNotFound = false
+			a.showSettings = false
+
+			// Write system config with new data dir
+			systemCfg := &config.SystemConfig{
+				DataDirectory: a.settingsNewDataDirPath,
+			}
+			if err := config.SaveSystemConfig(systemCfg); err != nil {
+				a.showAcknowledgeModal = true
+				a.acknowledgeModalTitle = "⚠️  Error"
+				a.acknowledgeModalMsg = fmt.Sprintf("Failed to save config:\n\n%v", err)
+				a.acknowledgeModalType = ModalTypeError
+				return a, nil
+			}
+
+			// Set restart flag
+			a.RestartAfterQuit = true
+
+			// Trigger quit flow (reuse existing logic)
+			a.dataModel.Quitting = true
+
+			// If plugins running, show shutdown modal
+			if a.dataModel.MCPManager != nil && a.dataModel.Config.PluginsEnabled {
+				if config.DebugLog != nil {
+					config.DebugLog.Printf("[Settings] New data dir creation: shutting down plugins before restart")
+				}
+				a.pluginSystemState = PluginSystemState{
+					Active:    true,
+					Operation: "stopping",
+					Phase:     "waiting",
+					Spinner:   spinner.New(),
+					StartTime: time.Now(),
+				}
+				a.pluginSystemState.Spinner.Spinner = spinner.Dot
+				return a, tea.Batch(
+					a.pluginSystemState.Spinner.Tick,
+					stopPluginSystemCmd(a.dataModel.MCPManager),
+				)
+			}
+
+			// No plugins - quit immediately
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("[Settings] New data dir creation: no plugins, quitting immediately")
+			}
+			if a.dataModel.CurrentSession != nil && a.dataModel.SessionStorage != nil {
+				_ = a.dataModel.SessionStorage.UnlockSession(a.dataModel.CurrentSession.ID)
+			}
+			return a, tea.Quit
+
+		case "n", "N", "esc":
+			// User cancelled - return to Settings
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("[Settings] User cancelled new data dir creation")
+			}
+			a.settingsDataDirNotFound = false
+			return a, nil
+		}
+		return a, nil
+	}
+
 	// If showing save error, Enter/Esc clears it
 	if a.settingsSaveError != "" {
 		if msg.String() == "enter" || msg.String() == "esc" {
@@ -359,19 +495,58 @@ func (a AppView) handleSettingsNavigationMode(msg tea.KeyMsg) (tea.Model, tea.Cm
 		return a, nil
 
 	case "enter":
+		// Check if this is the provider link field - open provider settings sub-screen
+		if a.settingsFields[a.selectedSettingIdx].Type == SettingTypeProviderLink {
+			a.providerSettingsState.visible = true
+			a.providerSettingsState.selectedProviderID = "ollama" // Default tab
+			a.providerSettingsState.selectedFieldIdx = 0
+			a.providerSettingsState.editMode = false
+			a.providerSettingsState.hasChanges = false
+
+			// Initialize edit input
+			a.providerSettingsState.editInput = textinput.New()
+			a.providerSettingsState.editInput.Width = 50
+			a.providerSettingsState.editInput.CharLimit = 500
+
+			// Load ALL providers' fields into cache (not just current tab)
+			a.providerSettingsState.currentFieldsMap = make(map[string][]ProviderField)
+
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("[CacheInit] ========== INITIALIZING PROVIDER CACHE ==========")
+			}
+
+			for _, providerID := range providerTabs {
+				a.providerSettingsState.currentFieldsMap[providerID] = a.providerSettingsState.getProviderFields(
+					providerID,
+					a.dataModel.Config,
+				)
+
+				if config.DebugLog != nil {
+					fields := a.providerSettingsState.currentFieldsMap[providerID]
+					config.DebugLog.Printf("[CacheInit] Provider: %s (%d fields)", providerID, len(fields))
+					for i, f := range fields {
+						config.DebugLog.Printf("[CacheInit]   Field[%d]: %s = '%s'", i, f.Label, f.Value)
+					}
+				}
+			}
+
+			return a, nil
+		}
+
 		// Check if this is the model field - open model selector instead
 		if a.settingsFields[a.selectedSettingIdx].Type == SettingTypeModel {
-			// Open model selector with current Ollama host
-			ollamaHost := a.settingsFields[1].Value // Ollama Host is at index 1
+			// Get Ollama host from config (no longer in settings fields)
+			ollamaHost := a.dataModel.Config.OllamaHost
 			return a, a.fetchModelListFromHost(ollamaHost)
 		}
 
 		// Check if this is the plugins enabled field - toggle it
 		if a.settingsFields[a.selectedSettingIdx].Type == SettingTypePluginsEnabled {
 			currentValue := a.settingsFields[a.selectedSettingIdx].Value
-			if currentValue == "true" {
+			switch currentValue {
+			case "true":
 				a.settingsFields[a.selectedSettingIdx].Value = "false"
-			} else {
+			case "false":
 				a.settingsFields[a.selectedSettingIdx].Value = "true"
 			}
 			a.settingsHasChanges = true
@@ -500,17 +675,11 @@ func (a AppView) handleSettingsEditMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Handle specific field logic
 			switch a.settingsFields[a.selectedSettingIdx].Type {
 			case SettingTypeDataDir:
-				// Normalize and check for existing config
+				a.settingsFields[a.selectedSettingIdx].Value = newValue
+				a.settingsHasChanges = true
 				a.settingsEditMode = false
 				a.settingsEditInput.Blur()
 				return a, a.handleDataDirectoryChangeCmd(newValue)
-
-			case SettingTypeOllamaHost:
-				// Validate Ollama host
-				a.settingsFields[a.selectedSettingIdx].Validation = FieldValidationPending
-				a.settingsEditMode = false
-				a.settingsEditInput.Blur()
-				return a, validateOllamaHostCmd(newValue)
 			}
 		}
 
@@ -546,12 +715,14 @@ func (a AppView) handleDataDirectoryChangeCmd(newPath string) tea.Cmd {
 		}
 
 		if userCfg != nil {
-			// Config exists - load values
+			// Config exists - load ALL values
 			return dataDirectoryLoadedMsg{
 				normalizedPath: normalized,
 				configLoaded:   true,
 				ollamaHost:     userCfg.Ollama.Host,
 				defaultModel:   userCfg.Ollama.DefaultModel,
+				systemPrompt:   userCfg.DefaultSystemPrompt,
+				pluginsEnabled: userCfg.PluginsEnabled,
 			}
 		}
 
@@ -565,29 +736,37 @@ func (a AppView) handleDataDirectoryChangeCmd(newPath string) tea.Cmd {
 
 func (a AppView) fetchModelListFromHost(host string) tea.Cmd {
 	return func() tea.Msg {
-		// Create a temporary client with the specified host
-		tempClient, err := ollama.NewClient(host, "")
+		// Create a temporary provider with the specified host
+		providerCfg := provider.Config{
+			Type:    provider.ProviderTypeOllama,
+			BaseURL: host,
+			Model:   "",
+		}
+		tempProvider, err := provider.NewProvider(providerCfg)
 		if err != nil {
 			return modelsListMsg{
-				Models: nil,
-				Err:    fmt.Errorf("failed to create client: %w", err),
+				Models:       nil,
+				Err:          fmt.Errorf("failed to create provider: %w", err),
+				ShowSelector: true,
 			}
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		models, err := tempClient.ListModels(ctx)
+		models, err := tempProvider.ListModels(ctx)
 		if err != nil {
 			return modelsListMsg{
-				Models: nil,
-				Err:    fmt.Errorf("failed to fetch Models: %w", err),
+				Models:       nil,
+				Err:          fmt.Errorf("failed to fetch Models: %w", err),
+				ShowSelector: true,
 			}
 		}
 
 		return modelsListMsg{
-			Models: models,
-			Err:    nil,
+			Models:       models,
+			Err:          nil,
+			ShowSelector: true,
 		}
 	}
 }
@@ -628,14 +807,21 @@ func (a AppView) saveSettingsCmd() tea.Cmd {
 			}
 		}
 
-		// Check if validation passed
-		for _, field := range a.settingsFields {
-			if field.Type == SettingTypeOllamaHost && field.Validation == FieldValidationError {
-				return settingsSaveMsg{success: false, err: fmt.Errorf("Ollama Host validation failed: %s", field.ErrorMsg)}
+		// Note: Ollama Host validation removed - now handled in provider sub-screen
+
+		// Normalize and check if data directory exists
+		dataDir, err := config.NormalizeDataDirectory(a.settingsFields[0].Value)
+		if err != nil {
+			return settingsSaveMsg{success: false, err: fmt.Errorf("Failed to normalize data directory: %w", err)}
+		}
+
+		// Check if data directory exists
+		if !fileExists(dataDir) {
+			// Directory doesn't exist - prompt user to create new data directory
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("[Settings] Data directory doesn't exist: %s", dataDir)
 			}
-			if field.Type == SettingTypeOllamaHost && field.Validation == FieldValidationPending {
-				return settingsSaveMsg{success: false, err: fmt.Errorf("Ollama Host validation in progress")}
-			}
+			return dataDirectoryNotFoundMsg{path: dataDir}
 		}
 
 		// Save system config
@@ -646,21 +832,20 @@ func (a AppView) saveSettingsCmd() tea.Cmd {
 			return settingsSaveMsg{success: false, err: fmt.Errorf("Failed to save system config: %w", err)}
 		}
 
-		// Save user config
-		dataDir, err := config.NormalizeDataDirectory(a.settingsFields[0].Value)
+		// Load existing config to preserve multi-provider settings
+		existingCfg, err := config.LoadUserConfig(dataDir)
 		if err != nil {
-			return settingsSaveMsg{success: false, err: fmt.Errorf("Failed to normalize data directory: %w", err)}
+			return settingsSaveMsg{success: false, err: fmt.Errorf("Failed to load existing config: %w", err)}
 		}
 
-		userCfg := &config.UserConfig{
-			Ollama: config.OllamaConfig{
-				Host:         a.settingsFields[1].Value,
-				DefaultModel: a.settingsFields[2].Value,
-			},
-			DefaultSystemPrompt: a.settingsFields[3].Value,
-			PluginsEnabled:      stringToBool(a.settingsFields[4].Value),
-		}
-		if err := config.SaveUserConfig(userCfg, dataDir); err != nil {
+		// Update ONLY the fields exposed in current Settings UI
+		// Note: Field 1 is Provider(s) link (not saved), Ollama Host now in provider sub-screen
+		existingCfg.DefaultModel = a.settingsFields[2].Value
+		existingCfg.DefaultSystemPrompt = a.settingsFields[3].Value
+		existingCfg.PluginsEnabled = stringToBool(a.settingsFields[4].Value)
+
+		// Save updated config (preserves DefaultProvider, Providers[], Security, etc.)
+		if err := config.SaveUserConfig(existingCfg, dataDir); err != nil {
 			return settingsSaveMsg{success: false, err: fmt.Errorf("Failed to save user config: %w", err)}
 		}
 
@@ -777,14 +962,19 @@ func renderDataExportModal(exportInput textinput.Model, exporting bool, cleaning
 	)
 }
 
-func renderSettings(fields []SettingField, selectedIdx int, editMode bool, editInput textinput.Model, hasChanges bool, confirmExit bool, loadedInfo string, saveError string, dataExportMode bool, dataExportInput textinput.Model, exportingDataDir bool, dataExportCleaningUp bool, dataExportSpinner spinner.Model, dataExportSuccess string, width, height int) string {
-	// Check for data export modal first
+func renderSettings(fields []SettingField, selectedIdx int, editMode bool, editInput textinput.Model, hasChanges bool, confirmExit bool, loadedInfo string, saveError string, dataExportMode bool, dataExportInput textinput.Model, exportingDataDir bool, dataExportCleaningUp bool, dataExportSpinner spinner.Model, dataExportSuccess string, dataDirNotFound bool, newDataDirPath string, width, height int) string {
+	// Check for new data directory confirmation modal first
+	if dataDirNotFound {
+		return renderDataDirNotFoundModal(newDataDirPath, width, height)
+	}
+
+	// Check for data export modal
 	if dataExportMode {
 		return renderDataExportModal(dataExportInput, exportingDataDir, dataExportCleaningUp, dataExportSpinner, dataExportSuccess, width, height)
 	}
 
 	if confirmExit {
-		return renderSettingsConfirmExit(width, height)
+		return RenderUnsavedChangesModal(width, height)
 	}
 
 	if saveError != "" {
@@ -803,24 +993,18 @@ func renderSettings(fields []SettingField, selectedIdx int, editMode bool, editI
 		modalWidth = 40
 	}
 
-	// Title
+	// Title section (centered, no borders - following modal_helpers.go pattern)
 	title := lipgloss.NewStyle().
 		Bold(true).
+		Foreground(accentColor).
 		Align(lipgloss.Center).
 		Width(modalWidth).
 		Render("Settings (Alt+Shift+S)")
 
-	// Border style
-	borderStyle := lipgloss.NewStyle().
+	// Separator (simple horizontal line - following modal_helpers.go pattern)
+	separator := lipgloss.NewStyle().
 		Foreground(dimColor).
-		Width(modalWidth)
-
-	topBorder := borderStyle.Render("┌" + strings.Repeat("─", modalWidth-2) + "┐")
-	middleBorder := borderStyle.Render("├" + strings.Repeat("─", modalWidth-2) + "┤")
-	bottomBorder := borderStyle.Render("└" + strings.Repeat("─", modalWidth-2) + "┘")
-
-	// Empty line
-	emptyLine := "│" + strings.Repeat(" ", modalWidth-2) + "│"
+		Render(strings.Repeat("─", modalWidth))
 
 	// Settings list
 	var settingsLines []string
@@ -881,9 +1065,9 @@ func renderSettings(fields []SettingField, selectedIdx int, editMode bool, editI
 		}
 
 		paddedLine := lipgloss.NewStyle().
-			Width(modalWidth - 2).
+			Width(modalWidth).
 			Render(line)
-		settingsLines = append(settingsLines, "│"+paddedLine+"│")
+		settingsLines = append(settingsLines, paddedLine)
 	}
 
 	// Footer
@@ -896,35 +1080,34 @@ func renderSettings(fields []SettingField, selectedIdx int, editMode bool, editI
 		footerText = FormatFooter("j/k", "Navigate", "Enter", "Edit", "x", "Export Data", "r", "Reset", "Esc", "Close")
 	}
 	footer := lipgloss.NewStyle().
+		Foreground(dimColor).
 		Align(lipgloss.Center).
-		Width(modalWidth - 2).
+		Width(modalWidth).
 		Render(footerText)
 
 	// Info line
 	var infoLine string
 	if loadedInfo != "" {
-		infoLine = "│" + lipgloss.NewStyle().
-			Width(modalWidth-2).
+		infoLine = lipgloss.NewStyle().
+			Width(modalWidth).
 			Foreground(accentColor).
-			Render("  "+loadedInfo) + "│\n"
+			Render("  "+loadedInfo) + "\n"
 	}
 
-	// Combine all parts
+	// Combine all parts (Title/Separator/Content/Separator/Footer pattern)
 	var content strings.Builder
-	content.WriteString(topBorder + "\n")
-	content.WriteString("│" + title + "│\n")
-	content.WriteString(middleBorder + "\n")
-	content.WriteString(emptyLine + "\n")
+	content.WriteString(title + "\n")
+	content.WriteString(separator + "\n")
+	content.WriteString(strings.Repeat(" ", modalWidth) + "\n") // Top padding
 	for _, line := range settingsLines {
 		content.WriteString(line + "\n")
 	}
-	content.WriteString(emptyLine + "\n")
+	content.WriteString(strings.Repeat(" ", modalWidth) + "\n") // Bottom padding
 	if infoLine != "" {
 		content.WriteString(infoLine)
 	}
-	content.WriteString(middleBorder + "\n")
-	content.WriteString("│" + footer + "│\n")
-	content.WriteString(bottomBorder)
+	content.WriteString(separator + "\n")
+	content.WriteString(footer)
 
 	// Center the modal
 	return lipgloss.Place(
@@ -937,118 +1120,47 @@ func renderSettings(fields []SettingField, selectedIdx int, editMode bool, editI
 }
 
 func renderSettingsSaveError(errorMsg string, width, height int) string {
-	modalWidth := 60
-	if width < modalWidth+10 {
-		modalWidth = width - 10
-	}
-
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("9")).
-		Align(lipgloss.Center).
-		Width(modalWidth).
-		Render("Error Saving Settings")
-
-	// Wrap error message
-	wrappedMsg := wordWrap(errorMsg, modalWidth-4)
-	message := lipgloss.NewStyle().
-		Width(modalWidth - 4).
-		Foreground(lipgloss.Color("9")).
-		Render(wrappedMsg)
-
-	footer := lipgloss.NewStyle().
-		Foreground(dimColor).
-		Align(lipgloss.Center).
-		Width(modalWidth - 2).
-		Render("Press Enter to acknowledge")
-
-	borderStyle := lipgloss.NewStyle().
-		Foreground(dimColor).
-		Width(modalWidth)
-
-	topBorder := borderStyle.Render("┌" + strings.Repeat("─", modalWidth-2) + "┐")
-	middleBorder := borderStyle.Render("├" + strings.Repeat("─", modalWidth-2) + "┤")
-	bottomBorder := borderStyle.Render("└" + strings.Repeat("─", modalWidth-2) + "┘")
-	emptyLine := "│" + strings.Repeat(" ", modalWidth-2) + "│"
-
-	var content strings.Builder
-	content.WriteString(topBorder + "\n")
-	content.WriteString("│" + title + "│\n")
-	content.WriteString(middleBorder + "\n")
-	content.WriteString(emptyLine + "\n")
-
-	// Add message lines
-	for _, line := range strings.Split(message, "\n") {
-		paddedLine := lipgloss.NewStyle().
-			Width(modalWidth - 2).
-			Render("  " + line)
-		content.WriteString("│" + paddedLine + "│\n")
-	}
-
-	content.WriteString(emptyLine + "\n")
-	content.WriteString(middleBorder + "\n")
-	content.WriteString("│" + footer + "│\n")
-	content.WriteString(bottomBorder)
-
-	return lipgloss.Place(
+	return RenderAcknowledgeModal(
+		"Error Saving Settings",
+		errorMsg,
+		ModalTypeError,
 		width,
 		height,
-		lipgloss.Center,
-		lipgloss.Center,
-		content.String(),
 	)
 }
 
-func renderSettingsConfirmExit(width, height int) string {
+func renderDataDirNotFoundModal(path string, width, height int) string {
 	modalWidth := 60
 	if width < modalWidth+10 {
 		modalWidth = width - 10
 	}
 
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(warningColor).
-		Align(lipgloss.Center).
+	// Build message lines
+	var messageLines []string
+	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Empty line
+
+	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
-		Render("Unsaved Changes")
+		Align(lipgloss.Center)
 
-	message := lipgloss.NewStyle().
-		Width(modalWidth - 2).
-		Align(lipgloss.Center).
-		Render("You have unsaved changes. Discard them?")
+	messageLines = append(messageLines, messageStyle.Render("The directory does not exist:"))
+	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, messageStyle.Render(path))
+	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, messageStyle.Render("Would you like to create a new data directory here?"))
+	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, messageStyle.Render("(OTUI will restart and launch the setup wizard)"))
 
-	footer := lipgloss.NewStyle().
-		Foreground(dimColor).
-		Align(lipgloss.Center).
-		Width(modalWidth - 2).
-		Render("y - Yes, discard  •  n - No, return to settings")
-
-	borderStyle := lipgloss.NewStyle().
-		Foreground(dimColor).
-		Width(modalWidth)
-
-	topBorder := borderStyle.Render("┌" + strings.Repeat("─", modalWidth-2) + "┐")
-	middleBorder := borderStyle.Render("├" + strings.Repeat("─", modalWidth-2) + "┤")
-	bottomBorder := borderStyle.Render("└" + strings.Repeat("─", modalWidth-2) + "┘")
-	emptyLine := "│" + strings.Repeat(" ", modalWidth-2) + "│"
-
-	var content strings.Builder
-	content.WriteString(topBorder + "\n")
-	content.WriteString("│" + title + "│\n")
-	content.WriteString(middleBorder + "\n")
-	content.WriteString(emptyLine + "\n")
-	content.WriteString("│" + message + "│\n")
-	content.WriteString(emptyLine + "\n")
-	content.WriteString(middleBorder + "\n")
-	content.WriteString("│" + footer + "│\n")
-	content.WriteString(bottomBorder)
-
-	return lipgloss.Place(
+	// Use RenderThreeSectionModal for consistent pattern
+	footer := FormatFooter("y", "Yes, create new data directory", "n", "No, return to Settings")
+	return RenderThreeSectionModal(
+		"⚠️  Data Directory Not Found",
+		messageLines,
+		footer,
+		ModalTypeWarning,
+		modalWidth,
 		width,
 		height,
-		lipgloss.Center,
-		lipgloss.Center,
-		content.String(),
 	)
 }
 
@@ -1180,7 +1292,7 @@ func startPluginSystemCmd(manager *mcp.MCPManager, session *storage.Session) tea
 // stopPluginSystemCmd shuts down all plugins and reports progress
 func stopPluginSystemCmd(manager *mcp.MCPManager) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 
 		// Use ShutdownWithTracking to detect unresponsive plugins

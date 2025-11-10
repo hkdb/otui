@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -47,15 +48,90 @@ func (a AppView) handleSessionRenameMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, cmd
 }
 
+func (a AppView) handlePassphraseForDataDir(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			// Cancel passphrase entry
+			a.showPassphraseForDataDir = false
+			a.passphraseForDataDir.SetValue("")
+			a.passphraseForDataDir.Blur()
+			a.passphraseRetryDataDir = ""
+			a.passphraseError = ""
+			a.settingsSaveError = "Data directory switch cancelled (passphrase required)"
+			return a, nil
+
+		case "enter":
+			passphrase := a.passphraseForDataDir.Value()
+			if err := ValidatePassphraseNotEmpty(passphrase); err != nil {
+				a.passphraseError = GetEmptyPassphraseError()
+				return a, nil
+			}
+
+			// Retry ApplyDataDirSwitch with passphrase
+			if err := a.dataModel.ApplyDataDirSwitch(a.passphraseRetryDataDir, passphrase); err != nil {
+				// Still failed - wrong passphrase or other error
+				a.passphraseError = GetIncorrectPassphraseError()
+				a.passphraseForDataDir.SetValue("")
+				return a, textinput.Blink
+			}
+
+			// Success - close passphrase modal
+			a.showPassphraseForDataDir = false
+			a.passphraseForDataDir.SetValue("")
+			a.passphraseForDataDir.Blur()
+			a.passphraseError = ""
+			a.passphraseRetryDataDir = ""
+
+			// Continue with steps 3c-6 (providers, plugins, UI refresh)
+			// Step 3c: Re-initialize providers
+			providerRefreshCmd := a.refreshProvidersAndModels()
+
+			// Step 4: Re-create MCP manager if plugins enabled
+			if a.dataModel.Config.PluginsEnabled {
+				if err := a.ensureMCPManager(); err != nil && config.DebugLog != nil {
+					config.DebugLog.Printf("[UI] Failed to recreate MCP manager: %v", err)
+				}
+			}
+
+			// Step 6: Refresh UI
+			a.resetUIStateForDataDirSwitch()
+
+			// Step 5: Start plugins if enabled
+			if a.dataModel.Config.PluginsEnabled && a.dataModel.MCPManager != nil {
+				return a, tea.Batch(
+					a.startPluginSystemWithModal(nil),
+					a.dataModel.FetchSessionList(),
+					providerRefreshCmd,
+				)
+			}
+
+			return a, tea.Batch(
+				a.dataModel.FetchSessionList(),
+				providerRefreshCmd,
+			)
+		}
+
+		// Update passphrase input
+		a.passphraseForDataDir, cmd = a.passphraseForDataDir.Update(msg)
+		return a, cmd
+	}
+
+	return a, nil
+}
+
 func (a AppView) handleSessionExportMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
-	// Handle success acknowledgment
-	if a.sessionExportSuccess != "" {
-		if msg.String() == "enter" || msg.String() == "esc" {
-			a.sessionExportSuccess = ""
-			a.sessionExportMode = false
-			return a, nil
+	// If processing or cleaning up, only handle escape
+	if a.exportingSession || a.exportCleaningUp {
+		if msg.String() == "esc" && a.exportingSession && !a.exportCleaningUp {
+			if a.exportCancelFunc != nil {
+				a.exportCancelFunc()
+			}
 		}
 		return a, nil
 	}

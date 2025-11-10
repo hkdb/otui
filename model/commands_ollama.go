@@ -11,10 +11,9 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/ollama/ollama/api"
+	mcptypes "github.com/mark3labs/mcp-go/mcp"
 
 	"otui/config"
-	"otui/mcp"
 )
 
 // BuildSystemPrompt returns the system prompt for the current session or default
@@ -44,11 +43,11 @@ func escapeQuotesForOllama(s string) string {
 // that work universally across all model sizes (3B-405B).
 // This approach prevents instruction overload by providing only essential guidance:
 // what tools exist, when to use them (binary decision), and to execute silently.
-func buildMinimalToolPrompt(tools []api.Tool) string {
+func buildMinimalToolPrompt(tools []mcptypes.Tool) string {
 	// Extract tool names only (no descriptions to minimize cognitive load)
 	toolNames := []string{}
 	for _, tool := range tools {
-		toolNames = append(toolNames, tool.Function.Name)
+		toolNames = append(toolNames, tool.Name)
 	}
 
 	return fmt.Sprintf(
@@ -62,20 +61,20 @@ func buildMinimalToolPrompt(tools []api.Tool) string {
 	)
 }
 
-// buildAPIMessages converts UI messages to Ollama API messages using minimal tool instructions.
+// buildAPIMessages converts UI messages to provider messages using minimal tool instructions.
 // This universal approach works across all model sizes (3B-405B) by keeping tool instructions
 // brief (~100 tokens) and leaving room for rich system prompts (500+ tokens).
 //
 // Layer 1: Minimal tool instructions (only if tools present)
 // Layer 2: User's system prompt (behavioral context)
 // Layer 3: Conversation messages (task)
-func buildAPIMessages(uiMessages []Message, systemPrompt string, tools []api.Tool) []api.Message {
-	var messages []api.Message
+func buildAPIMessages(uiMessages []Message, systemPrompt string, tools []mcptypes.Tool) []Message {
+	var messages []Message
 	hasTools := len(tools) > 0
 
 	// Layer 1: Minimal tool instructions (only if tools present)
 	if hasTools {
-		messages = append(messages, api.Message{
+		messages = append(messages, Message{
 			Role:    "system",
 			Content: buildMinimalToolPrompt(tools),
 		})
@@ -90,7 +89,7 @@ func buildAPIMessages(uiMessages []Message, systemPrompt string, tools []api.Too
 		if hasTools {
 			content = escapeQuotesForOllama(content)
 		}
-		messages = append(messages, api.Message{
+		messages = append(messages, Message{
 			Role:    "system",
 			Content: content,
 		})
@@ -99,7 +98,7 @@ func buildAPIMessages(uiMessages []Message, systemPrompt string, tools []api.Too
 	// Layer 3: Conversation messages (task)
 	for _, msg := range uiMessages {
 		if msg.Role == "user" || msg.Role == "assistant" {
-			messages = append(messages, api.Message{
+			messages = append(messages, Message{
 				Role:    msg.Role,
 				Content: msg.Content,
 			})
@@ -112,9 +111,30 @@ func buildAPIMessages(uiMessages []Message, systemPrompt string, tools []api.Too
 // SendToOllama sends the current conversation to Ollama and streams the response
 func (m *Model) SendToOllama() tea.Cmd {
 	// Capture necessary state
-	client := m.OllamaClient
-	mcpManager := m.MCPManager
 	currentSession := m.CurrentSession
+
+	// Get provider from session (Phase 1.6: multi-provider support)
+	sessionProvider := "ollama"
+	if currentSession != nil && currentSession.Provider != "" {
+		sessionProvider = currentSession.Provider
+	}
+
+	// Get the provider client for this session
+	client, ok := m.Providers[sessionProvider]
+	if !ok {
+		// Fallback to m.Provider if session provider not found
+		client = m.Provider
+		if config.Debug && config.DebugLog != nil {
+			config.DebugLog.Printf("[Model] WARNING: Session provider '%s' not found, using fallback", sessionProvider)
+		}
+	}
+
+	// Ensure model is set on provider (session.Model contains InternalName)
+	if currentSession != nil && currentSession.Model != "" {
+		client.SetModel(currentSession.Model)
+	}
+
+	mcpManager := m.MCPManager
 	systemPrompt := m.BuildSystemPrompt()
 	uiMessages := m.Messages
 
@@ -127,16 +147,16 @@ func (m *Model) SendToOllama() tea.Cmd {
 		defer cancel()
 
 		// Get enabled plugins and their tools (Phase 6)
-		var tools []api.Tool
+		var mcpTools []mcptypes.Tool
 		if mcpManager != nil && currentSession != nil {
 			// Get tools from all enabled plugins in current session
-			mcpTools, err := mcpManager.GetTools(ctx)
+			var err error
+			mcpTools, err = mcpManager.GetTools(ctx)
 			if err == nil && len(mcpTools) > 0 {
-				tools = mcp.ConvertMCPToolsToOllama(mcpTools)
 				if config.DebugLog != nil {
-					config.DebugLog.Printf("Loaded %d tools for current session", len(tools))
-					for i, tool := range tools {
-						config.DebugLog.Printf("  Tool %d: %s - %s", i+1, tool.Function.Name, tool.Function.Description)
+					config.DebugLog.Printf("Loaded %d tools for current session", len(mcpTools))
+					for i, tool := range mcpTools {
+						config.DebugLog.Printf("  Tool %d: %s - %s", i+1, tool.Name, tool.Description)
 					}
 				}
 			} else {
@@ -148,15 +168,15 @@ func (m *Model) SendToOllama() tea.Cmd {
 		}
 
 		// Build API messages with minimal tool instructions (universal approach for all model sizes)
-		messages := buildAPIMessages(uiMessages, systemPrompt, tools)
+		messages := buildAPIMessages(uiMessages, systemPrompt, mcpTools)
 
 		var chunks []string
 		var responseBuilder strings.Builder
-		var detectedToolCalls []api.ToolCall
+		var detectedToolCalls []ToolCall
 		startTime := time.Now()
 
 		// Chat with tools
-		err := client.ChatWithTools(ctx, messages, tools, func(chunk string, toolCalls []api.ToolCall) error {
+		err := client.ChatWithTools(ctx, messages, mcpTools, func(chunk string, toolCalls []ToolCall) error {
 			responseBuilder.WriteString(chunk)
 			chunks = append(chunks, chunk)
 			if len(toolCalls) > 0 && len(detectedToolCalls) == 0 {
@@ -200,16 +220,18 @@ func (m *Model) SendToOllama() tea.Cmd {
 }
 
 // FetchModelList retrieves the list of available Ollama models
-func (m *Model) FetchModelList() tea.Cmd {
-	client := m.OllamaClient
+// showSelector: whether to auto-show model selector after fetch (user-initiated vs background)
+func (m *Model) FetchModelList(showSelector bool) tea.Cmd {
+	client := m.Provider
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
 		models, err := client.ListModels(ctx)
 		return ModelsListMsg{
-			Models: models,
-			Err:    err,
+			Models:       models,
+			Err:          err,
+			ShowSelector: showSelector,
 		}
 	}
 }
@@ -217,7 +239,7 @@ func (m *Model) FetchModelList() tea.Cmd {
 // ExecuteToolsAndContinue executes detected tool calls and sends results back to LLM
 func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 	mcpManager := m.MCPManager
-	client := m.OllamaClient
+	client := m.Provider
 
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
@@ -228,25 +250,17 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 		}
 
 		// Execute each tool call and collect results
-		var toolResultMsgs []api.Message
+		var toolResultMsgs []Message
 
 		for i, toolCall := range msg.ToolCalls {
 			if config.DebugLog != nil {
-				config.DebugLog.Printf("Executing tool call %d: %s", i+1, toolCall.Function.Name)
+				config.DebugLog.Printf("Executing tool call %d: %s", i+1, toolCall.Name)
 			}
 
-			// Convert Ollama tool call to MCP format
-			toolName, args, err := mcp.ConvertOllamaToolCallToMCP(toolCall)
-			if err != nil {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("Error converting tool call: %v", err)
-				}
-				toolResultMsgs = append(toolResultMsgs, api.Message{
-					Role:    "tool",
-					Content: fmt.Sprintf("Error: Failed to parse tool arguments: %v", err),
-				})
-				continue
-			}
+			// ToolCall is already in provider-agnostic format (model.ToolCall)
+			// Extract name and arguments directly
+			toolName := toolCall.Name
+			args := toolCall.Arguments
 
 			// Execute tool via MCP manager
 			result, err := mcpManager.ExecuteTool(ctx, toolName, args)
@@ -254,7 +268,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 				if config.DebugLog != nil {
 					config.DebugLog.Printf("Error executing tool %s: %v", toolName, err)
 				}
-				toolResultMsgs = append(toolResultMsgs, api.Message{
+				toolResultMsgs = append(toolResultMsgs, Message{
 					Role:    "tool",
 					Content: fmt.Sprintf("Error executing %s: %v", toolName, err),
 				})
@@ -280,7 +294,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 				config.DebugLog.Printf("Tool %s result: %d chars", toolName, len(resultContent))
 			}
 
-			toolResultMsgs = append(toolResultMsgs, api.Message{
+			toolResultMsgs = append(toolResultMsgs, Message{
 				Role:    "tool",
 				Content: resultContent,
 			})
@@ -290,11 +304,11 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 		// 1. Original conversation context
 		fullMessages := msg.ContextMessages
 
-		// 2. Assistants initial response with tool calls
-		fullMessages = append(fullMessages, api.Message{
-			Role:      "assistant",
-			Content:   msg.InitialResponse,
-			ToolCalls: msg.ToolCalls,
+		// 2. Assistant's initial response (note: we can't include ToolCalls in Message struct currently)
+		// This is okay because the provider will handle the tool call format internally
+		fullMessages = append(fullMessages, Message{
+			Role:    "assistant",
+			Content: msg.InitialResponse,
 		})
 
 		// 3. Tool results
@@ -308,7 +322,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 		var chunks []string
 		var responseBuilder strings.Builder
 
-		err := client.ChatWithTools(ctx, fullMessages, nil, func(chunk string, toolCalls []api.ToolCall) error {
+		err := client.ChatWithTools(ctx, fullMessages, nil, func(chunk string, toolCalls []ToolCall) error {
 			responseBuilder.WriteString(chunk)
 			chunks = append(chunks, chunk)
 			// Note: Ignoring tool calls in second phase to prevent infinite loops

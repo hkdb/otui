@@ -1,8 +1,6 @@
 package model
 
 import (
-	"github.com/ollama/ollama/api"
-
 	"otui/ollama"
 	"otui/storage"
 )
@@ -28,9 +26,9 @@ type DisplayChunkTickMsg struct{}
 
 // Tool execution messages (Phase 6)
 type ToolCallsDetectedMsg struct {
-	ToolCalls       []api.ToolCall
+	ToolCalls       []ToolCall
 	InitialResponse string
-	ContextMessages []api.Message
+	ContextMessages []Message
 }
 
 type ToolExecutionCompleteMsg struct {
@@ -48,8 +46,9 @@ type MarkdownRenderedMsg struct {
 }
 
 type ModelsListMsg struct {
-	Models []ollama.ModelInfo
-	Err    error
+	Models       []ollama.ModelInfo
+	Err          error
+	ShowSelector bool // Whether to auto-show model selector (user-initiated vs background fetch)
 }
 
 type SessionsListMsg struct {
@@ -94,12 +93,6 @@ type DataExportCleanupDoneMsg struct{}
 
 type FlashTickMsg struct{}
 
-type ShutdownProgressMsg struct {
-	Phase             string // "complete" or "unresponsive"
-	UnresponsiveNames []string
-	Err               error
-}
-
 type PluginOperationCompleteMsg struct {
 	Operation string // "enable" or "disable"
 	PluginID  string
@@ -122,4 +115,18 @@ type EditorContentMsg struct {
 
 type EditorErrorMsg struct {
 	Err error
+}
+
+// ProviderPingMsg is sent when a provider ping completes (wizard setup)
+type ProviderPingMsg struct {
+	ProviderID string
+	Valid      bool
+	Err        error
+}
+
+// SingleProviderModelsMsg is sent when models are fetched from a single provider (wizard setup)
+type SingleProviderModelsMsg struct {
+	ProviderID string
+	Models     []ollama.ModelInfo
+	Err        error
 }

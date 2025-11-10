@@ -544,7 +544,8 @@ func (a AppView) handleModelSelectorUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 		case "enter":
 			list := a.getModelList()
 			if a.selectedModelIdx >= 0 && a.selectedModelIdx < len(list) {
-				selectedModel := list[a.selectedModelIdx].Name
+				selectedModelInfo := list[a.selectedModelIdx]
+				selectedModel := selectedModelInfo.Name
 
 				// If we're in settings mode, update the settings field
 				if a.showSettings {
@@ -565,14 +566,10 @@ func (a AppView) handleModelSelectorUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 						a.showModelSelector = false
 						a.modelFilterMode = false
 					} else {
-						// No warning needed - proceed with switch
-						a.dataModel.OllamaClient.SetModel(selectedModel)
-						if a.dataModel.CurrentSession != nil {
-							a.dataModel.CurrentSession.Model = selectedModel
-							a.dataModel.SessionDirty = true
-						}
+						// No warning needed - proceed with switch (Phase 1.6: use SwitchModel)
 						a.showModelSelector = false
 						a.modelFilterMode = false
+						return a, a.dataModel.SwitchModel(selectedModelInfo)
 					}
 				}
 			}
@@ -633,8 +630,8 @@ func (a AppView) handleModelSelectorUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 		a.showModelSelector = false
 		return a, nil
 	case "alt+r":
-		// Refresh model list
-		return a, a.dataModel.FetchModelList()
+		// Refresh model list (user-initiated, keep selector open)
+		return a, a.dataModel.FetchModelList(true)
 	case "j", "down":
 		list := a.getModelList()
 		if a.selectedModelIdx < len(list)-1 {
@@ -650,22 +647,20 @@ func (a AppView) handleModelSelectorUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 		// Select model and close modal
 		list := a.getModelList()
 		if a.selectedModelIdx >= 0 && a.selectedModelIdx < len(list) {
-			selectedModel := list[a.selectedModelIdx].Name
+			selectedModelInfo := list[a.selectedModelIdx]
+			selectedModel := selectedModelInfo.Name
 
-			// If we're in settings mode, update the settings field
+			// Settings mode - update the settings field
 			if a.showSettings {
 				a.settingsFields[2].Value = selectedModel
 				a.settingsHasChanges = true
 				a.showModelSelector = false
-			} else {
-				// Normal mode - update the client
-				a.dataModel.OllamaClient.SetModel(selectedModel)
-				if a.dataModel.CurrentSession != nil {
-					a.dataModel.CurrentSession.Model = selectedModel
-					a.dataModel.SessionDirty = true
-				}
-				a.showModelSelector = false
+				return a, nil
 			}
+
+			// Normal mode - update the client (Phase 1.6: use SwitchModel)
+			a.showModelSelector = false
+			return a, a.dataModel.SwitchModel(selectedModelInfo)
 		}
 		return a, nil
 	}
@@ -1003,17 +998,21 @@ func (a AppView) handleEditSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd)
 
 func (a AppView) handleToolWarningModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 	switch msg.String() {
-	case "enter":
-		// User confirmed - proceed with model switch
-		a.dataModel.OllamaClient.SetModel(a.pendingModelSwitch)
-		if a.dataModel.CurrentSession != nil {
-			a.dataModel.CurrentSession.Model = a.pendingModelSwitch
-			a.dataModel.SessionDirty = true
+	case "enter", "y":
+		// User confirmed - proceed with model switch (Phase 1.6: use SwitchModel)
+		// Find the model info from the list
+		var selectedModelInfo ollama.ModelInfo
+		for _, model := range a.modelList {
+			if model.Name == a.pendingModelSwitch {
+				selectedModelInfo = model
+				break
+			}
 		}
+
 		a.showToolWarningModal = false
 		a.pendingModelSwitch = ""
 		a.toolWarningPluginList = nil
-		return a, nil
+		return a, a.dataModel.SwitchModel(selectedModelInfo)
 
 	case "esc":
 		// User cancelled - don't switch model

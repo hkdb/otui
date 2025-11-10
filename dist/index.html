@@ -326,6 +326,77 @@
                 padding: 6px 12px;
             }
         }
+
+        @media (max-height: 820px) {
+            .screenshot {
+                display: none;
+            }
+        }
+
+        @media (max-height: 500px) {
+            .ascii-logo {
+                display: none;
+            }
+            .tagline {
+                margin-top: -150px;
+            }
+        }
+
+        @media (max-height: 400px) {
+            .tagline {
+                margin-bottom: 2px;
+            }
+            .github-hero-link {
+                margin-top: 10px;
+            }
+            .version {
+                margin-top: -8px;
+            }
+            .scroll-indicator {
+                bottom: 40px;
+            }
+        }
+
+        .demo-section {
+            width: 100%;
+            max-width: 900px;
+            margin-top: 60px;
+            text-align: center;
+        }
+
+        .demo-title {
+            font-size: 32px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 30px;
+            letter-spacing: -0.5px;
+        }
+
+        .demo-container {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px;
+            display: inline-block;
+        }
+
+        .demo-gif {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            filter: drop-shadow(0 4px 20px rgba(0, 0, 0, 0.3));
+        }
+
+        @media (max-width: 768px) {
+            .demo-title {
+                font-size: 24px;
+            }
+
+            .demo-container {
+                padding: 15px;
+                margin: 0 20px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -344,7 +415,7 @@
             </p>
 
             <div class="screenshot-container">
-                <img src="otui-ss.png" alt="OTUI Screenshot" class="screenshot">
+                <img src="otui-ss-half.png" alt="OTUI Screenshot" class="screenshot">
             </div>
 
             <div class="install-section">
@@ -358,9 +429,9 @@
             <a href="https://github.com/hkdb/otui" target="_blank" class="github-hero-link">
                 <img src="github.png" alt="GitHub" class="github-hero-icon">
             </a>
-            <div class="version">v0.01.00</div>
+            <div class="version">v0.02.00</div>
 
-            <a href="#features" class="scroll-indicator">
+            <a href="javascript:void(0);" onclick="scrollToFeatures()" class="scroll-indicator">
                 <div class="scroll-text">FEATURES</div>
                 <div class="arrow-down"></div>
             </a>
@@ -370,7 +441,7 @@
             <div class="features-grid">
                 <div class="feature-item">
                     <div><span class="feature-icon">🏗️</span><span class="feature-title">Effortless Setup</span></div>
-                    <p class="feature-description">Single command install & 3 configs in a welcome screen on first launch</p>
+                    <p class="feature-description">Single command install & intuitive guided setup on first launch</p>
                 </div>
 
                 <div class="feature-item">
@@ -470,6 +541,13 @@
             </div>
         </div>
 
+        <div class="demo-section">
+            <h2 class="demo-title">See It In Action</h2>
+            <div class="demo-container">
+                <img src="otui-demo.gif" alt="OTUI Demo" class="demo-gif">
+            </div>
+        </div>
+
         <footer class="footer">
             An Open Source Project @ <a href="https://github.com/hkdb/otui" target="_blank">hkdb/otui</a>
         </footer>
@@ -494,6 +572,12 @@
                 setTimeout(() => {
                     button.textContent = 'Copy';
                 }, 2000);
+            });
+        }
+
+        function scrollToFeatures() {
+            document.getElementById('features').scrollIntoView({ 
+                behavior: 'smooth' 
             });
         }
     </script>

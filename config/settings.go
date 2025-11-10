@@ -27,6 +27,13 @@ func LoadSystemConfig() (*SystemConfig, error) {
 	return cfg, nil
 }
 
+// SystemConfigExists checks if the system config file exists
+// without creating it (unlike LoadSystemConfig which creates if missing)
+func SystemConfigExists() bool {
+	settingsPath := GetSettingsFilePath()
+	return FileExists(settingsPath)
+}
+
 func LoadUserConfig(dataDir string) (*UserConfig, error) {
 	cfg := DefaultUserConfig()
 	userConfigPath := filepath.Join(dataDir, "config.toml")

@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
 
 	"otui/config"
+	"otui/mcp"
+	"otui/ollama"
 	"otui/storage"
 )
 
@@ -94,7 +97,7 @@ func (m *Model) SaveCurrentSession() tea.Cmd {
 
 	m.CurrentSession.Messages = sessionMessages
 	m.CurrentSession.UpdatedAt = time.Now()
-	m.CurrentSession.Model = m.OllamaClient.GetModel()
+	m.CurrentSession.Model = m.Provider.GetModel()
 
 	session := m.CurrentSession
 	storage := m.SessionStorage
@@ -129,12 +132,16 @@ func (m *Model) AutoSaveSession() tea.Cmd {
 		m.CurrentSession = &storage.Session{
 			ID:             "", // Let Save() generate UUID
 			Name:           storage.GenerateSessionName(firstUserMsg),
-			Model:          m.OllamaClient.GetModel(),
+			Model:          m.Config.DefaultModel,    // Use configured default model
+			Provider:       m.Config.DefaultProvider, // Use configured default provider
 			CreatedAt:      time.Now(),
 			UpdatedAt:      time.Now(),
 			EnabledPlugins: []string{},
 			SystemPrompt:   "",
 		}
+
+		// Switch active provider to match session
+		m.SwitchToDefaultProvider()
 
 		// Sync with MCP manager (security fix)
 		if m.MCPManager != nil {
@@ -389,13 +396,17 @@ func (m *Model) CreateAndSaveNewSession(name, systemPrompt string, enabledPlugin
 	newSession := &storage.Session{
 		ID:             "", // Let Save() generate UUID automatically
 		Name:           name,
-		Model:          m.OllamaClient.GetModel(),
+		Model:          m.Config.DefaultModel,    // Use configured default model
+		Provider:       m.Config.DefaultProvider, // Use configured default provider
 		Messages:       []storage.Message{},
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 		EnabledPlugins: enabledPlugins,
 		SystemPrompt:   systemPrompt,
 	}
+
+	// Switch active provider to match session
+	m.SwitchToDefaultProvider()
 
 	// Save to storage (generates ID automatically)
 	if m.SessionStorage != nil {
@@ -408,4 +419,123 @@ func (m *Model) CreateAndSaveNewSession(name, systemPrompt string, enabledPlugin
 	}
 
 	return newSession, nil
+}
+
+// ApplyDataDirSwitch applies a validated data directory switch.
+// This is pure business logic: destroys manager, updates storage, clears session.
+// Does NOT handle plugin shutdown/restart or provider re-initialization - that's UI orchestration.
+//
+// STEPS 2-3: Destroy MCP manager, switch data directory
+//
+// Note: Provider re-initialization must be done by UI layer due to import cycle
+// (provider package imports model, so model cannot import provider).
+func (m *Model) ApplyDataDirSwitch(newDataDir string, passphrase string) error {
+	if config.DebugLog != nil {
+		config.DebugLog.Printf("[Model] STEP 2-3: Applying data dir switch to %s", newDataDir)
+	}
+
+	// Validate new data directory first
+	newStorage, err := storage.NewSessionStorage(newDataDir)
+	if err != nil {
+		return fmt.Errorf("failed to initialize session storage: %w", err)
+	}
+
+	newPluginsConfig, err := config.LoadPluginsConfig(newDataDir)
+	if err != nil {
+		return fmt.Errorf("failed to load plugins config: %w", err)
+	}
+
+	newRegistry, err := mcp.NewRegistry(newDataDir)
+	if err != nil {
+		return fmt.Errorf("failed to initialize plugin registry: %w", err)
+	}
+
+	// STEP 2: Destroy MCP Manager (business logic - manager tied to old data dir)
+	if m.MCPManager != nil {
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("[Model] STEP 2: Destroying MCP manager")
+		}
+		m.MCPManager = nil
+	}
+
+	// STEP 3: Switch data directory (business logic - state transitions)
+	// Unlock current session from OLD data directory before switching
+	if m.CurrentSession != nil && m.SessionStorage != nil {
+		_ = m.SessionStorage.UnlockSession(m.CurrentSession.ID)
+	}
+
+	// Unlock OTUI instance from OLD data directory before switching
+	if m.SessionStorage != nil {
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("[Model] STEP 3a: Unlocking OTUI instance in old data dir")
+		}
+		_ = m.SessionStorage.UnlockOTUIInstance()
+	}
+
+	if config.DebugLog != nil {
+		config.DebugLog.Printf("[Model] STEP 3b: Switching data directory")
+	}
+
+	m.SessionStorage = newStorage
+	m.SearchIndex = storage.NewSearchIndex(newStorage)
+
+	// Lock OTUI instance in NEW data directory
+	if err := newStorage.LockOTUIInstance(); err != nil {
+		return fmt.Errorf("failed to lock new data directory: %w", err)
+	}
+	if config.DebugLog != nil {
+		config.DebugLog.Printf("[Model] STEP 3c: Locked OTUI instance in new data dir")
+	}
+
+	// Update plugin components
+	m.Plugins.Registry = newRegistry
+	m.Plugins.Config = newPluginsConfig
+
+	// Clear current session (business rule: switching dirs clears session)
+	m.CurrentSession = nil
+	m.Messages = []Message{}
+	m.SessionDirty = false
+	m.NeedsInitialRender = false
+
+	// Clear model cache for new data directory
+	m.ModelCache = make(map[string][]ollama.ModelInfo)
+	m.CacheExpiry = make(map[string]time.Time)
+
+	// Re-initialize debug log for new data directory
+	if config.Debug {
+		config.InitDebugLog(m.Config.DataDir())
+	}
+
+	// Reload config from NEW data directory (business logic - config owns model state)
+	if config.DebugLog != nil {
+		config.DebugLog.Printf("[Model] STEP 3b: Reloading config from new data directory")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		// If passphrase required and we DON'T have one yet, return error for UI to handle
+		if strings.Contains(err.Error(), "passphrase required") {
+			if passphrase == "" {
+				// Tell UI we need passphrase
+				return fmt.Errorf("passphrase required: %w", err)
+			}
+
+			// We have passphrase - retry loading credentials with it
+			if cfg.CredentialStore != nil {
+				cfg.CredentialStore.SetPassphrase(passphrase)
+				if err := cfg.CredentialStore.Load(cfg.DataDir()); err != nil {
+					return fmt.Errorf("failed to load credentials with passphrase: %w", err)
+				}
+			}
+		} else {
+			// Other errors
+			return fmt.Errorf("failed to reload config: %w", err)
+		}
+	}
+	m.Config = cfg
+
+	if config.DebugLog != nil {
+		config.DebugLog.Printf("[Model] STEP 2-3 complete: Data directory switch applied")
+	}
+
+	return nil
 }

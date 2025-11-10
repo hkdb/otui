@@ -44,6 +44,7 @@ func NewFilePickerState(config FilePickerConfig) FilePickerState {
 	fp.FileAllowed = true
 	fp.ShowPermissions = false
 	fp.ShowSize = false
+	fp.ShowHidden = config.ShowHidden
 
 	startDir := config.StartDirectory
 	if startDir == "" {
@@ -51,9 +52,6 @@ func NewFilePickerState(config FilePickerConfig) FilePickerState {
 	}
 	fp.CurrentDirectory = startDir
 
-	fp.Styles.EmptyDirectory = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("15")).
-		SetString("No .json files found in this directory")
 	fp.Styles.Directory = lipgloss.NewStyle().
 		Foreground(accentColor).
 		Bold(true)
@@ -112,7 +110,15 @@ func RenderFilePickerModal(state FilePickerState, width, height int) string {
 }
 
 func renderFilePickerInput(picker filepicker.Model, title string, width, height int) string {
+	// Guard clause: prevent rendering in tiny terminals
+	if width < 20 || height < 10 {
+		return "Terminal too small"
+	}
+
 	modalWidth := width - 10
+	if modalWidth < 10 {
+		modalWidth = 10
+	}
 	if modalWidth > 80 {
 		modalWidth = 80
 	}
@@ -137,7 +143,7 @@ func renderFilePickerInput(picker filepicker.Model, title string, width, height 
 	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
 
 	// Format footer
-	footer := "j/k Navigate  Enter Select  / Filter  Esc Cancel"
+	footer := "j/k Navigate  h/l Back/Forward  Esc Cancel"
 
 	return RenderThreeSectionModal(
 		title,
@@ -151,7 +157,15 @@ func renderFilePickerInput(picker filepicker.Model, title string, width, height 
 }
 
 func renderFilePickerProcessing(sp spinner.Model, config FilePickerConfig, width, height int) string {
+	// Guard clause: prevent rendering in tiny terminals
+	if width < 20 || height < 10 {
+		return "Terminal too small"
+	}
+
 	modalWidth := width - 10
+	if modalWidth < 10 {
+		modalWidth = 10
+	}
 	if modalWidth > 80 {
 		modalWidth = 80
 	}
@@ -189,7 +203,15 @@ func renderFilePickerProcessing(sp spinner.Model, config FilePickerConfig, width
 }
 
 func renderFilePickerCleanup(sp spinner.Model, width, height int) string {
+	// Guard clause: prevent rendering in tiny terminals
+	if width < 20 || height < 10 {
+		return "Terminal too small"
+	}
+
 	modalWidth := width - 10
+	if modalWidth < 10 {
+		modalWidth = 10
+	}
 	if modalWidth > 80 {
 		modalWidth = 80
 	}
@@ -222,9 +244,17 @@ func renderFilePickerCleanup(sp spinner.Model, width, height int) string {
 }
 
 func renderFilePickerSuccess(path string, title string, width, height int) string {
+	// Guard clause: prevent rendering in tiny terminals
+	if width < 20 || height < 10 {
+		return "Terminal too small"
+	}
+
 	modalWidth := 70
 	if width < modalWidth+10 {
 		modalWidth = width - 10
+		if modalWidth < 10 {
+			modalWidth = 10
+		}
 	}
 
 	// Title is dynamic: "✓ Import Successful" or "✓ Export Successful"

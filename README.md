@@ -7,27 +7,35 @@ An opinionated, "speed" and "usability" focused agentic TUI with a built-in MCP 
 
 ## 🚀 Features
 
-- 🏗️ **Effortless Setup** - Single command install & 3 configs in a welcome screen on first launch
+- 🏗️ **Effortless Setup** - Single command install & intuitive guided setup on first launch
 - 💫 **Minimalist UI** - Clean, distraction-free interface
 - 🚀 **Performance** - Designed to be blazingly fast and responsive
 - 👻 **Terminal transparency** - Respects your terminal's transparency settings
 - ⌨️ **Keyboard-driven** - Everything is keyboard only except to copy via text selection
-- 🖱  **Native text selection** - Highlight and copy any part of the LLM response
+- 🖱 **Native text selection** - Highlight and copy any part of the LLM response
 - ✏️ **Text Editor Integration** - Toggle your favorite text editor to compose your more complex prompts
 - 🚰 **Streaming responses** - Real-time AI responses with typewriter effect
 - ⚓ **Markdown Rendering** - Custom performance focused, minimalistic mark-down rendering
 - 📦 **Multiple models** - Effortlessly switch between models
 - 🎬 **Multiple Sessions** - Use different sessions to encapsulate different context and tasks
-- 🗃  **Session history** - Conversations are automatically saved and ready to continue where you left off
+- 🗃 **Session history** - Conversations are automatically saved and ready to continue where you left off
 - 🔍 **Session search** - Search and find past conversations easily
 - 🛣️ **Session import/export** - Easily bring sessions to another machine or share context with others
-- ✍🏼   **System Prompts** - Configure system prompts profile-wide or per session
+- ✍🏼  **System Prompts** - Configure system prompts profile-wide or per session
 - 🧳 **Portable** - Migrate everything to a new system or switch between user profiles easily
-- 🖧  **Profile Sync** - Sync profiles and sessions between devices with any file sync provider
+- 🖧 **Profile Sync** - Sync profiles and sessions between devices with any file sync provider
 - 💻 **Cross Platform** - Runs on Linux, FreeBSD, Mac, and Windows
 - 🔧 **MCP Plugins** - Automatic & Guided download + installations of MCP Plugins
 - 🛸 **MCP Registry** - A growing list of MCP server plugins to explore
 
+
+## 🤖 Provider Support
+
+- Ollama
+- [OpenRouter](https://openrouter.com)
+- Anthropic
+- OpenAI
+- More coming soon...
 
 ## 🖥️ OS Support
 
@@ -56,7 +64,7 @@ OTUI was designed to be hopefully intuitive enough to any user that is already f
 
 #### ⌨️ Keyboard Shortcuts
 
-At any point in time, users can press Alt+H to bring up the `help` screen to see what keybindings are set:
+At any point in time, users can press Alt+H to bring up the `help` screen to see what keybindings are:
 
 
 ![keybindings](docs/keybindings.png)
@@ -71,7 +79,7 @@ OTUI is made up of the following main UI components:
 - `Session Manager`  = Where users can manage sessions (Create, Edit, Search, Import, Export)
 - `Model Selector`   = Where users can select the LLM Model to use in the currently loaded session 
 - `Plugin Manager`  = Where users can manage MCP plugins (See the next section)
-- `Settings`         = Where users can set Data Directory, Ollama Host, Default Model, Profile Wide System Prompt, and Enable/Disable Plugins System
+- `Settings`         = Where users can set Data Directory, Default Model, Profile Wide System Prompt, Enable/Disable Plugins System and launch `Provider Settings` to configure providers.
 - `Help`             = Where users can see a cheat sheet of all the keybindings
 - `About`            = Where users can see information about OTUI and check the release version
 
@@ -101,7 +109,7 @@ The single data directory architecture makes OTUI super portable and syncable. U
 
 A likely future feature is to be able to encrypt your data dir for better security and privacy especially when using major cloud providers to sync.
 
-OTUI falls back on environment variables for configuration so that one can just set env var without using the TUI to setup:
+OTUI falls back on environment variables for configuration (Ollama only) so that one can just set env var without using the TUI to setup:
 
 ```bash
 # Set your Ollama server URL (ex: http://localhost:11434)
@@ -152,7 +160,7 @@ For more information about the Registry, see [OTUI MCP Registry](https://github.
 
 ## 👾 OTUI in Action
 
-![screencast](docs/otui-demo.gif)
+![screencast](dist/otui-demo.gif)
 
 ## 🛠️ Building From Source
 
@@ -182,11 +190,15 @@ rm -rf ~/.local/share/otui # or whatever data dir the user specified. This also 
 ## ⏳ Status
 
 **Completed**:
-- ✅ Ollama Only Core Functionality
+- ✅ Core Functionality
+- ✅ Ollama Support
+- ✅ [OpenRouter](https://openrouter.com) Support
+- ✅ Anthropic Support
+- ✅ OpenAI Support
 
 **Work in Progress**:
 - 🚧 Bug Fixes (On-Going)
-- 🚧 Provider Abastraction
+- 🚧 Adding Other Providers (Github Copilot, Gemini? TBD)
 - 🚧 More Sophisticated session/context management
 
 **Future Features**:
@@ -198,6 +210,12 @@ rm -rf ~/.local/share/otui # or whatever data dir the user specified. This also 
 - A lot of OTUI was made possible with: [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 - Some of OTUI was originally inspired by: [LIT TUI](https://github.com/Positronic-AI/lit-tui)
 - Most of the project was vibe coded with [OpenCode](https://opencode.ai) + [Claude Sonnet 4.5](https://www.anthropic.com/claude/sonnet)
+
+## 🦾 Support this Project
+
+If you like what you see and want to show your appreciation:
+
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/yellow_img.png)](https://www.buymeacoffee.com/3dfosi)
 
 ## 📢 Disclaimer
 

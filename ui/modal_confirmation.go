@@ -13,9 +13,17 @@ type ConfirmationState struct {
 }
 
 func RenderConfirmationModal(state ConfirmationState, width, height int) string {
+	// Guard clause: prevent rendering in tiny terminals
+	if width < 20 || height < 10 {
+		return "Terminal too small"
+	}
+
 	modalWidth := 60
 	if width < modalWidth+10 {
 		modalWidth = width - 10
+		if modalWidth < 10 {
+			modalWidth = 10
+		}
 	}
 
 	// Title section (no borders)
@@ -68,9 +76,17 @@ func RenderConfirmationModal(state ConfirmationState, width, height int) string 
 
 // RenderToolWarningModal shows a warning when switching to a model without tool support
 func RenderToolWarningModal(modelName string, enabledPlugins []string, width, height int) string {
+	// Guard clause: prevent rendering in tiny terminals
+	if width < 20 || height < 10 {
+		return "Terminal too small"
+	}
+
 	modalWidth := 70
 	if width < modalWidth+10 {
 		modalWidth = width - 10
+		if modalWidth < 10 {
+			modalWidth = 10
+		}
 	}
 
 	// Title section (no borders)
@@ -129,4 +145,15 @@ func RenderToolWarningModal(modelName string, enabledPlugins []string, width, he
 	content := strings.Join(sections, "\n")
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
+}
+
+// RenderUnsavedChangesModal shows confirmation when user tries to exit with unsaved changes
+// Reusable by Settings screen and Provider Settings screen
+func RenderUnsavedChangesModal(width, height int) string {
+	state := ConfirmationState{
+		Active:  true,
+		Title:   "Unsaved Changes",
+		Message: "You have unsaved changes. Discard them?",
+	}
+	return RenderConfirmationModal(state, width, height)
 }

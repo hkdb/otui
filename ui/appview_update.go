@@ -66,6 +66,11 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
+	// Handle passphrase modal for data dir switch (same pattern as other modals)
+	if a.showPassphraseForDataDir {
+		return a.handlePassphraseForDataDir(msg)
+	}
+
 	// Update registry refresh spinner if modal is active
 	if a.pluginManagerState.registryRefresh.visible && a.pluginManagerState.registryRefresh.phase == "fetching" {
 		a.pluginManagerState.registryRefresh.spinner, cmd = a.pluginManagerState.registryRefresh.spinner.Update(msg)
@@ -163,7 +168,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.pluginSystemState.Spinner.Spinner = spinner.Dot
 				return a, tea.Batch(
 					a.pluginSystemState.Spinner.Tick,
-					a.dataModel.StartPluginShutdown(3*time.Second), // 3 second timeout
+					stopPluginSystemCmd(a.dataModel.MCPManager), // 2 second timeout (standardized)
 				)
 			}
 
@@ -259,7 +264,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.closeAllModals()
 			a.showModelSelector = !wasOpen
 			if a.showModelSelector {
-				currentModel := a.dataModel.OllamaClient.GetModel()
+				currentModel := a.dataModel.Provider.GetModel()
 				for i, model := range a.modelList {
 					if model.Name == currentModel {
 						a.selectedModelIdx = i
@@ -309,10 +314,10 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						Validation:   FieldValidationNone,
 					},
 					{
-						Label:        "Ollama Host",
-						Value:        a.dataModel.Config.OllamaHost,
-						DefaultValue: "http://localhost:11434",
-						Type:         SettingTypeOllamaHost,
+						Label:        "Provider(s)",
+						Value:        "→",
+						DefaultValue: "",
+						Type:         SettingTypeProviderLink,
 						Validation:   FieldValidationNone,
 					},
 					{
@@ -409,7 +414,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if a.dataModel.Quitting {
 						return a, tea.Batch(
 							a.pluginSystemState.Spinner.Tick,
-							a.dataModel.StartPluginShutdown(2*time.Second),
+							stopPluginSystemCmd(a.dataModel.MCPManager), // 2 second timeout (standardized)
 						)
 					} else {
 						// Settings toggle - use stopPluginSystemCmd
@@ -603,6 +608,21 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					config.DebugLog.Printf("Enter pressed - sending message: %s", userMsg)
 				}
 
+				// Check if provider is enabled before sending
+				canSend, errMsg := a.dataModel.CanSendMessage()
+				if !canSend {
+					// Show error in chat area
+					a.dataModel.Messages = append(a.dataModel.Messages, Message{
+						Role:      "system",
+						Content:   errMsg,
+						Rendered:  errMsg,
+						Timestamp: time.Now(),
+					})
+					a.updateViewportContent(true)
+					a.textarea.Reset()
+					return a, nil
+				}
+
 				// Add user message
 				a.dataModel.Messages = append(a.dataModel.Messages, Message{
 					Role:      "user",
@@ -655,7 +675,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// If plugins are enabled, show shutdown modal and attempt graceful shutdown
 			if a.dataModel.MCPManager != nil && a.dataModel.Config.PluginsEnabled {
 				if config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] Ctrl+C: Plugins enabled, showing shutdown modal")
+					config.DebugLog.Printf("[UI] Alt+Q: Plugins enabled, showing shutdown modal")
 				}
 				a.dataModel.Quitting = true
 				a.pluginSystemState = PluginSystemState{
@@ -668,7 +688,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.pluginSystemState.Spinner.Spinner = spinner.Dot
 				return a, tea.Batch(
 					a.pluginSystemState.Spinner.Tick,
-					a.dataModel.StartPluginShutdown(3*time.Second), // 3 second timeout
+					stopPluginSystemCmd(a.dataModel.MCPManager), // 2 second timeout (standardized)
 				)
 			}
 
@@ -753,441 +773,18 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-	case streamChunksCollectedMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("streamChunksCollectedMsg received - %d chunks collected", len(msg.Chunks))
-		}
-
-		// Ignore if user cancelled
-		if !a.dataModel.Streaming {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Ignoring streamChunksCollectedMsg - user cancelled")
-			}
-			return a, nil
-		}
-
-		// Remove loading message
-		if len(a.dataModel.Messages) > 0 && a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" {
-			a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
-		}
-
-		// Initialize typewriter effect
-		a.chunks = msg.Chunks
-		a.chunkIndex = 0
-		a.dataModel.Streaming = true
-		a.currentResp.Reset()
-
-		// Start displaying chunks with typewriter effect after a brief delay
-		// This gives the spinner time to be visible
-		return a, tea.Tick(300*time.Millisecond, func(time.Time) tea.Msg {
-			return displayChunkTickMsg{}
-		})
-
-	case displayChunkTickMsg:
-		// Stop typewriter if user cancelled
-		if !a.dataModel.Streaming {
-			return a, nil
-		}
-
-		if a.chunkIndex >= len(a.chunks) {
-			// All chunks displayed - finalize
-			fullResp := a.currentResp.String()
-			a.dataModel.Streaming = false
-			a.chunks = nil
-			a.chunkIndex = 0
-			a.currentResp.Reset()
-
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Typewriter complete - finalizing message")
-			}
-
-			// Add final message and trigger markdown render
-			a.dataModel.Messages = append(a.dataModel.Messages, Message{
-				Role:      "assistant",
-				Content:   fullResp,
-				Rendered:  fullResp, // Start with plain text
-				Timestamp: time.Now(),
-			})
-
-			messageIndex := len(a.dataModel.Messages) - 1
-			a.updateViewportContent(true)
-			a.dataModel.SessionDirty = true
-
-			// Auto-save session and render markdown
-			cmds = []tea.Cmd{
-				a.renderMarkdownAsync(messageIndex, fullResp),
-				a.dataModel.AutoSaveSession(),
-			}
-			return a, tea.Batch(cmds...)
-		}
-
-		// Display next chunk
-		chunk := a.chunks[a.chunkIndex]
-		a.chunkIndex++
-		a.currentResp.WriteString(chunk)
-		a.updateStreamingMessage()
-
-		// Schedule next chunk with delay (30ms, but first chunk is immediate)
-		delay := 30 * time.Millisecond
-		if a.chunkIndex == 1 {
-			delay = time.Millisecond // First chunk nearly immediate
-		}
-
-		return a, tea.Tick(delay, func(time.Time) tea.Msg {
-			return displayChunkTickMsg{}
-		})
-
-	case streamChunkMsg:
-		a.currentResp.WriteString(msg.Chunk)
-		a.updateStreamingMessage()
-		return a, nil
-
-	case streamDoneMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("streamDoneMsg received - response length: %d", len(msg.FullResponse))
-		}
-
-		a.dataModel.Streaming = false
-
-		// Remove loading message (last system message)
-		if len(a.dataModel.Messages) > 0 && a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" {
-			a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
-		}
-
-		// Add final assistant message with plain text initially
-		if msg.FullResponse != "" {
-			a.dataModel.Messages = append(a.dataModel.Messages, Message{
-				Role:      "assistant",
-				Content:   msg.FullResponse,
-				Rendered:  msg.FullResponse, // Start with plain text
-				Timestamp: time.Now(),
-			})
-
-			messageIndex := len(a.dataModel.Messages) - 1
-
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Message added as plain text, triggering async markdown render")
-			}
-
-			// Update viewport immediately with plain text
-			a.updateViewportContent(true)
-
-			// Trigger async markdown rendering (non-blocking)
-			return a, a.renderMarkdownAsync(messageIndex, msg.FullResponse)
-		} else {
-			// No response received
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("ERROR: No response in streamDoneMsg")
-			}
-			a.dataModel.Messages = append(a.dataModel.Messages, Message{
-				Role:      "system",
-				Content:   "⚠️ No response received from Ollama",
-				Rendered:  "⚠️ No response received from Ollama",
-				Timestamp: time.Now(),
-			})
-			a.updateViewportContent(true)
-		}
-		a.currentResp.Reset()
-
-		return a, nil
-
-	case streamErrorMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("streamErrorMsg received: %v", msg.Err)
-		}
-
-		a.dataModel.Streaming = false
-		a.currentResp.Reset()
-
-		// Remove loading message
-		if len(a.dataModel.Messages) > 0 && a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" {
-			a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
-		}
-
-		// Check if error is about tool support
-		errorMsg := msg.Err.Error()
-		var displayMsg string
-		if strings.Contains(errorMsg, "does not support tools") {
-			// Extract model name from error if possible
-			currentModel := a.dataModel.OllamaClient.GetModel()
-			displayMsg = fmt.Sprintf("❌ Error: %s does not support tool calling.\n\n"+
-				"Your session has enabled plugins that require tool support.\n"+
-				"Switch to a tool-capable model marked with [🔧] next to it.\n\n"+
-				"Press Alt+M to change model.", currentModel)
-		} else {
-			displayMsg = fmt.Sprintf("❌ Error: %v\n\nMake sure OLLAMA_HOST is set correctly.", msg.Err)
-		}
-
-		// Show error message
-		a.dataModel.Messages = append(a.dataModel.Messages, Message{
-			Role:      "system",
-			Content:   displayMsg,
-			Rendered:  displayMsg,
-			Timestamp: time.Now(),
-		})
-		a.updateViewportContent(true)
-		return a, nil
+	// Streaming messages → appview_update_streaming.go
+	case streamChunksCollectedMsg, displayChunkTickMsg, streamChunkMsg, streamDoneMsg, streamErrorMsg:
+		return a.handleStreamingMessage(msg)
 
 	// Phase 6: Tool execution handlers
-	case toolCallsDetectedMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Tool calls detected: %d calls", len(msg.ToolCalls))
-		}
+	// Tool messages → appview_update_tools.go
+	case toolCallsDetectedMsg, toolExecutionCompleteMsg, toolExecutionErrorMsg:
+		return a.handleToolMessage(msg)
 
-		// Set executing tool indicator (use first tool's plugin name)
-		if len(msg.ToolCalls) > 0 {
-			// Extract plugin ID from namespaced tool name (e.g., "ihor-sokoliuk-mcp-searxng.search" -> "ihor-sokoliuk-mcp-searxng")
-			toolName := msg.ToolCalls[0].Function.Name
-			var pluginID string
-			if idx := strings.Index(toolName, "."); idx != -1 {
-				pluginID = toolName[:idx]
-			} else {
-				pluginID = toolName
-			}
-
-			// Get short display name from registry (e.g., "ihor-sokoliuk-mcp-searxng" -> "mcp-searxng")
-			if a.dataModel.MCPManager != nil {
-				shortName := a.dataModel.MCPManager.GetPluginShortName(pluginID)
-				if shortName != "" {
-					a.executingTool = shortName
-				} else {
-					a.executingTool = pluginID // Fallback
-				}
-			} else {
-				a.executingTool = pluginID
-			}
-
-			// Initialize and start tool execution spinner
-			a.toolExecutionSpinner = spinner.New()
-			a.toolExecutionSpinner.Spinner = spinner.Dot
-
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Starting tool execution for: %s", a.executingTool)
-			}
-
-			return a, tea.Batch(
-				a.toolExecutionSpinner.Tick,
-				a.dataModel.ExecuteToolsAndContinue(msg),
-			)
-		}
-
-		return a, nil
-
-	case toolExecutionCompleteMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Tool execution complete - %d chunks", len(msg.Chunks))
-		}
-
-		// Clear tool execution state
-		a.executingTool = ""
-
-		// Ignore if user cancelled
-		if !a.dataModel.Streaming {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Ignoring toolExecutionCompleteMsg - user cancelled")
-			}
-			return a, nil
-		}
-
-		// Remove loading message if present
-		if len(a.dataModel.Messages) > 0 && a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" {
-			a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
-		}
-
-		// Initialize typewriter effect (same as normal responses)
-		a.chunks = msg.Chunks
-		a.chunkIndex = 0
-		a.dataModel.Streaming = true
-		a.currentResp.Reset()
-
-		// Start displaying chunks with typewriter effect
-		return a, tea.Tick(300*time.Millisecond, func(time.Time) tea.Msg {
-			return displayChunkTickMsg{}
-		})
-
-	case toolExecutionErrorMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Tool execution error: %v", msg.Err)
-		}
-
-		// Clear execution state
-		a.executingTool = ""
-		a.dataModel.Streaming = false
-		a.currentResp.Reset()
-
-		// Remove loading message
-		if len(a.dataModel.Messages) > 0 && a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" {
-			a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
-		}
-
-		// Show error message
-		a.dataModel.Messages = append(a.dataModel.Messages, Message{
-			Role:      "system",
-			Content:   fmt.Sprintf("❌ Tool execution error: %v", msg.Err),
-			Rendered:  fmt.Sprintf("❌ Tool execution error: %v", msg.Err),
-			Timestamp: time.Now(),
-		})
-
-		a.updateViewportContent(true)
-		return a, nil
-
-	case flashTickMsg:
-		if a.highlightFlashCount > 0 && a.highlightFlashCount < 6 {
-			a.highlightFlashCount++
-			a.updateViewportContent(false)
-			return a, tea.Tick(300*time.Millisecond, func(time.Time) tea.Msg {
-				return flashTickMsg{}
-			})
-		}
-		a.highlightedMessageIdx = -1
-		a.highlightFlashCount = 0
-		a.updateViewportContent(false)
-		return a, nil
-
-	case markdownRenderedMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("markdownRenderedMsg received for message %d", msg.MessageIndex)
-		}
-
-		if msg.MessageIndex >= 0 && msg.MessageIndex < len(a.dataModel.Messages) {
-			a.dataModel.Messages[msg.MessageIndex].Rendered = msg.Rendered
-
-			gotoBottom := a.highlightedMessageIdx < 0
-			a.updateViewportContent(gotoBottom)
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Viewport updated with rendered markdown (gotoBottom=%v)", gotoBottom)
-			}
-		}
-		return a, nil
-
-	case modelsListMsg:
-		if msg.Err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Error fetching Models: %v", msg.Err)
-			}
-			// Optionally show error to user
-			return a, nil
-		}
-
-		a.modelList = msg.Models
-		a.modelListCached = true
-
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Fetched %d models from Ollama", len(msg.Models))
-		}
-
-		// If in settings mode, open model selector
-		if a.showSettings {
-			a.showModelSelector = true
-			// Pre-select current model if in list
-			currentModel := a.settingsFields[2].Value
-			for i, model := range a.modelList {
-				if model.Name == currentModel {
-					a.selectedModelIdx = i
-					break
-				}
-			}
-		}
-
-		return a, nil
-
-	case sessionsListMsg:
-		if msg.Err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Error fetching Sessions: %v", msg.Err)
-			}
-			return a, nil
-		}
-
-		a.sessionList = msg.Sessions
-		a.selectedSessionIdx = 0
-
-		// Select current session if session manager is open
-		if a.showSessionManager && a.dataModel.CurrentSession != nil {
-			for i, session := range msg.Sessions {
-				if session.ID == a.dataModel.CurrentSession.ID {
-					a.selectedSessionIdx = i
-					break
-				}
-			}
-		}
-
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Fetched %d sessions", len(msg.Sessions))
-		}
-
-		// Check if we just deleted the current session
-		if a.dataModel.CurrentSession == nil {
-			if len(msg.Sessions) > 0 {
-				// Load the first session in the list
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("Current session deleted, loading first available Session: %s", msg.Sessions[0].ID)
-				}
-				return a, a.dataModel.LoadSession(msg.Sessions[0].ID)
-			} else {
-				// No sessions left - close modal and show empty state
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("No sessions left after deletion, showing empty state")
-				}
-				a.showSessionManager = false
-			}
-		}
-
-		return a, nil
-
-	case shutdownProgressMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[UI] ========== shutdownProgressMsg RECEIVED ==========")
-			config.DebugLog.Printf("[UI] shutdownProgressMsg: phase=%s, unresponsive=%v, err=%v", msg.Phase, msg.UnresponsiveNames, msg.Err)
-		}
-
-		if msg.Phase == "complete" {
-			// Shutdown completed successfully, quit now
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] shutdownProgressMsg: Phase is 'complete' - shutting down cleanly")
-			}
-			if a.dataModel.CurrentSession != nil && a.dataModel.SessionStorage != nil {
-				_ = a.dataModel.SessionStorage.UnlockSession(a.dataModel.CurrentSession.ID)
-			}
-
-			// Clear plugin system state
-			a.pluginSystemState = PluginSystemState{}
-
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] shutdownProgressMsg: Returning tea.Quit")
-			}
-			return a, tea.Quit
-		}
-
-		if msg.Phase == "unresponsive" {
-			// Plugins didn't respond, show unresponsive modal
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] shutdownProgressMsg: Phase is 'unresponsive' - switching to warning modal")
-				config.DebugLog.Printf("[UI] shutdownProgressMsg: Setting phase='unresponsive', unresponsivePlugins=%v", msg.UnresponsiveNames)
-			}
-			a.pluginSystemState.Phase = "unresponsive"
-			a.pluginSystemState.UnresponsivePlugins = msg.UnresponsiveNames
-
-			// Capture error reason (timeout or other error)
-			if msg.Err != nil {
-				a.pluginSystemState.ErrorMsg = msg.Err.Error()
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] shutdownProgressMsg: Shutdown error: %v", msg.Err)
-				}
-			} else {
-				a.pluginSystemState.ErrorMsg = "Shutdown timed out"
-			}
-
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] shutdownProgressMsg: Returning m (modal should now show unresponsive state)")
-			}
-			return a, nil
-		}
-
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[UI] shutdownProgressMsg: WARNING - Unknown phase '%s', returning m", msg.Phase)
-		}
-		return a, nil
+	// UI messages → appview_update_ui.go
+	case flashTickMsg, markdownRenderedMsg, modelsListMsg, sessionsListMsg:
+		return a.handleUIMessage(msg)
 
 	case pluginSystemOperationMsg:
 		// Handle plugin system start/stop completion (from Settings toggle)
@@ -1236,11 +833,24 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if msg.operation == "stopping" {
+			// Handle failure first (early return pattern - RULE #15)
 			if !msg.success && len(msg.unresponsivePlugins) > 0 {
-				// Some plugins didn't respond - show warning
 				if config.DebugLog != nil {
 					config.DebugLog.Printf("[UI] Plugin shutdown UNRESPONSIVE: %v", msg.unresponsivePlugins)
 				}
+
+				// Check if this was part of a callback operation
+				if a.pendingPluginOperation == "datadir_switch" {
+					a.pendingPluginOperation = ""
+					a.pendingPluginOperationData = nil
+					a.showAcknowledgeModal = true
+					a.acknowledgeModalTitle = "⚠️  Data Directory Switch Failed"
+					a.acknowledgeModalMsg = "Plugin shutdown failed. Cannot complete data directory switch."
+					a.acknowledgeModalType = ModalTypeError
+					return a, nil
+				}
+
+				// Shutdown unresponsive error (Settings toggle or quit)
 				a.pluginSystemState.Phase = "unresponsive"
 				a.pluginSystemState.UnresponsivePlugins = msg.unresponsivePlugins
 				if msg.err != nil {
@@ -1249,26 +859,60 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 
-			// Success - reload config to reflect PluginsEnabled=false
+			// Success path (no else needed - RULE #15)
+			a.pluginSystemState.Active = false
+
+			// STEP 2: Destroy manager (ALWAYS after successful shutdown - critical!)
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("[UI] Plugin shutdown SUCCESS - destroying manager")
+			}
+			a.dataModel.MCPManager = nil
+
+			// Check if this is app quit
+			if a.dataModel.Quitting {
+				if config.DebugLog != nil {
+					config.DebugLog.Printf("[UI] Shutdown complete - quitting app")
+				}
+				if a.dataModel.CurrentSession != nil && a.dataModel.SessionStorage != nil {
+					_ = a.dataModel.SessionStorage.UnlockSession(a.dataModel.CurrentSession.ID)
+				}
+				a.pluginSystemState = PluginSystemState{}
+				return a, tea.Quit
+			}
+
+			// Check if this was part of a callback operation
+			if a.pendingPluginOperation == "datadir_switch" {
+				if config.DebugLog != nil {
+					config.DebugLog.Printf("[UI] STEP 1-2 complete: Shutdown + destroy - continuing with STEPS 3-6")
+				}
+
+				newDataDir := a.pendingPluginOperationData.(string)
+				a.pendingPluginOperation = ""
+				a.pendingPluginOperationData = nil
+
+				// Continue with STEPS 3-6
+				return a, a.completeDataDirSwitch(newDataDir)
+			}
+
+			// Normal plugin shutdown (Settings toggle disable)
 			if config.DebugLog != nil {
 				config.DebugLog.Printf("[UI] Plugin shutdown SUCCESS - reloading config")
 			}
 			cfg, err := config.Load()
 			if err != nil {
 				if config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] ERROR reloading config after plugin disable: %v", err)
+					config.DebugLog.Printf("[UI] ERROR reloading config: %v", err)
 				}
-				// Still proceed with shutdown even if reload fails
-			} else {
+			}
+			if err == nil {
 				a.dataModel.Config = cfg
 			}
 
-			// Dismiss modal, clear manager
+			// Dismiss modal
 			a.pluginSystemState = PluginSystemState{}
-			a.dataModel.MCPManager = nil
 
 			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] Plugins disabled successfully, config reloaded, modal dismissed")
+				config.DebugLog.Printf("[UI] Plugins disabled successfully, modal dismissed")
 			}
 			return a, nil
 		}
@@ -1413,339 +1057,14 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
-	case sessionLoadedMsg:
-		if msg.Err != nil {
-			// Check if error is due to session being locked
-			if msg.Err.Error() == "session_locked" {
-				a.showAcknowledgeModal = true
-				a.acknowledgeModalTitle = "Session In Use"
-				a.acknowledgeModalMsg = "This session is currently being used in another OTUI instance.\n\n" +
-					"Only one instance can use a session at a time.\n\n" +
-					"Options:\n" +
-					"• Close the other OTUI instance\n" +
-					"• Use a different session\n" +
-					"• Run OTUI in a container for isolated instances"
-				a.acknowledgeModalType = ModalTypeWarning
-				return a, nil
-			}
+	// Session messages → appview_update_sessions.go
+	case sessionLoadedMsg, sessionSavedMsg, sessionRenamedMsg, sessionExportedMsg,
+		sessionImportedMsg, exportCleanupDoneMsg:
+		return a.handleSessionMessage(msg)
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Error loading Session: %v", msg.Err)
-			}
-			return a, nil
-		}
-
-		// Unlock old session before switching
-		if a.dataModel.CurrentSession != nil && a.dataModel.SessionStorage != nil {
-			_ = a.dataModel.SessionStorage.UnlockSession(a.dataModel.CurrentSession.ID)
-		}
-
-		// Load session into UI and sync with MCP manager
-		a.setCurrentSession(msg.Session)
-
-		a.dataModel.SessionDirty = false
-		a.showSessionManager = false
-
-		// Save as current session so it's restored on next launch
-		if a.dataModel.SessionStorage != nil && msg.Session != nil {
-			a.dataModel.SessionStorage.SaveCurrentSessionID(msg.Session.ID)
-		}
-
-		// Convert storage messages to UI messages
-		a.dataModel.Messages = []Message{}
-		for _, sMsg := range msg.Session.Messages {
-			// Use cached rendering if available, otherwise use content
-			rendered := sMsg.Rendered
-			if rendered == "" {
-				rendered = sMsg.Content
-			}
-			a.dataModel.Messages = append(a.dataModel.Messages, Message{
-				Role:      sMsg.Role,
-				Content:   sMsg.Content,
-				Rendered:  rendered,
-				Timestamp: sMsg.Timestamp,
-			})
-		}
-
-		// Set model from session
-		if msg.Session.Model != "" {
-			a.dataModel.OllamaClient.SetModel(msg.Session.Model)
-		}
-
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Loaded session %s with %d messages", msg.Session.ID, len(msg.Session.Messages))
-		}
-
-		// Check if we need to scroll to a specific message
-		if a.pendingScrollToMessageIdx >= 0 && a.pendingScrollToMessageIdx < len(a.dataModel.Messages) {
-			messageIdx := a.pendingScrollToMessageIdx
-			a.pendingScrollToMessageIdx = -1
-
-			var offsetContent strings.Builder
-			for i := range messageIdx {
-				msg := a.dataModel.Messages[i]
-
-				timestamp := DimStyle.Render(msg.Timestamp.Format("[15:04]"))
-
-				var roleStyle = DimStyle
-				var roleName string
-				switch msg.Role {
-				case "user":
-					roleStyle = UserStyle
-					roleName = "You"
-				case "assistant":
-					roleStyle = AssistantStyle
-					roleName = "Assistant"
-				default:
-					roleStyle = DimStyle
-					roleName = "System"
-				}
-
-				role := roleStyle.Render(roleName)
-				renderedContent := msg.Rendered
-
-				if msg.Role == "user" {
-					greenBold := "\x1b[32;1m"
-					reset := "\x1b[0m"
-					bar := greenBold + "┃" + reset
-
-					lines := strings.Split(renderedContent, "\n")
-					offsetContent.WriteString(fmt.Sprintf("%s %s %s\n", bar, timestamp, role))
-					for _, line := range lines {
-						offsetContent.WriteString(fmt.Sprintf("%s %s\n", bar, line))
-					}
-					offsetContent.WriteString("\n")
-				} else {
-					offsetContent.WriteString(fmt.Sprintf("%s %s\n%s\n\n", timestamp, role, renderedContent))
-				}
-			}
-
-			actualOffset := strings.Count(offsetContent.String(), "\n")
-			viewportHeight := a.viewport.Height
-			centerOffset := actualOffset - (viewportHeight / 2)
-			centerOffset = max(centerOffset, 0)
-
-			a.highlightedMessageIdx = messageIdx
-			a.highlightFlashCount = 1
-			a.updateViewportContent(false)
-
-			totalLines := a.viewport.TotalLineCount()
-			if centerOffset > totalLines-viewportHeight {
-				centerOffset = totalLines - viewportHeight
-			}
-
-			a.viewport.SetYOffset(centerOffset)
-
-			// Trigger flash animation
-			var renderCmds []tea.Cmd
-			renderCmds = append(renderCmds, tea.Tick(300*time.Millisecond, func(time.Time) tea.Msg {
-				return flashTickMsg{}
-			}))
-
-			// Trigger markdown rendering for user and assistant messages that need it
-			// Render in REVERSE order (newest first) since viewport shows bottom
-			for i := len(a.dataModel.Messages) - 1; i >= 0; i-- {
-				if a.dataModel.Messages[i].Role == "assistant" || a.dataModel.Messages[i].Role == "user" {
-					// Skip if already rendered (cached from disk)
-					if a.dataModel.Messages[i].Rendered != "" && a.dataModel.Messages[i].Rendered != a.dataModel.Messages[i].Content {
-						continue
-					}
-					renderCmds = append(renderCmds, a.renderMarkdownAsync(i, a.dataModel.Messages[i].Content))
-				}
-			}
-
-			return a, tea.Batch(renderCmds...)
-		}
-
-		// No pending scroll, go to bottom as usual
-		a.updateViewportContent(true)
-
-		// Trigger markdown rendering for user and assistant messages that need it
-		// Render in REVERSE order (newest first) since viewport shows bottom
-		var renderCmds []tea.Cmd
-		for i := len(a.dataModel.Messages) - 1; i >= 0; i-- {
-			if a.dataModel.Messages[i].Role == "assistant" || a.dataModel.Messages[i].Role == "user" {
-				// Skip if already rendered (cached from disk)
-				if a.dataModel.Messages[i].Rendered != "" && a.dataModel.Messages[i].Rendered != a.dataModel.Messages[i].Content {
-					continue
-				}
-				renderCmds = append(renderCmds, a.renderMarkdownAsync(i, a.dataModel.Messages[i].Content))
-			}
-		}
-
-		return a, tea.Batch(renderCmds...)
-
-	case sessionSavedMsg:
-		if msg.Err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Error saving Session: %v", msg.Err)
-			}
-			return a, nil
-		}
-
-		a.dataModel.SessionDirty = false
-
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Session saved successfully")
-		}
-
-		return a, nil
-
-	case sessionRenamedMsg:
-		if msg.Err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Error renaming Session: %v", msg.Err)
-			}
-			return a, nil
-		}
-
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Session renamed successfully")
-		}
-
-		return a, nil
-
-	case sessionExportedMsg:
-		if msg.Cancelled {
-			// Export was cancelled - check if partial file exists
-			a.exportingSession = false
-			a.exportCancelCtx = nil
-			a.exportCancelFunc = nil
-
-			// Check if partial file was created
-			if fileExists(a.exportTargetPath) {
-				// Start cleanup phase
-				a.exportCleaningUp = true
-				return a, tea.Batch(
-					a.exportSpinner.Tick,
-					a.dataModel.CleanupPartialFileCmd(a.exportTargetPath),
-				)
-			} else {
-				// No partial file - just close modal
-				a.sessionExportMode = false
-				a.exportTargetPath = ""
-				return a, nil
-			}
-		}
-
-		if msg.Err != nil {
-			// Export failed - close modal with error
-			a.exportingSession = false
-			a.exportCancelCtx = nil
-			a.exportCancelFunc = nil
-			a.sessionExportMode = false
-			a.exportTargetPath = ""
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Export error: %v", msg.Err)
-			}
-			return a, nil
-		}
-
-		// Success - show success modal
-		a.exportingSession = false
-		a.exportCancelCtx = nil
-		a.exportCancelFunc = nil
-		a.sessionExportSuccess = msg.Path
-		a.exportTargetPath = ""
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Session exported successfully to: %s", msg.Path)
-		}
-		return a, nil
-
-	case sessionImportedMsg:
-		a.sessionImportPicker.Processing = false
-		a.sessionImportPicker.CleaningUp = false
-		a.sessionImportCancelCtx = nil
-		a.sessionImportCancelFunc = nil
-
-		if msg.Cancelled {
-			a.sessionImportPicker.Reset()
-			return a, nil
-		}
-
-		if msg.Err != nil {
-			// Import failed - close modal with error
-			a.sessionImportPicker.Reset()
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Import error: %v", msg.Err)
-			}
-			return a, nil
-		}
-
-		// Success - show success modal and refresh session list
-		successMsg := fmt.Sprintf("Imported: %s\nMessages: %d\nModel: %s",
-			msg.Session.Name, len(msg.Session.Messages), msg.Session.Model)
-		a.sessionImportPicker.Success = &successMsg
-		a.sessionImportSuccess = msg.Session
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Session imported successfully: %s", msg.Session.Name)
-		}
-
-		// Refresh session list in background
-		return a, func() tea.Msg {
-			sessions, err := a.dataModel.SessionStorage.List()
-			return sessionsListMsg{Sessions: sessions, Err: err}
-		}
-
-	case exportCleanupDoneMsg:
-		// Cleanup finished - return to session manager
-		a.exportCleaningUp = false
-		a.sessionExportMode = false
-		a.exportTargetPath = ""
-		return a, nil
-
-	case dataExportedMsg:
-		if msg.Cancelled {
-			// Data export was cancelled - check if partial file exists
-			a.exportingDataDir = false
-			a.dataExportCancelCtx = nil
-			a.dataExportCancelFunc = nil
-
-			if fileExists(a.dataExportTargetPath) {
-				// Start cleanup phase
-				a.dataExportCleaningUp = true
-				return a, tea.Batch(
-					a.dataExportSpinner.Tick,
-					a.dataModel.CleanupPartialDataExportCmd(a.dataExportTargetPath),
-				)
-			} else {
-				// No partial file - just close modal
-				a.dataExportMode = false
-				a.dataExportTargetPath = ""
-				return a, nil
-			}
-		}
-
-		if msg.Err != nil {
-			// Data export failed - close modal with error
-			a.exportingDataDir = false
-			a.dataExportCancelCtx = nil
-			a.dataExportCancelFunc = nil
-			a.dataExportMode = false
-			a.dataExportTargetPath = ""
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Data export error: %v", msg.Err)
-			}
-			return a, nil
-		}
-
-		// Success - show success modal
-		a.exportingDataDir = false
-		a.dataExportCancelCtx = nil
-		a.dataExportCancelFunc = nil
-		a.dataExportSuccess = msg.Path
-		a.dataExportTargetPath = ""
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Data directory exported successfully to: %s", msg.Path)
-		}
-		return a, nil
-
-	case dataExportCleanupDoneMsg:
-		// Data export cleanup finished - return to settings
-		a.dataExportCleaningUp = false
-		a.dataExportMode = false
-		a.dataExportTargetPath = ""
-		return a, nil
+	// Data export messages → appview_update_ui.go
+	case dataExportedMsg, dataExportCleanupDoneMsg:
+		return a.handleUIMessage(msg)
 
 	// Plugin manager messages
 	case installProgressMsg:
@@ -1802,9 +1121,21 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	// Settings modal custom messages
-	case ollamaValidationMsg, dataDirectoryLoadedMsg, settingsSaveMsg:
+	case ollamaValidationMsg, dataDirectoryLoadedMsg, dataDirectoryNotFoundMsg, settingsSaveMsg, providerFieldSavedMsg, providerFieldsSavedMsg:
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("[UI] ========== SETTINGS MESSAGE ROUTING ==========")
+			config.DebugLog.Printf("[UI] Message type: %T", msg)
+			config.DebugLog.Printf("[UI] a.showSettings = %v", a.showSettings)
+			config.DebugLog.Printf("[UI] a.providerSettingsState.visible = %v", a.providerSettingsState.visible)
+		}
 		if a.showSettings {
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("[UI] Routing to handleSettingsInput()")
+			}
 			return a.handleSettingsInput(msg)
+		}
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("[UI] ❌ NOT routing - a.showSettings is false!")
 		}
 		return a, nil
 

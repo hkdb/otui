@@ -25,6 +25,7 @@ type Session struct {
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
 	Model          string    `json:"model"`
+	Provider       string    `json:"provider,omitempty"` // Provider ID: "ollama", "openrouter", "anthropic"
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	Messages       []Message `json:"messages"`
@@ -37,6 +38,7 @@ type SessionMetadata struct {
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
 	Model          string    `json:"model"`
+	Provider       string    `json:"provider,omitempty"` // Provider ID: "ollama", "openrouter", "anthropic"
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 	MessageCount   int       `json:"message_count"`
@@ -105,6 +107,11 @@ func (s *SessionStorage) Load(id string) (*Session, error) {
 		return nil, fmt.Errorf("failed to unmarshal session: %w", err)
 	}
 
+	// MIGRATION: Default to "ollama" for existing sessions without provider
+	if session.Provider == "" {
+		session.Provider = "ollama"
+	}
+
 	return &session, nil
 }
 
@@ -137,6 +144,7 @@ func (s *SessionStorage) List() ([]SessionMetadata, error) {
 			ID:             session.ID,
 			Name:           session.Name,
 			Model:          session.Model,
+			Provider:       session.Provider,
 			CreatedAt:      session.CreatedAt,
 			UpdatedAt:      session.UpdatedAt,
 			MessageCount:   len(session.Messages),

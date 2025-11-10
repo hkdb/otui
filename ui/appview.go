@@ -17,6 +17,7 @@ import (
 	"otui/mcp"
 	appmodel "otui/model"
 	"otui/ollama"
+	"otui/provider"
 	"otui/storage"
 )
 
@@ -90,15 +91,23 @@ type AppView struct {
 	showAbout bool
 
 	// Settings modal
-	showSettings        bool
-	settingsFields      []SettingField
-	selectedSettingIdx  int
-	settingsEditMode    bool
-	settingsEditInput   textinput.Model
-	settingsHasChanges  bool
-	settingsConfirmExit bool
-	settingsLoadedInfo  string
-	settingsSaveError   string
+	showSettings            bool
+	settingsFields          []SettingField
+	selectedSettingIdx      int
+	settingsEditMode        bool
+	settingsEditInput       textinput.Model
+	settingsHasChanges      bool
+	settingsConfirmExit     bool
+	settingsLoadedInfo      string
+	settingsSaveError       string
+	settingsDataDirNotFound bool   // Show confirmation for creating new data directory
+	settingsNewDataDirPath  string // Path of new data directory to create
+
+	// Provider Settings confirmation modal
+	providerSettingsConfirmExit bool
+
+	// Provider settings sub-screen
+	providerSettingsState ProviderSettingsState
 
 	// Data export state
 	dataExportMode       bool
@@ -124,6 +133,13 @@ type AppView struct {
 	acknowledgeModalTitle string
 	acknowledgeModalMsg   string
 	acknowledgeModalType  ModalType
+
+	// SSH passphrase modal for data dir switch (uses shared modal helper)
+	showPassphraseForDataDir bool
+	passphraseForDataDir     textinput.Model
+	passphraseSSHKeyPath     string
+	passphraseError          string
+	passphraseRetryDataDir   string // Data dir to retry after passphrase entered
 
 	// New session modal
 	showNewSessionModal      bool
@@ -160,6 +176,14 @@ type AppView struct {
 
 	// Plugin system operation state (unified for app quit and Settings toggle)
 	pluginSystemState PluginSystemState
+
+	// Pending plugin operation callbacks (for actions after shutdown/startup completes)
+	pendingPluginOperation     string      // "datadir_switch", "plugin_disable", "app_quit"
+	pendingPluginOperationData interface{} // Optional data for callback (e.g., newDataDir string)
+
+	// RestartAfterQuit indicates OTUI should restart after quit completes
+	// Used for creating new data directories from Settings
+	RestartAfterQuit bool
 
 	// Tool execution state (Phase 6)
 	executingTool        string        // Plugin name currently executing (e.g., "mcp-searxng")
@@ -250,7 +274,7 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 		Mode:           FilePickerModeOpen,
 		AllowedTypes:   []string{".json"},
 		StartDirectory: "",
-		ShowHidden:     false,
+		ShowHidden:     true,
 		OperationType:  "Import",
 	})
 
@@ -270,6 +294,9 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 	globalSearchInput.Prompt = "Search all: "
 	globalSearchInput.CharLimit = 100
 
+	// Initialize passphrase input for data dir switch (reuses shared helper)
+	passphraseForDataDir := NewPassphraseInput("Enter passphrase for SSH key")
+
 	// Create plugin state
 	pluginState := &appmodel.PluginState{
 		Registry:  registry,
@@ -280,8 +307,31 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 	// Create search index
 	searchIndex := storage.NewSearchIndex(sessionStorage)
 
-	// Initialize the core data model
-	dataModel := appmodel.NewModel(cfg, sessionStorage, lastSession, pluginState, mcpManager, searchIndex, version, license)
+	// Initialize ALL providers (Ollama + cloud providers) via provider package
+	// Provider package owns provider lifecycle - zero business logic in UI
+	allProviders := provider.InitializeProviders(cfg)
+
+	// Use configured default provider instead of hardcoded Ollama
+	defaultProvider := allProviders[cfg.DefaultProvider]
+	if defaultProvider == nil {
+		// Fallback to Ollama if default provider not found
+		defaultProvider = allProviders["ollama"]
+	}
+
+	// Initialize the core data model with default provider
+	dataModel := appmodel.NewModel(cfg, defaultProvider, sessionStorage, lastSession, pluginState, mcpManager, searchIndex, version, license)
+
+	// Set ALL providers on the model (multi-provider support)
+	dataModel.Providers = allProviders
+
+	// Create initial session if none exists (e.g., after welcome wizard)
+	if lastSession == nil {
+		newSession, _ := dataModel.CreateAndSaveNewSession("New Session", "", []string{})
+		dataModel.CurrentSession = newSession
+		if mcpManager != nil {
+			mcpManager.SetSession(newSession)
+		}
+	}
 
 	return AppView{
 		dataModel:                    dataModel,
@@ -307,6 +357,7 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 		globalSearchInput:            globalSearchInput,
 		highlightedMessageIdx:        -1,
 		pendingScrollToMessageIdx:    -1,
+		passphraseForDataDir:         passphraseForDataDir,
 		showPluginManager:            false,
 		pluginManagerState: PluginManagerState{
 			pluginState: pluginState,
@@ -323,7 +374,7 @@ func (a AppView) Init() tea.Cmd {
 
 	cmds := []tea.Cmd{
 		textarea.Blink,
-		a.dataModel.FetchModelList(),
+		a.dataModel.FetchAllModels(false), // Background fetch on startup, don't show selector
 	}
 
 	// Start all enabled plugins asynchronously
@@ -369,6 +420,11 @@ func (a AppView) View() string {
 		)
 	}
 
+	// Show passphrase modal for data dir switch (uses shared modal helper)
+	if a.showPassphraseForDataDir {
+		return a.renderPassphraseForDataDirModal()
+	}
+
 	// Show info modal if active (highest priority)
 	if a.showInfoModal {
 		return RenderConfirmationModal(ConfirmationState{
@@ -396,12 +452,21 @@ func (a AppView) View() string {
 
 	// Show model selector if toggled
 	if a.showModelSelector {
-		return renderModelSelector(a.modelList, a.selectedModelIdx, a.dataModel.OllamaClient.GetModel(), a.modelFilterMode, a.modelFilterInput, a.filteredModelList, a.width, a.height)
+		multiProvider := len(a.dataModel.Providers) > 1
+		return renderModelSelector(a.modelList, a.selectedModelIdx, a.dataModel.Provider.GetModel(), a.modelFilterMode, a.modelFilterInput, a.filteredModelList, multiProvider, a.width, a.height)
 	}
 
 	// Show settings modal if toggled
 	if a.showSettings {
-		return renderSettings(a.settingsFields, a.selectedSettingIdx, a.settingsEditMode, a.settingsEditInput, a.settingsHasChanges, a.settingsConfirmExit, a.settingsLoadedInfo, a.settingsSaveError, a.dataExportMode, a.dataExportInput, a.exportingDataDir, a.dataExportCleaningUp, a.dataExportSpinner, a.dataExportSuccess, a.width, a.height)
+		// Check if provider settings sub-screen is visible
+		if a.providerSettingsState.visible {
+			// Check for confirmation modal first
+			if a.providerSettingsConfirmExit {
+				return RenderUnsavedChangesModal(a.width, a.height)
+			}
+			return a.renderProviderSettings(a.width, a.height)
+		}
+		return renderSettings(a.settingsFields, a.selectedSettingIdx, a.settingsEditMode, a.settingsEditInput, a.settingsHasChanges, a.settingsConfirmExit, a.settingsLoadedInfo, a.settingsSaveError, a.dataExportMode, a.dataExportInput, a.exportingDataDir, a.dataExportCleaningUp, a.dataExportSpinner, a.dataExportSuccess, a.settingsDataDirNotFound, a.settingsNewDataDirPath, a.width, a.height)
 	}
 
 	// Show new session modal (must be before session manager)
@@ -535,7 +600,7 @@ func (a AppView) View() string {
 
 	// Title bar - "OTUI - Model - Session Name | 🔌 plugins"
 	otuiText := AssistantStyle.Render("OTUI")
-	modelText := TitleStyle.Render(fmt.Sprintf(" - %s", a.dataModel.OllamaClient.GetModel()))
+	modelText := TitleStyle.Render(fmt.Sprintf(" - %s", a.dataModel.Provider.GetDisplayName()))
 	sessionName := "New Session"
 	if a.dataModel.CurrentSession != nil && a.dataModel.CurrentSession.Name != "" {
 		sessionName = a.dataModel.CurrentSession.Name
@@ -686,4 +751,15 @@ func (a *AppView) closeAllModals() {
 	if a.dataExportInput.Focused() {
 		a.dataExportInput.Blur()
 	}
+}
+
+func (a AppView) renderPassphraseForDataDirModal() string {
+	return RenderPassphraseModal(
+		"SSH Key Passphrase Required",
+		a.passphraseSSHKeyPath,
+		a.passphraseForDataDir,
+		a.passphraseError,
+		a.width,
+		a.height,
+	)
 }

@@ -9,3 +9,11 @@ type Message struct {
 	Rendered  string // Cached rendered markdown (optimize if storage becomes a concern)
 	Timestamp time.Time
 }
+
+// ToolCall represents a provider-agnostic tool call request.
+// This allows us to abstract away provider-specific tool call formats
+// (Ollama's api.ToolCall, OpenAI's function calls, etc.).
+type ToolCall struct {
+	Name      string
+	Arguments map[string]any
+}

@@ -1,6 +1,8 @@
 package model
 
 import (
+	"time"
+
 	"otui/config"
 	"otui/mcp"
 	"otui/ollama"
@@ -11,7 +13,8 @@ import (
 type Model struct {
 	// Core dependencies
 	Config         *config.Config
-	OllamaClient   *ollama.Client
+	Provider       Provider            // Current session's provider
+	Providers      map[string]Provider // All enabled providers (map[provider_id]Provider)
 	SessionStorage *storage.SessionStorage
 	MCPManager     *mcp.MCPManager
 
@@ -20,6 +23,10 @@ type Model struct {
 	CurrentSession *storage.Session
 	SearchIndex    *storage.SearchIndex
 	Plugins        *PluginState
+
+	// Model caching (for cloud providers)
+	ModelCache  map[string][]ollama.ModelInfo // Cached models per provider
+	CacheExpiry map[string]time.Time          // Cache expiry per provider
 
 	// Runtime state (not UI)
 	Streaming          bool
@@ -33,20 +40,10 @@ type Model struct {
 }
 
 // NewModel creates a new Model with the given configuration
-func NewModel(cfg *config.Config, sessionStorage *storage.SessionStorage, lastSession *storage.Session, plugins *PluginState, mcpManager *mcp.MCPManager, searchIndex *storage.SearchIndex, version, license string) *Model {
-	// Initialize Ollama client (allow nil for offline mode - Phase 4)
-	client, err := ollama.NewClient(cfg.OllamaURL(), cfg.Model())
-	if err != nil {
-		// Don't panic - allow offline mode
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[Model] Ollama client creation failed: %v (running in offline mode)", err)
-		}
-		client = nil
-	}
-
+func NewModel(cfg *config.Config, providerClient Provider, sessionStorage *storage.SessionStorage, lastSession *storage.Session, plugins *PluginState, mcpManager *mcp.MCPManager, searchIndex *storage.SearchIndex, version, license string) *Model {
 	// Set model from last session if available
-	if client != nil && lastSession != nil && lastSession.Model != "" {
-		client.SetModel(lastSession.Model)
+	if providerClient != nil && lastSession != nil && lastSession.Model != "" {
+		providerClient.SetModel(lastSession.Model)
 	}
 
 	// Load messages from last session if available
@@ -66,13 +63,16 @@ func NewModel(cfg *config.Config, sessionStorage *storage.SessionStorage, lastSe
 
 	m := &Model{
 		Config:             cfg,
-		OllamaClient:       client,
+		Provider:           providerClient,
+		Providers:          make(map[string]Provider),
 		SessionStorage:     sessionStorage,
 		MCPManager:         mcpManager,
 		Messages:           messages,
 		CurrentSession:     lastSession,
 		SearchIndex:        searchIndex,
 		Plugins:            plugins,
+		ModelCache:         make(map[string][]ollama.ModelInfo),
+		CacheExpiry:        make(map[string]time.Time),
 		Streaming:          false,
 		SessionDirty:       false,
 		NeedsInitialRender: needsRender,

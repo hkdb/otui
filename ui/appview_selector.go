@@ -9,7 +9,7 @@ import (
 	"otui/ollama"
 )
 
-func renderModelSelector(models []ollama.ModelInfo, selectedIdx int, currentModel string, filterMode bool, filterInput textinput.Model, filteredModels []ollama.ModelInfo, width, height int) string {
+func renderModelSelector(models []ollama.ModelInfo, selectedIdx int, currentModel string, filterMode bool, filterInput textinput.Model, filteredModels []ollama.ModelInfo, multiProvider bool, width, height int) string {
 	// Modal dimensions
 	modalWidth := width - 10
 	if modalWidth > 80 {
@@ -23,7 +23,7 @@ func renderModelSelector(models []ollama.ModelInfo, selectedIdx int, currentMode
 		Bold(true).
 		Align(lipgloss.Center).
 		Width(modalWidth).
-		Render("Select Ollama Model")
+		Render("Select Model")
 
 	// Header: show filter input or count
 	var header string
@@ -132,20 +132,27 @@ func renderModelSelector(models []ollama.ModelInfo, selectedIdx int, currentMode
 				nameWithTag += ":" + tag
 			}
 
+			// Add provider suffix if multiple providers enabled
+			providerSuffix := ""
+			if multiProvider && model.Provider != "" {
+				providerSuffix = fmt.Sprintf(" (%s)", model.Provider)
+			}
+
 			maxNameWidth := modalWidth - 20 // Reserve space for size
-			if len(nameWithTag) > maxNameWidth {
-				nameWithTag = nameWithTag[:maxNameWidth-3] + "..."
+			if len(nameWithTag)+len(providerSuffix) > maxNameWidth {
+				nameWithTag = nameWithTag[:maxNameWidth-len(providerSuffix)-3] + "..."
 			}
 
 			// Calculate spacing based on actual tool indicator width (0 if not present, 8 if present)
-			spacing := modalWidth - len(indicator) - len(nameWithTag) - toolIndicatorWidth - len(currentMarker) - len(size) - 4
+			spacing := modalWidth - len(indicator) - len(nameWithTag) - len(providerSuffix) - toolIndicatorWidth - len(currentMarker) - len(size) - 4
 			if spacing < 1 {
 				spacing = 1
 			}
 
-			line := fmt.Sprintf("%s%s%s%s%s%s",
+			line := fmt.Sprintf("%s%s%s%s%s%s%s",
 				indicator,
 				nameWithTag,
+				providerSuffix,
 				toolIndicator,
 				currentMarker,
 				strings.Repeat(" ", spacing),
@@ -211,6 +218,11 @@ func renderModelSelector(models []ollama.ModelInfo, selectedIdx int, currentMode
 
 // formatSize converts bytes to human-readable format
 func formatSize(bytes int64) string {
+	// Return empty string for unknown sizes (OpenRouter, etc.)
+	if bytes == 0 {
+		return ""
+	}
+
 	const unit = 1024
 	if bytes < unit {
 		return fmt.Sprintf("%d B", bytes)

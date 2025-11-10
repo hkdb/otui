@@ -28,7 +28,6 @@ type exportCleanupDoneMsg = model.ExportCleanupDoneMsg
 type dataExportedMsg = model.DataExportedMsg
 type dataExportCleanupDoneMsg = model.DataExportCleanupDoneMsg
 type flashTickMsg = model.FlashTickMsg
-type shutdownProgressMsg = model.ShutdownProgressMsg
 type pluginOperationCompleteMsg = model.PluginOperationCompleteMsg
 type pluginStartupCompleteMsg = model.PluginStartupCompleteMsg
 type registryRefreshCompleteMsg = model.RegistryRefreshCompleteMsg
@@ -39,7 +38,7 @@ type SettingFieldType int
 
 const (
 	SettingTypeDataDir SettingFieldType = iota
-	SettingTypeOllamaHost
+	SettingTypeProviderLink
 	SettingTypeModel
 	SettingTypeSystemPrompt
 	SettingTypePluginsEnabled
