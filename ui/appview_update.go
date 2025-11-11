@@ -364,9 +364,10 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Check if plugin system is enabled
 			if !a.dataModel.Config.PluginsEnabled {
 				a.closeAllModals()
-				a.showInfoModal = true
-				a.infoModalTitle = "⚠️  Plugin System Disabled"
-				a.infoModalMsg = "The plugin system is currently disabled.\n\nEnable it in Settings (Alt+Shift+S) to use plugins."
+				a.showAcknowledgeModal = true
+				a.acknowledgeModalTitle = "⚠️  Plugin System Disabled"
+				a.acknowledgeModalMsg = "The plugin system is currently disabled.\n\nEnable it in Settings (Alt+Shift+S) to use plugins."
+				a.acknowledgeModalType = ModalTypeWarning
 				return a, nil
 			}
 

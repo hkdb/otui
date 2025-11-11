@@ -191,14 +191,36 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		//
 		// ============================================================================
 
-		// Preserve current state for rollback
+		// Preserve current state for rollback (capture BEFORE config reload)
 		oldDataDir := a.dataModel.Config.DataDir()
 		oldHost := a.dataModel.Config.OllamaURL()
 		oldPluginsEnabled := a.dataModel.Config.PluginsEnabled
 		currentModel := a.dataModel.Provider.GetModel()
 
+		// Reload config immediately after successful save to pick up fresh values
+		// This was removed during data dir refactor but is needed for ALL settings saves
+		// (not just data dir changes). Fixes regression from commit 094e265.
+		cfg, err := config.Load()
+		if err != nil {
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("[Settings Save] ERROR reloading config: %v", err)
+			}
+			a.showAcknowledgeModal = true
+			a.acknowledgeModalTitle = "⚠️  Settings Save Error"
+			a.acknowledgeModalMsg = fmt.Sprintf("Settings were saved to disk but failed to reload:\n\n%v\n\nPlease restart OTUI to ensure changes take effect.", err)
+			a.acknowledgeModalType = ModalTypeError
+			return a, nil
+		}
+
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("[Settings Save] Config reloaded successfully: PluginsEnabled=%v, DefaultSystemPrompt=%q",
+				cfg.PluginsEnabled, cfg.DefaultSystemPrompt)
+		}
+
+		a.dataModel.Config = cfg
+
 		// Get the new data dir from system config (to check if it changed)
-		// Config will be loaded in ApplyDataDirSwitch() after switching
+		// Note: For data dir changes, config will be loaded AGAIN in ApplyDataDirSwitch()
 		// (may prompt for passphrase if new data dir is SSH-encrypted)
 		systemCfg, err := config.LoadSystemConfig()
 		if err != nil {

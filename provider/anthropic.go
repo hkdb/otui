@@ -71,6 +71,16 @@ func (p *AnthropicProvider) ChatWithTools(ctx context.Context, messages []model.
 	// Convert OTUI messages to Anthropic format
 	anthropicMessages, systemPrompt := convertToAnthropicMessages(messages)
 
+	// Prepend tool instructions to system blocks if tools present
+	finalSystemPrompt := systemPrompt
+	if len(tools) > 0 {
+		toolInstructionBlock := anthropic.TextBlockParam{
+			Text: buildAnthropicToolInstructions(tools),
+		}
+		// Tool instructions go FIRST (Layer 1), then user prompts (Layer 2)
+		finalSystemPrompt = append([]anthropic.TextBlockParam{toolInstructionBlock}, systemPrompt...)
+	}
+
 	// Build request parameters
 	params := anthropic.MessageNewParams{
 		Model:     p.model,
@@ -79,8 +89,8 @@ func (p *AnthropicProvider) ChatWithTools(ctx context.Context, messages []model.
 	}
 
 	// Add system prompt if present
-	if len(systemPrompt) > 0 {
-		params.System = systemPrompt
+	if len(finalSystemPrompt) > 0 {
+		params.System = finalSystemPrompt
 	}
 
 	// Add tools if provided

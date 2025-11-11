@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	Version = "v0.02.00"
+	Version = "v0.03.00"
 	License = "Apache-2.0"
 )
 
@@ -251,13 +251,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Ensure cleanup on exit
-	defer func() {
-		if err := sessionStorage.UnlockOTUIInstance(); err != nil && config.DebugLog != nil {
-			config.DebugLog.Printf("Warning: failed to unlock OTUI instance: %v", err)
-		}
-	}()
-
 	// Load last session with lock check
 	var lastSession *storage.Session
 	if lastSessionID, err := sessionStorage.LoadCurrentSessionID(); err == nil {
@@ -270,8 +263,19 @@ func main() {
 		// If locked: lastSession remains nil → NewModel will create new session
 	}
 
+	// Create AppView before defer so we can unlock the CURRENT data directory on exit
+	// (which may differ from initial data directory if user switched during session)
+	appView := ui.NewAppView(cfg, sessionStorage, lastSession, Version, License)
+
+	// Ensure cleanup on exit - uses appView method to unlock CURRENT data directory
+	defer func() {
+		if err := appView.UnlockCurrentDataDir(); err != nil && config.DebugLog != nil {
+			config.DebugLog.Printf("Warning: failed to unlock OTUI instance: %v", err)
+		}
+	}()
+
 	p := tea.NewProgram(
-		ui.NewAppView(cfg, sessionStorage, lastSession, Version, License),
+		appView,
 		tea.WithAltScreen(),
 	)
 

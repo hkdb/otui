@@ -61,8 +61,18 @@ func (p *OpenAIProvider) Chat(ctx context.Context, messages []model.Message, cal
 
 // ChatWithTools implements Provider.ChatWithTools with streaming support.
 func (p *OpenAIProvider) ChatWithTools(ctx context.Context, messages []model.Message, tools []mcptypes.Tool, callback model.StreamCallback) error {
+	// Prepend tool instructions if tools present
+	messagesWithInstructions := messages
+	if len(tools) > 0 {
+		toolInstruction := model.Message{
+			Role:    "system",
+			Content: buildOpenAIToolInstructions(tools),
+		}
+		messagesWithInstructions = append([]model.Message{toolInstruction}, messages...)
+	}
+
 	// Convert OTUI messages to OpenAI format
-	openaiMessages := ConvertToOpenAIMessages(messages)
+	openaiMessages := ConvertToOpenAIMessages(messagesWithInstructions)
 
 	// Build request parameters
 	params := openai.ChatCompletionNewParams{

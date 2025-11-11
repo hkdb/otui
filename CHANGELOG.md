@@ -1,12 +1,20 @@
 # Changelog
 
-## [v0.01.00] - 2025-11-06
 
-First ALPHA release of OTUI
+## [v0.03.00] - 2025-11-11
 
-- Core functionality (Ollama Only)
+**Feature(s):**
 
-[v0.01.00]: https://github.com/hkdb/otui/releases/tag/v0.01.00
+- Added docker image and instructions in README.
+
+**Maintenance & Bug Fixes:**
+
+- Sizable improvements to MCP use stability
+- Fixes save settings regression
+- Fixes stale lock files after switching data (profile) dir
+- Fixes minor UI bugs
+
+[v0.03.00]: https://github.com/hkdb/otui/releases/tag/v0.03.00
 
 ---
 
@@ -29,3 +37,14 @@ First ALPHA release of OTUI
 [v0.02.00]: https://github.com/hkdb/otui/releases/tag/v0.02.00
 
 ---
+
+## [v0.01.00] - 2025-11-06
+
+First ALPHA release of OTUI
+
+- Core functionality (Ollama Only)
+
+[v0.01.00]: https://github.com/hkdb/otui/releases/tag/v0.01.00
+
+---
+

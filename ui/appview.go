@@ -763,3 +763,16 @@ func (a AppView) renderPassphraseForDataDirModal() string {
 		a.height,
 	)
 }
+
+// UnlockCurrentDataDir unlocks the OTUI instance in the current data directory.
+// This is called on application exit to ensure the instance lock is released.
+// Safe to call multiple times or with nil storage (returns nil).
+//
+// Used by main.go defer to unlock the CURRENT data directory, which may differ
+// from the initial data directory if the user switched directories during the session.
+func (a *AppView) UnlockCurrentDataDir() error {
+	if a.dataModel == nil || a.dataModel.SessionStorage == nil {
+		return nil
+	}
+	return a.dataModel.SessionStorage.UnlockOTUIInstance()
+}

@@ -58,6 +58,15 @@ That's it! Now you just launch OTUI in the terminal by just typing:
 otui
 ```
 
+## 🐳 Containerized for Sandboxing or running Multiple Instances on the same host
+
+If you want to sandbox otui so that it can't touch your host filesystem or you want to run multiple instances of otui, you can run it with any OCI container. For the convenience of the majority, you probably already have docker and you can run it by aliasing this command:
+
+```
+docker run -ti --rm -v </path/to/config/dir/on/host>:/home/otui/.config/otui -v </path/to/profile/dir/on/host:/home/otui/.local/share/otui -v </path/to/encryption/dir/on/host:/home/otui/.ssh ghcr.io/hkdb/otui:v0.03.00
+```
+You will notice that there are 3 volumes mounted so that your data persists. Config, Data (Profile), and SSH (to encrypt your API keys at rest). See the configuration section further down for more details.
+
 ## 🏗️ Basic Concepts
 
 OTUI was designed to be hopefully intuitive enough to any user that is already familiar with keyboard driven environments. At the footer of each screen, there will always be reminders of what the keybindings are. The hope is that, aside from reading this README section, you wouldn't HAVE TO read or touch a user guide at all and still be able to pick it up in no time. If the footer reminders are not enough, there's always a cheat sheet `help` screen.
@@ -99,6 +108,7 @@ Default Configuration Locations:
 
 - Configuration directory: `~/.config/otui/`
 - Default data directory: `~/.local/share/otui`
+- Keys to encrypt your API keys at rest: `~/.ssh`
 
 Pretty much everything is put inside the data directory. The only thing `~/.config/otui/settings.toml` does is it lets OTUI know where the data dir is. You can think of the data dir like an independent user profile with all your configs and sessions stored in it. If you wanted multiple profiles, all you have to do is go to settings and switch your data directory. OTUI will then automatically load your new profile with all the configs and sessions of that profile without having to restart the app.
 

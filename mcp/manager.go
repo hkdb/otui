@@ -34,7 +34,7 @@ func NewMCPManager(cfg *config.Config, pluginStorage *storage.PluginStorage, plu
 		pluginStorage: pluginStorage,
 		pluginsConfig: pluginsConfig,
 		registry:      registry,
-		client:        NewClient(),
+		client:        NewClient(registry),
 		activePlugins: make(map[string]bool),
 		failedPlugins: make(map[string]error),
 		dataDir:       dataDir,
@@ -184,31 +184,40 @@ func (m *MCPManager) GetTools(ctx context.Context) ([]mcptypes.Tool, error) {
 		return nil, nil
 	}
 
-	enabledPlugins := m.getEnabledPluginsLocked()
-	if len(enabledPlugins) == 0 {
+	pluginMap := m.getEnabledPluginsWithNamesLocked()
+	if len(pluginMap) == 0 {
 		return nil, nil
 	}
 
-	return m.client.GetTools(ctx, enabledPlugins)
+	return m.client.GetTools(ctx, pluginMap)
 }
 
-func (m *MCPManager) getEnabledPluginsLocked() []string {
+func (m *MCPManager) getEnabledPluginsWithNamesLocked() map[string]string {
 	if m.currentSession == nil {
 		return nil
 	}
 
-	var enabled []string
+	pluginMap := make(map[string]string)
 	for _, pluginID := range m.currentSession.EnabledPlugins {
 		if !m.pluginStorage.IsInstalled(pluginID) {
 			continue
 		}
 
-		if m.activePlugins[pluginID] {
-			enabled = append(enabled, pluginID)
+		if !m.activePlugins[pluginID] {
+			continue
 		}
+
+		// Lookup plugin in registry to get short name
+		shortName := pluginID // Default fallback
+		plugin := m.registry.GetByID(pluginID)
+		if plugin != nil {
+			shortName = GetShortPluginName(plugin.Name)
+		}
+
+		pluginMap[pluginID] = shortName
 	}
 
-	return enabled
+	return pluginMap
 }
 
 func (m *MCPManager) CallTool(ctx context.Context, toolName string, args map[string]any) (*mcptypes.CallToolResult, error) {

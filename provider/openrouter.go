@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"otui/config"
 	"otui/mcp"
 	"otui/model"
 	"otui/ollama"
@@ -55,6 +56,46 @@ func NewOpenRouterProvider(baseURL, apiKey, model string) (*OpenRouterProvider, 
 	}, nil
 }
 
+// shouldSkipToolInstructions checks if a model BREAKS with explicit tool instructions.
+// Most models work well with instructions, but some models (like qwen) understand
+// tools natively and get confused by explicit prompting, causing XML leakage.
+func shouldSkipToolInstructions(modelName string) bool {
+	modelLower := strings.ToLower(modelName)
+
+	// Blacklist: Models that BREAK with explicit instructions
+	skipInstructions := []string{
+		"qwen", // Leaks XML with instructions, works natively without them
+	}
+
+	for _, prefix := range skipInstructions {
+		if strings.Contains(modelLower, prefix) {
+			return true
+		}
+	}
+
+	// Default: send instructions (most models benefit from them)
+	return false
+}
+
+// convertToolNamesForOpenRouter converts tool names from dotted notation to underscore notation.
+// OpenRouter API requires tool names matching ^[a-zA-Z0-9_-]{1,64}$ (no dots allowed).
+// Example: "server-filesystem.read_file" → "server-filesystem__read_file"
+func convertToolNamesForOpenRouter(tools []mcptypes.Tool) []mcptypes.Tool {
+	converted := make([]mcptypes.Tool, len(tools))
+	for i, tool := range tools {
+		converted[i] = tool
+		converted[i].Name = strings.ReplaceAll(tool.Name, ".", "__")
+	}
+	return converted
+}
+
+// convertToolNameFromOpenRouter converts a tool name from underscore notation back to dotted notation.
+// This reverses the conversion applied by convertToolNamesForOpenRouter.
+// Example: "server-filesystem__read_file" → "server-filesystem.read_file"
+func convertToolNameFromOpenRouter(toolName string) string {
+	return strings.ReplaceAll(toolName, "__", ".")
+}
+
 // Chat implements Provider.Chat by delegating to ChatWithTools with no tools.
 func (p *OpenRouterProvider) Chat(ctx context.Context, messages []model.Message, callback model.StreamCallback) error {
 	return p.ChatWithTools(ctx, messages, nil, callback)
@@ -62,8 +103,27 @@ func (p *OpenRouterProvider) Chat(ctx context.Context, messages []model.Message,
 
 // ChatWithTools implements Provider.ChatWithTools with streaming support.
 func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model.Message, tools []mcptypes.Tool, callback model.StreamCallback) error {
+	// Prepend tool instructions if tools present (unless model is blacklisted)
+	messagesWithInstructions := messages
+	if len(tools) > 0 && !shouldSkipToolInstructions(p.model) {
+		toolInstruction := model.Message{
+			Role:    "system",
+			Content: buildOpenRouterToolInstructions(tools),
+		}
+		messagesWithInstructions = append([]model.Message{toolInstruction}, messages...)
+	}
+
+	// Debug logging for tool instruction decisions (no else statements)
+	if config.DebugLog != nil && len(tools) > 0 && shouldSkipToolInstructions(p.model) {
+		config.DebugLog.Printf("[OpenRouter] Model '%s': Skipping tool instructions (blacklisted - uses native understanding)", p.model)
+	}
+
+	if config.DebugLog != nil && len(tools) > 0 && !shouldSkipToolInstructions(p.model) {
+		config.DebugLog.Printf("[OpenRouter] Model '%s': Adding tool instructions", p.model)
+	}
+
 	// Convert OTUI messages to OpenAI format
-	openaiMessages := ConvertToOpenAIMessages(messages)
+	openaiMessages := ConvertToOpenAIMessages(messagesWithInstructions)
 
 	// Build request parameters
 	params := openai.ChatCompletionNewParams{
@@ -71,9 +131,10 @@ func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model
 		Model:    openai.ChatModel(p.model),
 	}
 
-	// Add tools if provided
+	// Add tools if provided (convert dots to underscores for OpenRouter API)
 	if len(tools) > 0 {
-		openaiTools := mcp.ConvertMCPToolsToOpenAIFormat(tools)
+		convertedTools := convertToolNamesForOpenRouter(tools)
+		openaiTools := mcp.ConvertMCPToolsToOpenAIFormat(convertedTools)
 		params.Tools = openaiTools
 	}
 
@@ -89,10 +150,10 @@ func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model
 		// Handle finished tool calls
 		if tool, ok := acc.JustFinishedToolCall(); ok {
 			if callback != nil {
-				// Convert to provider tool call
+				// Convert to provider tool call (convert underscores back to dots)
 				args := ParseToolArguments(tool.Arguments)
 				toolCall := model.ToolCall{
-					Name:      tool.Name,
+					Name:      convertToolNameFromOpenRouter(tool.Name),
 					Arguments: args,
 				}
 				callback("", []model.ToolCall{toolCall})

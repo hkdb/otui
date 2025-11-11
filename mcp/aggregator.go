@@ -9,18 +9,20 @@ import (
 
 type ToolAggregator struct {
 	processManager *ProcessManager
+	registry       *Registry
 }
 
-func NewToolAggregator(pm *ProcessManager) *ToolAggregator {
+func NewToolAggregator(pm *ProcessManager, reg *Registry) *ToolAggregator {
 	return &ToolAggregator{
 		processManager: pm,
+		registry:       reg,
 	}
 }
 
-func (ta *ToolAggregator) GetToolsForPlugins(ctx context.Context, pluginIDs []string) ([]mcptypes.Tool, error) {
+func (ta *ToolAggregator) GetToolsForPlugins(ctx context.Context, pluginMap map[string]string) ([]mcptypes.Tool, error) {
 	var allTools []mcptypes.Tool
 
-	for _, pluginID := range pluginIDs {
+	for pluginID, shortName := range pluginMap {
 		tools, err := ta.processManager.GetTools(pluginID)
 		if err != nil {
 			continue
@@ -28,7 +30,7 @@ func (ta *ToolAggregator) GetToolsForPlugins(ctx context.Context, pluginIDs []st
 
 		for _, tool := range tools {
 			namespacedTool := tool
-			namespacedTool.Name = pluginID + "." + tool.Name
+			namespacedTool.Name = shortName + "." + tool.Name
 			allTools = append(allTools, namespacedTool)
 		}
 	}
@@ -37,9 +39,12 @@ func (ta *ToolAggregator) GetToolsForPlugins(ctx context.Context, pluginIDs []st
 }
 
 func (ta *ToolAggregator) ExecuteTool(ctx context.Context, toolName string, args map[string]any) (*mcptypes.CallToolResult, error) {
-	pluginID, actualToolName := parseToolName(toolName)
+	shortName, actualToolName := parseToolName(toolName)
 
-	client, err := ta.processManager.GetClient(pluginID)
+	// Convert short name back to full plugin ID
+	fullPluginID := ta.findFullPluginID(shortName)
+
+	client, err := ta.processManager.GetClient(fullPluginID)
 	if err != nil {
 		return nil, err
 	}
@@ -50,6 +55,23 @@ func (ta *ToolAggregator) ExecuteTool(ctx context.Context, toolName string, args
 			Arguments: args,
 		},
 	})
+}
+
+// findFullPluginID converts a short plugin name back to its full plugin ID
+// by checking all running plugins and looking up their registry names.
+func (ta *ToolAggregator) findFullPluginID(shortName string) string {
+	ta.processManager.mu.RLock()
+	defer ta.processManager.mu.RUnlock()
+
+	for pluginID := range ta.processManager.processes {
+		plugin := ta.registry.GetByID(pluginID)
+		if plugin != nil && GetShortPluginName(plugin.Name) == shortName {
+			return pluginID
+		}
+	}
+
+	// Fallback: return the short name as-is (might be a full ID already)
+	return shortName
 }
 
 func parseToolName(namespacedName string) (string, string) {

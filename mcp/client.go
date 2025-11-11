@@ -11,11 +11,11 @@ type Client struct {
 	aggregator     *ToolAggregator
 }
 
-func NewClient() *Client {
+func NewClient(registry *Registry) *Client {
 	pm := NewProcessManager()
 	return &Client{
 		processManager: pm,
-		aggregator:     NewToolAggregator(pm),
+		aggregator:     NewToolAggregator(pm, registry),
 	}
 }
 
@@ -27,8 +27,8 @@ func (c *Client) Stop(ctx context.Context, pluginID string) error {
 	return c.processManager.StopPlugin(ctx, pluginID)
 }
 
-func (c *Client) GetTools(ctx context.Context, enabledPlugins []string) ([]mcptypes.Tool, error) {
-	return c.aggregator.GetToolsForPlugins(ctx, enabledPlugins)
+func (c *Client) GetTools(ctx context.Context, pluginMap map[string]string) ([]mcptypes.Tool, error) {
+	return c.aggregator.GetToolsForPlugins(ctx, pluginMap)
 }
 
 func (c *Client) CallTool(ctx context.Context, toolName string, args map[string]any) (*mcptypes.CallToolResult, error) {
