@@ -72,8 +72,8 @@
         .scroll-indicator {
             position: absolute;
             bottom: 100px;
-            left: 0;
-            right: -8px;
+            left: -2px;
+            right: -6px;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -96,6 +96,8 @@
             border-bottom: 2px solid #8b949e;
             transform: rotate(-45deg);
             animation: bounce 2s infinite;
+            position: relative;
+            left: -1px;
         }
 
         @keyframes bounce {
@@ -202,6 +204,44 @@
         .copy-button.copied {
             background: #3d444d;
             color: #58a6ff;
+        }
+
+        .alternative-installs {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin-top: 15px;
+        }
+
+        .alt-install-link {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            text-decoration: none;
+            color: #8b949e;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        .alt-install-link:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.2);
+            color: #c9d1d9;
+        }
+
+        .alt-install-icon {
+            font-size: 16px;
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+        }
+
+        .alt-install-text {
+            font-weight: 500;
         }
 
         .features-section {
@@ -325,20 +365,46 @@
                 font-size: 10px;
                 padding: 6px 12px;
             }
+
+            .alternative-installs {
+                flex-direction: column;
+                gap: 10px;
+                align-items: center;
+            }
+
+            .alt-install-link {
+                width: 200px;
+                justify-content: center;
+            }
+        }
+
+        @media (max-height: 920px) {
+            .github-hero-link {
+                margin-top: 25px;
+            }
         }
 
         @media (max-height: 820px) {
             .screenshot {
                 display: none;
             }
+            .github-hero-link {
+                margin-top: 15px;
+            }
         }
 
-        @media (max-height: 500px) {
+        @media (max-height: 600px) {
             .ascii-logo {
                 display: none;
             }
             .tagline {
                 margin-top: -150px;
+            }
+            .github-hero-link {
+                margin-top: 8px;
+            }
+            .alternative-installs {
+                margin-top: 8px;
             }
         }
 
@@ -347,13 +413,17 @@
                 margin-bottom: 2px;
             }
             .github-hero-link {
-                margin-top: 10px;
+                margin-top: 5px;
             }
             .version {
                 margin-top: -8px;
             }
             .scroll-indicator {
-                bottom: 40px;
+                bottom: 30px;
+            }
+            .alternative-installs {
+                gap: 5px;
+                margin-top: 5px;
             }
         }
 
@@ -419,10 +489,28 @@
             </div>
 
             <div class="install-section">
-                <p class="install-instruction">To install, copy and paste this command into your terminal:</p>
+                <p class="install-instruction">To install on Linux, Mac, or FreeBSD, copy and paste this command into your terminal:</p>
                 <div class="code-block">
                     <button class="copy-button" onclick="copyToClipboard()">Copy</button>
                     <code id="install-command">curl -sL https://hkdb.github.io/otui/get.sh | bash</code>
+                </div>
+                <div class="alternative-installs">
+                    <a href="https://github.com/hkdb/otui/releases/latest/download/otui-windows-amd64.exe" class="alt-install-link" target="_blank">
+                        <svg class="alt-install-icon" viewBox="0 0 88 88" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" d="M0 12.402l35.687-4.86.016 34.423-35.67.203zm35.67 33.529l.028 34.453L.028 75.48.026 45.7zm4.326-39.025L87.314 0v41.527l-47.318.376zm47.329 39.349l-.011 41.34-47.318-6.678-.066-34.739z"/>
+                        </svg>
+                        <span class="alt-install-text">Windows (x64)</span>
+                    </a>
+                    <a href="https://github.com/hkdb/otui/releases/latest/download/otui-windows-arm64.exe" class="alt-install-link" target="_blank">
+                        <svg class="alt-install-icon" viewBox="0 0 88 88" xmlns="http://www.w3.org/2000/svg">
+                            <path fill="currentColor" d="M0 12.402l35.687-4.86.016 34.423-35.67.203zm35.67 33.529l.028 34.453L.028 75.48.026 45.7zm4.326-39.025L87.314 0v41.527l-47.318.376zm47.329 39.349l-.011 41.34-47.318-6.678-.066-34.739z"/>
+                        </svg>
+                        <span class="alt-install-text">Windows (ARM)</span>
+                    </a>
+                    <a href="https://github.com/hkdb/otui/blob/main/docs/CONTAINERIZE.md" class="alt-install-link" target="_blank">
+                        <span class="alt-install-icon">🐳</span>
+                        <span class="alt-install-text">Dockerize</span>
+                    </a>
                 </div>
             </div>
 

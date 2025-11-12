@@ -49,7 +49,7 @@ Currently, only Ollama and OpenRouter are being tested more extensively.
 
 ## 📦 Installation
 
-Paste the following into your terminal:
+For Linux, Mac, or FreeBSD, paste the following into your terminal:
 
 ```
 curl -sL https://hkdb.github.io/otui/get.sh | bash
@@ -60,14 +60,24 @@ That's it! Now you just launch OTUI in the terminal by just typing:
 otui
 ```
 
+For Windows, download the binary for the latest release:
+- [Windows (x64)]( https://github.com/hkdb/otui/releases/download/v0.03.01/otui-windows-amd64.exe)
+- [Windows (arm)]( https://github.com/hkdb/otui/releases/download/v0.03.01/otui-windows-arm64.exe)
+
 ## 🐳 Containerized for Sandboxing or running Multiple Instances on the same host
 
 If you want to sandbox otui so that it can't touch your host filesystem or you want to run multiple instances of otui, you can run it with any OCI container. For the convenience of the majority, you probably already have docker and you can run it by aliasing this command:
 
-```
-docker run -ti --rm -v </path/to/config/dir/on/host>:/home/otui/.config/otui -v </path/to/profile/dir/on/host:/home/otui/.local/share/otui -v </path/to/encryption/dir/on/host:/home/otui/.ssh ghcr.io/hkdb/otui:v0.03.00
+```bash
+docker run -ti --rm \
+                -v </path/to/config/dir/on/host>:/home/otui/.config/otui \
+                -v </path/to/profile/dir/on/host>:/home/otui/.local/share/otui \
+                -v </path/to/encryption/dir/on/host>:/home/otui/.ssh \
+                ghcr.io/hkdb/otui:v0.03.01
 ```
 You will notice that there are 3 volumes mounted so that your data persists. Config, Data (Profile), and SSH (to encrypt your API keys at rest). See the configuration section further down for more details.
+
+Form more information, see the slightly more comprehensive [guide on running OTUI in containers](docs/CONTAINERIZE.md).
 
 ## 🏗️ Basic Concepts
 
