@@ -112,16 +112,16 @@ func renderModelSelector(models []ollama.ModelInfo, selectedIdx int, currentMode
 			// Format size
 			size := formatSize(model.Size)
 
-			// Check if current model
+			// Check if current model (uses helper for cross-provider compatibility)
 			currentMarker := ""
-			if model.Name == currentModel {
+			if IsCurrentModel(model, currentModel) {
 				currentMarker = " (current)"
 			}
 
-			// Check if model supports tool calling
+			// Check if model supports tool calling (uses helper for all providers)
 			toolIndicator := ""
 			toolIndicatorWidth := 0
-			if ollama.ModelSupportsToolCalling(model.Name) {
+			if ModelSupportsTools(model) {
 				toolIndicator = " [🔧]"
 				toolIndicatorWidth = 5 // Visual width: space(1) + bracket(1) + emoji(2) + bracket(1) = 5
 			}
@@ -163,7 +163,7 @@ func renderModelSelector(models []ollama.ModelInfo, selectedIdx int, currentMode
 			lineStyle := lipgloss.NewStyle()
 			if i == selectedIdx {
 				lineStyle = lineStyle.Foreground(successColor).Bold(true) // Green bold for active selector
-			} else if model.Name == currentModel {
+			} else if IsCurrentModel(model, currentModel) {
 				lineStyle = lineStyle.Foreground(accentColor).Bold(true) // Cyan bold for current model
 			}
 

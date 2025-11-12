@@ -98,6 +98,8 @@ func (m *Model) SaveCurrentSession() tea.Cmd {
 	m.CurrentSession.Messages = sessionMessages
 	m.CurrentSession.UpdatedAt = time.Now()
 	m.CurrentSession.Model = m.Provider.GetModel()
+	// Note: CurrentSession.Provider is set by SwitchModel() and preserved here
+	// The entire session object (including Provider field) is saved to JSON storage
 
 	session := m.CurrentSession
 	storage := m.SessionStorage

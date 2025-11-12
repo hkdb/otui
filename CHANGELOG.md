@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.03.01] - 2025-11-11
+
+**Maintenance & Bug Fixes:**
+
+- Fixes wrong provider loaded on startup if provider is not ollama
+- Fixes current model and tool support indicator for providers that are not ollama
+- Fixes export confirmation acknowledgement
+
+[v0.03.01]: https://github.com/hkdb/otui/releases/tag/v0.03.01
+
+---
 
 ## [v0.03.00] - 2025-11-11
 

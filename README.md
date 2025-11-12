@@ -37,6 +37,8 @@ An opinionated, "speed" and "usability" focused agentic TUI with a built-in MCP 
 - OpenAI
 - More coming soon...
 
+Currently, only Ollama and OpenRouter are being tested more extensively.
+
 ## 🖥️ OS Support
 
 - GNU/Linux

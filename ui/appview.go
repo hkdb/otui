@@ -311,15 +311,27 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 	// Provider package owns provider lifecycle - zero business logic in UI
 	allProviders := provider.InitializeProviders(cfg)
 
-	// Use configured default provider instead of hardcoded Ollama
-	defaultProvider := allProviders[cfg.DefaultProvider]
-	if defaultProvider == nil {
-		// Fallback to Ollama if default provider not found
-		defaultProvider = allProviders["ollama"]
+	// Determine which provider to use for initialization
+	// Priority: session's provider → configured default → ollama fallback
+	// This ensures sessions with non-default providers load correctly on app restart
+	sessionProvider := cfg.DefaultProvider
+	if lastSession != nil && lastSession.Provider != "" {
+		sessionProvider = lastSession.Provider
 	}
 
-	// Initialize the core data model with default provider
-	dataModel := appmodel.NewModel(cfg, defaultProvider, sessionStorage, lastSession, pluginState, mcpManager, searchIndex, version, license)
+	initialProvider := allProviders[sessionProvider]
+	if initialProvider == nil {
+		// Session's provider not available - fall back to configured default
+		initialProvider = allProviders[cfg.DefaultProvider]
+		if initialProvider == nil {
+			// Default provider not available - fall back to Ollama
+			initialProvider = allProviders["ollama"]
+		}
+	}
+
+	// Initialize the core data model with correct provider (session's or default)
+	// This fixes bug where non-default provider sessions would use wrong provider on restart
+	dataModel := appmodel.NewModel(cfg, initialProvider, sessionStorage, lastSession, pluginState, mcpManager, searchIndex, version, license)
 
 	// Set ALL providers on the model (multi-provider support)
 	dataModel.Providers = allProviders

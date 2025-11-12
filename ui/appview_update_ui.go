@@ -61,13 +61,11 @@ func (a AppView) handleUIMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		// Background fetches (provider settings save, etc.) don't interrupt UX
 		if a.showSettings && msg.ShowSelector {
 			a.showModelSelector = true
-			// Pre-select current model if in list
+			// Pre-select current model if in list (uses helper for cross-provider matching)
 			currentModel := a.settingsFields[2].Value
-			for i, model := range a.modelList {
-				if model.Name == currentModel {
-					a.selectedModelIdx = i
-					break
-				}
+			idx, _ := FindModelByName(a.modelList, currentModel)
+			if idx >= 0 {
+				a.selectedModelIdx = idx
 			}
 		}
 

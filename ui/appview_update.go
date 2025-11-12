@@ -265,11 +265,10 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.showModelSelector = !wasOpen
 			if a.showModelSelector {
 				currentModel := a.dataModel.Provider.GetModel()
-				for i, model := range a.modelList {
-					if model.Name == currentModel {
-						a.selectedModelIdx = i
-						break
-					}
+				// Use helper function for cross-provider model matching
+				idx, _ := FindModelByName(a.modelList, currentModel)
+				if idx >= 0 {
+					a.selectedModelIdx = idx
 				}
 			}
 			return a, nil

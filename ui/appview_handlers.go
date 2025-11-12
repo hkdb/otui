@@ -126,6 +126,17 @@ func (a AppView) handlePassphraseForDataDir(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a AppView) handleSessionExportMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
+	// Handle success acknowledgment (Enter or ESC to dismiss)
+	if a.sessionExportSuccess != "" {
+		switch msg.String() {
+		case "enter", "esc":
+			a.sessionExportSuccess = ""
+			a.sessionExportMode = false
+			return a, nil
+		}
+		return a, nil
+	}
+
 	// If processing or cleaning up, only handle escape
 	if a.exportingSession || a.exportCleaningUp {
 		if msg.String() == "esc" && a.exportingSession && !a.exportCleaningUp {
@@ -185,9 +196,10 @@ func (a AppView) handleSessionExportMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (a AppView) handleSessionImportMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
-	// Handle success acknowledgment
+	// Handle success acknowledgment (Enter or ESC to dismiss)
 	if a.sessionImportPicker.Success != nil {
-		if msg.String() == "enter" || msg.String() == "esc" {
+		switch msg.String() {
+		case "enter", "esc":
 			a.sessionImportSuccess = nil
 			a.sessionImportPicker.Reset()
 			return a, nil

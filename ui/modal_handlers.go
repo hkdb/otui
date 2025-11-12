@@ -556,7 +556,8 @@ func (a AppView) handleModelSelectorUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 				} else {
 					// Normal mode - check if model supports tools and warn if needed
 					hasEnabledPlugins := a.dataModel.CurrentSession != nil && len(a.dataModel.CurrentSession.EnabledPlugins) > 0
-					modelSupportsTools := ollama.ModelSupportsToolCalling(selectedModel)
+					// Use helper for cross-provider tool support detection
+					modelSupportsTools := ModelSupportsTools(selectedModelInfo)
 
 					if hasEnabledPlugins && !modelSupportsTools {
 						// Show warning modal
@@ -1000,14 +1001,16 @@ func (a AppView) handleToolWarningModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd)
 	switch msg.String() {
 	case "enter", "y":
 		// User confirmed - proceed with model switch (Phase 1.6: use SwitchModel)
-		// Find the model info from the list
-		var selectedModelInfo ollama.ModelInfo
-		for _, model := range a.modelList {
-			if model.Name == a.pendingModelSwitch {
-				selectedModelInfo = model
-				break
-			}
+		// Find the model info from the list (uses helper for cross-provider matching)
+		_, modelInfo := FindModelByName(a.modelList, a.pendingModelSwitch)
+		if modelInfo == nil {
+			// Model not found - shouldn't happen but handle gracefully
+			a.showToolWarningModal = false
+			a.pendingModelSwitch = ""
+			a.toolWarningPluginList = nil
+			return a, nil
 		}
+		selectedModelInfo := *modelInfo
 
 		a.showToolWarningModal = false
 		a.pendingModelSwitch = ""
