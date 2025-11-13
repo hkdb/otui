@@ -54,47 +54,53 @@ For Linux, Mac, or FreeBSD, paste the following into your terminal:
 ```
 curl -sL https://hkdb.github.io/otui/get.sh | bash
 ```
-That's it! Now you just launch OTUI in the terminal by just typing:
+That's it! Now you can launch OTUI in the terminal by typing:
 
 ```
 otui
 ```
 
 For Windows, download the binary for the latest release:
-- [Windows (x64)]( https://github.com/hkdb/otui/releases/download/v0.03.01/otui-windows-amd64.exe)
-- [Windows (arm)]( https://github.com/hkdb/otui/releases/download/v0.03.01/otui-windows-arm64.exe)
+- [Windows (x64)](https://github.com/hkdb/otui/releases/latest/download/otui-windows-amd64.exe)
+- [Windows (arm)](https://github.com/hkdb/otui/releases/latest/download/otui-windows-arm64.exe)
 
 ## 🐳 Containerized for Sandboxing or running Multiple Instances on the same host
 
-If you want to sandbox otui so that it can't touch your host filesystem or you want to run multiple instances of otui, you can run it with any OCI container. For the convenience of the majority, you probably already have docker and you can run it by aliasing this command:
+If you want to sandbox OTUI so that it can't touch your host filesystem or you want to run multiple instances of OTUI, you can run it with any OCI container. For the convenience of the majority, you probably already have docker and you can run it by aliasing this command:
 
 ```bash
 docker run -ti --rm \
+                -e OTUI_EDITOR=<nano/vim/emacs> \
                 -v </path/to/config/dir/on/host>:/home/otui/.config/otui \
                 -v </path/to/profile/dir/on/host>:/home/otui/.local/share/otui \
                 -v </path/to/encryption/dir/on/host>:/home/otui/.ssh \
-                ghcr.io/hkdb/otui:v0.03.01
+                ghcr.io/hkdb/otui:latest
 ```
-You will notice that there are 3 volumes mounted so that your data persists. Config, Data (Profile), and SSH (to encrypt your API keys at rest). See the configuration section further down for more details.
+You will notice that there are 3 volumes mounted so that your data persists. 
+- Config (Tells OTUI where to find the profile dir) 
+- Data (Profile) 
+- SSH (to encrypt your API keys at rest). 
 
-Form more information, see the slightly more comprehensive [guide on running OTUI in containers](docs/CONTAINERIZE.md).
+See the configuration section further down for more details about the config structure.
+
+For more information about running OTUI in a container, see the slightly more comprehensive [guide on running OTUI in containers](docs/CONTAINERIZE.md).
 
 ## 🏗️ Basic Concepts
 
-OTUI was designed to be hopefully intuitive enough to any user that is already familiar with keyboard driven environments. At the footer of each screen, there will always be reminders of what the keybindings are. The hope is that, aside from reading this README section, you wouldn't HAVE TO read or touch a user guide at all and still be able to pick it up in no time. If the footer reminders are not enough, there's always a cheat sheet `help` screen.
+OTUI was designed to be hopefully intuitive enough to any user that is already familiar with keyboard driven environments. At the footer of each screen, there will always be reminders of what the keybindings are. The hope is that, aside from reading this README section, users wouldn't HAVE TO read or touch a user guide at all and still be able to pick it up in no time. If the footer reminders are not enough, there's always a cheat sheet `help` screen.
 
 #### ⌨️ Keyboard Shortcuts
 
-At any point in time, users can press Alt+H to bring up the `help` screen to see what keybindings are:
+At any point in time, users can press Alt+H to bring up the `help` screen to see what the keybindings are:
 
 
 ![keybindings](docs/keybindings.png)
 
-In the future, I will likely add the ability to at least customize modifiers if not all keybindings if there's enough interest since some of these key combinations might clash with tiling wm environments.
+In the future, I will likely add the ability to at least customize modifiers if not all keybindings since some of these key combinations might clash with tiling wm environments.
 
 #### 🗺️ UI Components:
 
-OTUI is made up of the following main UI components:
+**OTUI is made up of the following main UI components:**
 
 - `Main Chat Screen` = Where users will chat with LLMs. (As shown at the top of this README)
 - `Session Manager`  = Where users can manage sessions (Create, Edit, Search, Import, Export)
@@ -106,9 +112,9 @@ OTUI is made up of the following main UI components:
 
 #### ✏️ Text Editor Integration
 
-No matter how much work you put into a message input field, nothing beats your favorite text editor when composing complex prompts. That's why OTUI's message input field is integrated with your favorite text editor. At any point in time even if you are in the middle of typing a message, you can just pres `Alt+I` to bring up your favorite text editor temporarily take over the screen to finish composing your prompt. When you quit and save, it will automatically insert the text into your message input field awaiting you to hit `Enter` to send.
+No matter how much work you put into a message input field, nothing beats your favorite text editor when composing complex prompts. That's why OTUI's message input field is integrated with your favorite text editor. At any point in time even if you are in the middle of typing a message, you can just press `Alt+I` to bring up your favorite text editor to temporarily take over the screen to finish composing your prompt. When you quit and save, it will automatically insert the text into your message input field awaiting you to hit `Enter` to send.
 
-OTUI is pretty good at detecting your default text editor but if you have a specific that you want to use for OTUI, just set the environment variable:
+OTUI is pretty good at detecting your default text editor but if you have a specific one you want to use for OTUI, just set the environment variable:
 
 ```
 export OTUI_EDITOR=[ your favorite text editor ]
@@ -129,7 +135,15 @@ The single data directory architecture makes OTUI super portable and syncable. U
 - Copy or move the entire directory to another machine and everything is ready to go
 - Specify the data directory to be stored in a location that's being synced by Syncthing, Google Drive, etc
 
-A likely future feature is to be able to encrypt your data dir for better security and privacy especially when using major cloud providers to sync.
+Addtional Profiles:
+
+To setup a additional new profiles after having setup the first profile already, users can go to Settings and change the data dir to a new directory that doesn't exist, press Alt-Enter to save, and OTUI will run you through the setup screens to get the new profile setup.
+
+A likely future feature is to be able to encrypt session data for better security and privacy which is especially applicable when using major cloud providers to sync.
+
+Last but not least all API keys are stored encrypted at rest with an ssh keypair **if the user chooses to enable it during setup**.
+
+**Environment Variables:**
 
 OTUI falls back on environment variables for configuration (Ollama only) so that one can just set env var without using the TUI to setup:
 
@@ -140,13 +154,13 @@ export OTUI_OLLAMA_HOST=http://your-ollama-server:11434
 # Set your preferred model (ex: llama3.2:latest)
 export OTUI_OLLAMA_MODEL=qwen2.5:latest
 
-# Set your prefered data dir location (ex: ~/.local/share/otui)
-export OTUI_DATA_DIR=https://your-searxng-instance.com
+# Set your preferred data dir location (ex: ~/.local/share/otui)
+export OTUI_DATA_DIR=/path/to/your/data/dir
 
 # Run OTUI
 ./otui
 ```
-This can be useful if you wanted to run OTUI in a OCI container by just setting the environment varibles on launch.
+This can be useful if you wanted to run OTUI in an OCI container by just setting the environment variables on launch.
 
 #### 🤖 MCP Plugins Registry and Plugins System
 
@@ -178,7 +192,7 @@ Each plugin needs to be enabled by the user manually after installation. After a
 
 Curated just means we have tried installing and using them ourselves. All other MCP plugins may not have ever been tested by us before. The entry barrier to land in our registry is not high (ie. how popular they are on github, etc). So do your own research and use your own judgement when exploring MCP plugins. We are not responsible for what the MCP plugins do regardless if the cause is related to OTUI's code base or not. 
 
-For more information about the Registry, see [OTUI MCP Registry](https://github.com/hkdb/otui)
+For more information about the Registry, see [OTUI MCP Registry](https://github.com/hkdb/otui-registry)
 
 ## 👾 OTUI in Action
 
@@ -241,7 +255,7 @@ If you like what you see and want to show your appreciation:
 
 ## 📢 Disclaimer
 
-This software is provided as is with no warranty. The author and contributors of this project is not responsible for any damages that this software may directly or indirectly cause.
+This software is provided as is with no warranty. The author and contributors of this project are not responsible for any damages that this software may directly or indirectly cause.
 
 This project is not associated or affiliated with [OLLAMA](https://ollama.com).
 

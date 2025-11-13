@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.03.02] - 2025-11-12
+
+**Maintenance & Bug Fixes:**
+
+- Updated container image to support macos
+- Updated container image to have more reliable permissions
+- Updated README.md and docs/CONTAINERIZE.md
+
+[v0.03.02]: https://github.com/hkdb/otui/releases/tag/v0.03.02
+
+---
+
 ## [v0.03.01] - 2025-11-11
 
 **Maintenance & Bug Fixes:**

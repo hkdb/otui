@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	Version = "v0.03.01"
+	Version = "v0.03.02"
 	License = "Apache-2.0"
 )
 
