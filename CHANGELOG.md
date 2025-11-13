@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.03.03] - 2025-11-13
+
+**Maintenance & Bug Fixes:**
+
+- Fixes regression that prevented npm from working in container image
+
+[v0.03.03]: https://github.com/hkdb/otui/releases/tag/v0.03.03
+
+---
+
 ## [v0.03.02] - 2025-11-12
 
 **Maintenance & Bug Fixes:**
