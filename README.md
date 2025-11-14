@@ -58,15 +58,6 @@ Installing MCP plugins:
 Text Editor Integration:
 ![editor](dist/editor.gif)
 
-## 🛠️ Building From Source
-
-Requires Go 1.22 or later.
-
-```bash
-go mod tidy
-go build
-```
-
 ## 📦 Installation
 
 For Linux, Mac, or FreeBSD, paste the following into your terminal:
@@ -213,6 +204,15 @@ Each plugin needs to be enabled by the user manually after installation. After a
 Curated just means we have tried installing and using them ourselves. All other MCP plugins may not have ever been tested by us before. The entry barrier to land in our registry is not high (ie. how popular they are on github, etc). So do your own research and use your own judgement when exploring MCP plugins. We are not responsible for what the MCP plugins do regardless if the cause is related to OTUI's code base or not. 
 
 For more information about the Registry, see [OTUI MCP Registry](https://github.com/hkdb/otui-registry)
+
+## 🛠️ Building From Source
+
+Requires Go 1.22 or later.
+
+```bash
+go mod tidy
+go build
+```
 
 ## 🐛 Debug
 
