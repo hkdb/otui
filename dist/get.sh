@@ -6,7 +6,7 @@
 
 set -e
 
-VER="v0.03.03"
+VER="v0.03.04"
 CYAN='\033[0;36m'
 GREEN='\033[1;32m'
 NC='\033[0m' 
@@ -24,7 +24,7 @@ echo -e "${CYAN}
                                                                                          
 ${NC}"
 
-echo -e "🚀️ ${GREEN}The Cross-Platform Package Management Assistant with Super Powers${NC}\n"
+echo -e "🚀️ ${GREEN}An Opinionated, Minimalist Agentic TUI${NC}\n"
 
 USEROS=""
 echo -e "🐧️ Detecting OS..."

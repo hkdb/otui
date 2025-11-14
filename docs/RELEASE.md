@@ -1,6 +1,16 @@
 # Release Process
 
-### 1. Update version number in code base and dist/
+### 1. Update CHANGELOG.md
+
+```
+## [v0.01.00] - <DATE ~ 2025-11-06>
+
+
+
+[v0.01.00]: https://github.com/hkdb/otui/releases/tag/v0.01.00
+```
+
+### 2. Update version number in code base and dist/
 
 To release a new version, change version at the following files:
 - main.go
@@ -11,7 +21,7 @@ To release a new version, change version at the following files:
 The automated way is:
 
 ```bash
-./scripts/release.sh <version number> # ie. v0.02.00
+./scripts/release.sh <version number> # ex. v0.02.00
 ```
 
 When in doubt, look at the script's help output:
@@ -20,20 +30,16 @@ When in doubt, look at the script's help output:
 ./scripts/release.sh help
 ```
 
-### 2. Update CHANGELOG.md
+### 3. Build and push Docker image
 
+```bash
+go build
+./scripts/build-container.sh <version number> # ex. v0.02.00
 ```
-## [v0.01.00] - <DATE ~ 2025-11-06>
+Test image before push.
+Test image on test devices before tagging as latest and push.
 
-
-
-[v0.01.00]: https://github.com/hkdb/otui/releases/tag/v0.01.00
-```
-
-### 3. Create tag based on version.
-
-
-### 4. Create release based on tag
+### 4. Create tag and release based on version.
 
 
 ### 5. Monitor Github Actions job to make sure all is well.

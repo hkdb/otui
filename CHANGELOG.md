@@ -1,5 +1,19 @@
 # Changelog
 
+## [v0.03.04] - 2025-11-13
+
+**Maintenance & Bug Fixes:**
+
+- Corrected get script header
+- Added video in Github Pages
+- Updated release doc
+
+No changes were made to the binary. v0.03.03 users can skip this release.
+
+[v0.03.04]: https://github.com/hkdb/otui/releases/tag/v0.03.04
+
+---
+
 ## [v0.03.03] - 2025-11-13
 
 **Maintenance & Bug Fixes:**
