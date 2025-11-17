@@ -111,7 +111,12 @@ func (a *AppView) updateStreamingMessage() {
 	// Add streaming message (assistant - flush left)
 	timestamp := DimStyle.Render(time.Now().Format("[15:04]"))
 	role := AssistantStyle.Render("Assistant")
-	streamContent := a.currentResp.String() + "▋" // Cursor
+
+	// Show spinner while waiting for first chunk, then show text with cursor
+	streamContent := a.loadingSpinner.View()
+	if a.currentResp.String() != "" {
+		streamContent = a.currentResp.String() + "▋"
+	}
 
 	content.WriteString(fmt.Sprintf("%s %s\n%s\n\n", timestamp, role, streamContent))
 

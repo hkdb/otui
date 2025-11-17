@@ -161,6 +161,38 @@ func renderConfigModal(
 		Width(modalWidth).
 		Align(lipgloss.Left)
 
+	// For remote plugins, add explanatory header about env vars and auth
+	switch plugin.InstallType {
+	case "remote":
+		headerStyle := lipgloss.NewStyle().
+			Foreground(accentColor).
+			Bold(true).
+			Width(modalWidth)
+		messageLines = append(messageLines, headerStyle.Render("Environment Variables (sent as HTTP headers):"))
+		messageLines = append(messageLines, messageStyle.Render(""))
+
+		hintStyle := lipgloss.NewStyle().
+			Foreground(dimColor).
+			Italic(true).
+			Width(modalWidth)
+
+		// Show auth type specific hints
+		switch plugin.AuthType {
+		case "oauth":
+			messageLines = append(messageLines,
+				hintStyle.Render("  Required: OAUTH_CLIENT_ID, OAUTH_REDIRECT_URI"))
+			messageLines = append(messageLines,
+				hintStyle.Render("  Optional: OAUTH_CLIENT_SECRET, OAUTH_SCOPES"))
+		case "headers":
+			messageLines = append(messageLines,
+				hintStyle.Render("  Common: Authorization, X-API-Key, X-Custom-Header"))
+		case "none":
+			messageLines = append(messageLines,
+				hintStyle.Render("  No authentication configured"))
+		}
+		messageLines = append(messageLines, messageStyle.Render(""))
+	}
+
 	// Build full config schema (includes Environment and Args fields)
 	fullSchema := mcp.BuildFullConfigSchema(plugin)
 
@@ -415,12 +447,18 @@ func (a *AppView) renderAddCustomModal() string {
 		modalWidth = a.width - 10
 	}
 
+	// Determine title based on mode
+	title := "Add Custom Plugin"
+	if a.pluginManagerState.addCustomModal.editMode {
+		title = "Edit Custom Plugin"
+	}
+
 	titleSection := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(accentColor).
 		Align(lipgloss.Center).
 		Width(modalWidth).
-		Render("Add Custom Plugin")
+		Render(title)
 
 	var messageLines []string
 	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
@@ -442,12 +480,23 @@ func (a *AppView) renderAddCustomModal() string {
 		fieldDef{"repository", "Repository", ""},
 		fieldDef{"id", "ID", ""},
 		fieldDef{"name", "Name", ""},
-		fieldDef{"install_type", "Install Type", "(npm, pip, npx, go, manual, docker, binary)"},
+		fieldDef{"install_type", "Install Type", "(npm, pip, npx, go, manual, docker, binary, remote)"},
 		fieldDef{"package", "Package", ""},
 	)
 
+	// Conditionally show ServerURL, AuthType, and Transport for remote
+	switch installType {
+	case "remote":
+		fieldOrder = append(fieldOrder,
+			fieldDef{"server_url", "Server URL", "(http://localhost:8080 or https://mcp.example.com)"},
+			fieldDef{"auth_type", "Auth Type", "(none, headers, oauth)"},
+			fieldDef{"transport", "Transport", "(sse, streamable-http)"},
+		)
+	}
+
 	// Conditionally show Command field for manual/docker/binary
-	if installType == "manual" || installType == "docker" || installType == "binary" {
+	switch installType {
+	case "manual", "docker", "binary":
 		hint := "(optional - command to start plugin)"
 		switch installType {
 		case "docker":
@@ -517,7 +566,10 @@ func (a *AppView) renderAddCustomModal() string {
 	// Calculate dynamic indices for Environment and Arguments
 	installTypeForRender := a.pluginManagerState.addCustomModal.fields["install_type"].Value()
 	numTextFieldsForRender := 8 // Base fields: repository, id, name, install_type, package, description, category, language
-	if installTypeForRender == "manual" || installTypeForRender == "docker" || installTypeForRender == "binary" {
+	switch installTypeForRender {
+	case "remote":
+		numTextFieldsForRender = 11 // Add server_url, auth_type, and transport
+	case "manual", "docker", "binary":
 		numTextFieldsForRender = 9 // Add command field
 	}
 	envIndexForRender := numTextFieldsForRender
@@ -562,7 +614,12 @@ func (a *AppView) renderAddCustomModal() string {
 		Width(modalWidth).
 		Render(strings.Join(messageLines, "\n"))
 
-	footer := FormatFooter("Tab/Shift+Tab", "Navigate", "Enter", "Edit", "Alt+Enter", "Add", "Esc", "Cancel")
+	// Determine footer action based on mode
+	footerAction := "Add"
+	if a.pluginManagerState.addCustomModal.editMode {
+		footerAction = "Save"
+	}
+	footer := FormatFooter("Tab/Shift+Tab", "Navigate", "Enter", "Edit", "Alt+Enter", footerAction, "Esc", "Cancel")
 
 	footerSection := lipgloss.NewStyle().
 		Foreground(dimColor).

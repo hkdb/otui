@@ -17,7 +17,10 @@ type Plugin struct {
 	Language     string        `json:"language,omitempty"`
 	InstallType  string        `json:"install_type"`
 	Package      string        `json:"package,omitempty"`
-	Command      string        `json:"command,omitempty"` // Custom command for manual/docker plugins
+	Command      string        `json:"command,omitempty"`    // Custom command for manual/docker plugins
+	ServerURL    string        `json:"server_url,omitempty"` // For remote plugins
+	AuthType     string        `json:"auth_type,omitempty"`  // "none", "headers", "oauth"
+	Transport    string        `json:"transport,omitempty"`  // "sse" (default), "streamable-http"
 	RuntimeDeps  []string      `json:"runtime_deps,omitempty"`
 	Verified     bool          `json:"verified"`
 	Official     bool          `json:"official"`

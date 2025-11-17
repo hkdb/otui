@@ -98,6 +98,37 @@ func (c *CredentialStore) Delete(providerID string) error {
 	return nil
 }
 
+// GetPlugin retrieves a plugin credential
+// Format: plugin_<pluginID>_<key>
+func (c *CredentialStore) GetPlugin(pluginID, key string) string {
+	credKey := fmt.Sprintf("plugin_%s_%s", pluginID, key)
+	return c.credentials[credKey]
+}
+
+// SetPlugin stores a plugin credential
+func (c *CredentialStore) SetPlugin(pluginID, key, value string) error {
+	credKey := fmt.Sprintf("plugin_%s_%s", pluginID, key)
+	c.credentials[credKey] = value
+	return nil
+}
+
+// DeletePluginAll removes all credentials for a plugin
+func (c *CredentialStore) DeletePluginAll(pluginID string) error {
+	prefix := fmt.Sprintf("plugin_%s_", pluginID)
+	for key := range c.credentials {
+		switch {
+		case len(key) >= len(prefix) && key[:len(prefix)] == prefix:
+			delete(c.credentials, key)
+		}
+	}
+	return nil
+}
+
+// GetEncryptionManager returns the encryption manager (for FileTokenStore)
+func (c *CredentialStore) GetEncryptionManager() *EncryptionManager {
+	return c.encManager
+}
+
 // GetMethod returns the current security method
 func (c *CredentialStore) GetMethod() SecurityMethod {
 	return c.method

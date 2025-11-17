@@ -286,7 +286,24 @@ func (a AppView) handleConfigModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 				mergedConfig[envVar.Key] = envVar.Value
 			}
 
-			a.pluginManagerState.pluginState.Config.SetPluginConfig(plugin.ID, mergedConfig)
+			// Use secure save helper (handles encryption if SSH key mode)
+			err := config.SavePluginConfigSecure(
+				a.dataModel.Config,
+				a.dataModel.Config.DataDir(),
+				a.pluginManagerState.pluginState.Config,
+				plugin.ID,
+				mergedConfig,
+			)
+			switch {
+			case err != nil:
+				a.showAcknowledgeModal = true
+				a.acknowledgeModalTitle = "Configuration Save Failed"
+				a.acknowledgeModalMsg = fmt.Sprintf("Failed to save plugin configuration: %v", err)
+				a.acknowledgeModalType = ModalTypeError
+				return a, nil
+			}
+
+			// Save plugins.toml
 			_ = config.SavePluginsConfig(a.dataModel.Config.DataDir(), a.pluginManagerState.pluginState.Config)
 		}
 
@@ -324,8 +341,11 @@ func (a AppView) handleAddCustomFormUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 
 	fieldKeys := []string{"repository", "id", "name", "install_type", "package"}
 
-	// Add command if install type requires it
-	if installType == "manual" || installType == "docker" || installType == "binary" {
+	// Add conditional fields based on install type
+	switch installType {
+	case "remote":
+		fieldKeys = append(fieldKeys, "server_url", "auth_type", "transport")
+	case "manual", "docker", "binary":
 		fieldKeys = append(fieldKeys, "command")
 	}
 
@@ -339,6 +359,11 @@ func (a AppView) handleAddCustomFormUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 
 	// Handle form submission (Alt+Enter)
 	if msg.String() == "alt+enter" {
+		// Check if we're in edit mode
+		if a.pluginManagerState.addCustomModal.editMode {
+			return a.handleEditCustomPluginSubmit()
+		}
+
 		// Collect all field values
 		fields := a.pluginManagerState.addCustomModal.fields
 
@@ -367,6 +392,9 @@ func (a AppView) handleAddCustomFormUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 			Author:      author,
 			InstallType: fields["install_type"].Value(),
 			Package:     fields["package"].Value(),
+			ServerURL:   fields["server_url"].Value(),
+			AuthType:    fields["auth_type"].Value(),
+			Transport:   fields["transport"].Value(),
 			Command:     fields["command"].Value(),
 			Description: fields["description"].Value(),
 			Category:    fields["category"].Value(),
@@ -376,13 +404,55 @@ func (a AppView) handleAddCustomFormUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 			Args:        mcp.ArgsToString(a.pluginManagerState.addCustomModal.args),
 		}
 
-		// Validate required fields
-		if plugin.Repository == "" || plugin.ID == "" || plugin.Name == "" || plugin.InstallType == "" || plugin.Package == "" {
+		// Validate common required fields
+		switch {
+		case plugin.Repository == "":
 			a.showAcknowledgeModal = true
 			a.acknowledgeModalTitle = "Invalid Plugin Configuration"
-			a.acknowledgeModalMsg = "Plugin configuration is missing required fields.\n\nPlease ensure Repository, ID, Name, Install Type, and Package are all filled in."
+			a.acknowledgeModalMsg = "Repository is required"
 			a.acknowledgeModalType = ModalTypeError
 			return a, nil
+		case plugin.ID == "":
+			a.showAcknowledgeModal = true
+			a.acknowledgeModalTitle = "Invalid Plugin Configuration"
+			a.acknowledgeModalMsg = "ID is required"
+			a.acknowledgeModalType = ModalTypeError
+			return a, nil
+		case plugin.Name == "":
+			a.showAcknowledgeModal = true
+			a.acknowledgeModalTitle = "Invalid Plugin Configuration"
+			a.acknowledgeModalMsg = "Name is required"
+			a.acknowledgeModalType = ModalTypeError
+			return a, nil
+		case plugin.InstallType == "":
+			a.showAcknowledgeModal = true
+			a.acknowledgeModalTitle = "Invalid Plugin Configuration"
+			a.acknowledgeModalMsg = "Install Type is required"
+			a.acknowledgeModalType = ModalTypeError
+			return a, nil
+		}
+
+		// Install-type specific validation
+		switch plugin.InstallType {
+		case "remote":
+			switch {
+			case plugin.ServerURL == "":
+				a.showAcknowledgeModal = true
+				a.acknowledgeModalTitle = "Invalid Plugin Configuration"
+				a.acknowledgeModalMsg = "Server URL is required for remote plugins"
+				a.acknowledgeModalType = ModalTypeError
+				return a, nil
+			}
+		default:
+			// Package required for all non-remote plugins
+			switch {
+			case plugin.Package == "":
+				a.showAcknowledgeModal = true
+				a.acknowledgeModalTitle = "Invalid Plugin Configuration"
+				a.acknowledgeModalMsg = "Package is required for " + plugin.InstallType + " plugins"
+				a.acknowledgeModalType = ModalTypeError
+				return a, nil
+			}
 		}
 
 		// Add to registry
@@ -407,6 +477,8 @@ func (a AppView) handleAddCustomFormUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 	// Handle Esc
 	if msg.String() == "esc" {
 		a.pluginManagerState.addCustomModal.visible = false
+		a.pluginManagerState.addCustomModal.editMode = false
+		a.pluginManagerState.addCustomModal.editingPlugin = nil
 		a.clearAddCustomFormState()
 		return a, nil
 	}
@@ -1096,6 +1168,64 @@ func (a AppView) handlePluginManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 					}
 				}
 			}
+		case "e":
+			plugin := a.pluginManagerState.detailsModal.plugin
+			// Only allow editing custom plugins that are disabled
+			if plugin.Custom && a.pluginManagerState.pluginState.Installer.IsInstalled(plugin.ID) {
+				enabled := a.pluginManagerState.pluginState.Config.GetPluginEnabled(plugin.ID)
+				if enabled {
+					// Block editing if plugin is enabled
+					a.showAcknowledgeModal = true
+					a.acknowledgeModalTitle = "⚠️  Cannot Edit Enabled Plugin"
+					a.acknowledgeModalMsg = fmt.Sprintf("%s is currently enabled. Please disable it first (press 'd' in Installed tab), then try editing again.", plugin.Name)
+					a.acknowledgeModalType = ModalTypeWarning
+					return a, nil
+				}
+
+				// Close details modal
+				a.pluginManagerState.detailsModal.visible = false
+				a.pluginManagerState.detailsModal.plugin = nil
+
+				// Enter edit mode
+				a.pluginManagerState.addCustomModal.visible = true
+				a.pluginManagerState.addCustomModal.editMode = true
+				a.pluginManagerState.addCustomModal.editingPlugin = plugin
+				a.pluginManagerState.addCustomModal.fieldIdx = 0
+
+				// Pre-populate all fields from existing plugin
+				fieldNames := []string{"repository", "id", "name", "install_type", "package", "server_url", "auth_type", "transport", "command", "description", "category", "language"}
+				fieldValues := []string{plugin.Repository, plugin.ID, plugin.Name, plugin.InstallType, plugin.Package, plugin.ServerURL, plugin.AuthType, plugin.Transport, plugin.Command, plugin.Description, plugin.Category, plugin.Language}
+
+				for i, fieldName := range fieldNames {
+					field := a.pluginManagerState.addCustomModal.fields[fieldName]
+					field.SetValue(fieldValues[i])
+					a.pluginManagerState.addCustomModal.fields[fieldName] = field
+				}
+
+				// Load env vars from plugin config
+				if pluginCfg := a.pluginManagerState.pluginState.Config.GetPluginConfig(plugin.ID); pluginCfg != nil {
+					// Convert config map to EnvVarPair array
+					envVars := []EnvVarPair{}
+					for k, v := range pluginCfg {
+						envVars = append(envVars, EnvVarPair{Key: k, Value: v})
+					}
+					a.pluginManagerState.addCustomModal.envVars = envVars
+				}
+
+				// Parse args from plugin.Args string if present
+				if plugin.Args != "" {
+					// Args are stored as JSON string in plugin.Args
+					// We'll leave them empty for now - user can reconfigure if needed
+					a.pluginManagerState.addCustomModal.args = []mcp.ArgPair{}
+				}
+
+				// Focus first field
+				field := a.pluginManagerState.addCustomModal.fields["repository"]
+				field.Focus()
+				a.pluginManagerState.addCustomModal.fields["repository"] = field
+
+				return a, textinput.Blink
+			}
 		}
 		return a, nil
 	}
@@ -1275,6 +1405,65 @@ func (a AppView) handlePluginManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 					a.dataModel.EnablePlugin(plugin.ID),
 				)
 			}
+		}
+
+		// Edit custom plugin
+		if a.pluginManagerState.selection.viewMode == "custom" && len(plugins) > 0 && a.pluginManagerState.selection.selectedPluginIdx < len(plugins) {
+			plugin := &plugins[a.pluginManagerState.selection.selectedPluginIdx]
+
+			// Only allow editing custom plugins
+			if !plugin.Custom {
+				return a, nil
+			}
+
+			// Block editing if plugin is enabled
+			if a.pluginManagerState.pluginState.Config != nil && a.pluginManagerState.pluginState.Config.GetPluginEnabled(plugin.ID) {
+				a.showAcknowledgeModal = true
+				a.acknowledgeModalTitle = "⚠️  Cannot Edit Enabled Plugin"
+				a.acknowledgeModalMsg = fmt.Sprintf("%s is currently enabled. Please disable it first (press 'd' in Installed tab), then try editing again.", plugin.Name)
+				a.acknowledgeModalType = ModalTypeWarning
+				return a, nil
+			}
+
+			// Enter edit mode
+			a.pluginManagerState.addCustomModal.visible = true
+			a.pluginManagerState.addCustomModal.editMode = true
+			a.pluginManagerState.addCustomModal.editingPlugin = plugin
+			a.pluginManagerState.addCustomModal.fieldIdx = 0
+
+			// Pre-populate all fields from existing plugin
+			fieldNames := []string{"repository", "id", "name", "install_type", "package", "server_url", "auth_type", "transport", "command", "description", "category", "language"}
+			fieldValues := []string{plugin.Repository, plugin.ID, plugin.Name, plugin.InstallType, plugin.Package, plugin.ServerURL, plugin.AuthType, plugin.Transport, plugin.Command, plugin.Description, plugin.Category, plugin.Language}
+
+			for i, fieldName := range fieldNames {
+				field := a.pluginManagerState.addCustomModal.fields[fieldName]
+				field.SetValue(fieldValues[i])
+				a.pluginManagerState.addCustomModal.fields[fieldName] = field
+			}
+
+			// Load env vars from plugin config
+			if pluginCfg := a.pluginManagerState.pluginState.Config.GetPluginConfig(plugin.ID); pluginCfg != nil {
+				// Convert config map to EnvVarPair array
+				envVars := []EnvVarPair{}
+				for k, v := range pluginCfg {
+					envVars = append(envVars, EnvVarPair{Key: k, Value: v})
+				}
+				a.pluginManagerState.addCustomModal.envVars = envVars
+			}
+
+			// Parse args from plugin.Args string if present
+			if plugin.Args != "" {
+				// Args are stored as JSON string in plugin.Args
+				// We'll leave them empty for now - user can reconfigure if needed
+				a.pluginManagerState.addCustomModal.args = []mcp.ArgPair{}
+			}
+
+			// Focus first field
+			field := a.pluginManagerState.addCustomModal.fields["repository"]
+			field.Focus()
+			a.pluginManagerState.addCustomModal.fields["repository"] = field
+
+			return a, textinput.Blink
 		}
 	case "d":
 		if a.pluginManagerState.selection.viewMode == "custom" && len(plugins) > 0 && a.pluginManagerState.selection.selectedPluginIdx < len(plugins) {
@@ -1588,4 +1777,161 @@ func fetchGitHubMetadata(repoURL string) tea.Cmd {
 			err:         nil,
 		}
 	}
+}
+
+// handleEditCustomPluginSubmit handles submitting the edit custom plugin form
+func (a AppView) handleEditCustomPluginSubmit() (AppView, tea.Cmd) {
+	// Extract field values
+	fields := a.pluginManagerState.addCustomModal.fields
+	repository := strings.TrimSpace(fields["repository"].Value())
+	id := strings.TrimSpace(fields["id"].Value())
+	name := strings.TrimSpace(fields["name"].Value())
+	installType := strings.TrimSpace(fields["install_type"].Value())
+	packageField := strings.TrimSpace(fields["package"].Value())
+	serverURL := strings.TrimSpace(fields["server_url"].Value())
+	authType := strings.TrimSpace(fields["auth_type"].Value())
+	transport := strings.TrimSpace(fields["transport"].Value())
+	command := strings.TrimSpace(fields["command"].Value())
+	description := strings.TrimSpace(fields["description"].Value())
+	category := strings.TrimSpace(fields["category"].Value())
+	language := strings.TrimSpace(fields["language"].Value())
+
+	// Validation: ID must not change
+	if id != a.pluginManagerState.addCustomModal.editingPlugin.ID {
+		a.showAcknowledgeModal = true
+		a.acknowledgeModalTitle = "❌ Invalid Edit"
+		a.acknowledgeModalMsg = "Cannot change plugin ID. Delete and re-add if you need a different ID."
+		a.acknowledgeModalType = ModalTypeError
+		return a, nil
+	}
+
+	// DOUBLE-CHECK: Plugin must still be disabled
+	if a.pluginManagerState.pluginState.Config != nil && a.pluginManagerState.pluginState.Config.GetPluginEnabled(id) {
+		a.showAcknowledgeModal = true
+		a.acknowledgeModalTitle = "⚠️  Plugin Is Enabled"
+		a.acknowledgeModalMsg = "Plugin was enabled while editing. Please disable it and try again."
+		a.acknowledgeModalType = ModalTypeError
+		a.pluginManagerState.addCustomModal.visible = false
+		a.pluginManagerState.addCustomModal.editMode = false
+		a.pluginManagerState.addCustomModal.editingPlugin = nil
+		return a, nil
+	}
+
+	// Validation: Required fields based on install type
+	switch installType {
+	case "remote":
+		if serverURL == "" {
+			a.showAcknowledgeModal = true
+			a.acknowledgeModalTitle = "❌ Missing Server URL"
+			a.acknowledgeModalMsg = "Server URL is required for remote plugins."
+			a.acknowledgeModalType = ModalTypeError
+			return a, nil
+		}
+		// Default auth type
+		if authType == "" {
+			authType = "none"
+		}
+	case "npm", "pip", "npx", "go":
+		if packageField == "" {
+			a.showAcknowledgeModal = true
+			a.acknowledgeModalTitle = "❌ Missing Package"
+			a.acknowledgeModalMsg = fmt.Sprintf("Package is required for %s install type.", installType)
+			a.acknowledgeModalType = ModalTypeError
+			return a, nil
+		}
+	}
+
+	// Extract author from repository URL
+	author := ""
+	if repoPath, found := strings.CutPrefix(repository, "https://github.com/"); found {
+		repoPath = strings.TrimSuffix(repoPath, ".git")
+		parts := strings.Split(repoPath, "/")
+		if len(parts) > 0 {
+			author = parts[0]
+		}
+	}
+
+	// Convert env vars to keys
+	envKeys := make([]string, len(a.pluginManagerState.addCustomModal.envVars))
+	for i, ev := range a.pluginManagerState.addCustomModal.envVars {
+		envKeys[i] = ev.Key
+	}
+
+	// Build updated plugin object
+	updatedPlugin := &mcp.Plugin{
+		ID:          id,
+		Name:        name,
+		Repository:  repository,
+		Author:      author,
+		InstallType: installType,
+		Package:     packageField,
+		ServerURL:   serverURL,
+		AuthType:    authType,
+		Transport:   transport,
+		Command:     command,
+		Description: description,
+		Category:    category,
+		Language:    language,
+		Custom:      true,
+		Environment: mcp.EnvVarsToString(envKeys),
+		Args:        mcp.ArgsToString(a.pluginManagerState.addCustomModal.args),
+	}
+
+	// Update in registry (in-memory + custom_plugins.json)
+	warnings, err := a.pluginManagerState.pluginState.Registry.UpdateCustomPlugin(id, updatedPlugin)
+	if err != nil {
+		a.showAcknowledgeModal = true
+		a.acknowledgeModalTitle = "❌ Update Failed"
+		a.acknowledgeModalMsg = fmt.Sprintf("Failed to update plugin: %v", err)
+		a.acknowledgeModalType = ModalTypeError
+		return a, nil
+	}
+
+	// Update in database (via Installer)
+	if err := a.pluginManagerState.pluginState.Installer.UpdateCustomPlugin(updatedPlugin); err != nil {
+		a.showAcknowledgeModal = true
+		a.acknowledgeModalTitle = "❌ Database Update Failed"
+		a.acknowledgeModalMsg = fmt.Sprintf("Failed to save changes: %v", err)
+		a.acknowledgeModalType = ModalTypeError
+		return a, nil
+	}
+
+	// Update plugin config (env vars)
+	envMap := make(map[string]string)
+	for _, pair := range a.pluginManagerState.addCustomModal.envVars {
+		if pair.Key != "" {
+			envMap[pair.Key] = pair.Value
+		}
+	}
+
+	// Save env vars to config
+	a.pluginManagerState.pluginState.Config.SetPluginConfig(id, envMap)
+
+	// Save config to disk
+	if err := config.SavePluginsConfig(a.dataModel.Config.DataDir(), a.pluginManagerState.pluginState.Config); err != nil {
+		a.showAcknowledgeModal = true
+		a.acknowledgeModalTitle = "⚠️  Config Save Failed"
+		a.acknowledgeModalMsg = fmt.Sprintf("Plugin updated but failed to save config: %v", err)
+		a.acknowledgeModalType = ModalTypeWarning
+		return a, nil
+	}
+
+	// Close modal
+	a.pluginManagerState.addCustomModal.visible = false
+	a.pluginManagerState.addCustomModal.editMode = false
+	a.pluginManagerState.addCustomModal.editingPlugin = nil
+	a.clearAddCustomFormState()
+
+	// Show success message with warnings if any
+	msg := fmt.Sprintf("%s has been updated successfully. Enable it in the Installed tab to use the new settings.", name)
+	if len(warnings) > 0 {
+		msg += "\n\nWarnings:\n" + strings.Join(warnings, "\n")
+	}
+
+	a.showAcknowledgeModal = true
+	a.acknowledgeModalTitle = "✅ Plugin Updated"
+	a.acknowledgeModalMsg = msg
+	a.acknowledgeModalType = ModalTypeInfo
+
+	return a, nil
 }

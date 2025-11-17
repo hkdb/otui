@@ -34,7 +34,7 @@ func NewMCPManager(cfg *config.Config, pluginStorage *storage.PluginStorage, plu
 		pluginStorage: pluginStorage,
 		pluginsConfig: pluginsConfig,
 		registry:      registry,
-		client:        NewClient(registry),
+		client:        NewClient(registry, dataDir, cfg),
 		activePlugins: make(map[string]bool),
 		failedPlugins: make(map[string]error),
 		dataDir:       dataDir,
@@ -103,6 +103,8 @@ func detectNpmBinary(installPath, packageName string) string {
 
 func (m *MCPManager) buildPluginCommand(plugin *Plugin, installed *storage.InstalledPlugin, pluginConfig map[string]string) (string, []string) {
 	switch plugin.InstallType {
+	case "remote":
+		return "", nil // No command for remote plugins
 	case "npm":
 		// Use locally installed binary from node_modules/.bin
 		var binaryPath string
@@ -440,7 +442,10 @@ func (m *MCPManager) StartAllEnabledPlugins(ctx context.Context) error {
 		// Build command for this plugin
 		pluginConfig := m.pluginsConfig.GetPluginConfig(installed.ID)
 		command, args := m.buildPluginCommand(plugin, &installed, pluginConfig)
-		if command == "" {
+
+		// Skip if no command AND not a remote plugin
+		switch {
+		case command == "" && plugin.InstallType != "remote":
 			continue
 		}
 
@@ -470,6 +475,33 @@ func (m *MCPManager) StartAllEnabledPlugins(ctx context.Context) error {
 			Args:       pts.args,
 			Env:        make(map[string]string),
 			Config:     m.pluginsConfig.GetPluginConfig(pts.installed.ID),
+			ServerURL:  pts.installed.ServerURL,
+			AuthType:   pts.installed.AuthType,
+			Transport:  pts.installed.Transport,
+		}
+
+		// Check for server_url override in user config
+		userConfig := m.pluginsConfig.GetPluginConfig(pts.installed.ID)
+		if serverURLOverride := userConfig["server_url"]; serverURLOverride != "" {
+			mcpConfig.ServerURL = serverURLOverride
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("[MCP] StartAllEnabledPlugins: Overriding server_url for '%s': %s → %s", pts.installed.ID, pts.installed.ServerURL, serverURLOverride)
+			}
+		}
+
+		// For remote plugins, merge env vars from config into Env
+		// (Phase 0 will handle loading encrypted credentials here)
+		switch pts.plugin.InstallType {
+		case "remote":
+			// Get config which may contain auth headers
+			for k, v := range m.pluginsConfig.GetPluginConfig(pts.installed.ID) {
+				mcpConfig.Env[k] = v
+			}
+		}
+
+		// Substitute session template variables in environment
+		if m.currentSession != nil {
+			mcpConfig.Env = SubstituteSessionVars(mcpConfig.Env, m.currentSession.ID, m.currentSession.Name, m.dataDir)
 		}
 
 		// Start the plugin (this can be slow, mutex is NOT held)
@@ -640,7 +672,10 @@ func (m *MCPManager) StartPlugin(ctx context.Context, pluginID string) error {
 	// Build command
 	pluginConfig := m.pluginsConfig.GetPluginConfig(pluginID)
 	command, args := m.buildPluginCommand(plugin, installed, pluginConfig)
-	if command == "" {
+
+	// Skip if no command AND not a remote plugin
+	switch {
+	case command == "" && plugin.InstallType != "remote":
 		return fmt.Errorf("failed to build command for plugin: %s", pluginID)
 	}
 
@@ -656,6 +691,32 @@ func (m *MCPManager) StartPlugin(ctx context.Context, pluginID string) error {
 		Args:       args,
 		Env:        make(map[string]string),
 		Config:     m.pluginsConfig.GetPluginConfig(pluginID),
+		ServerURL:  installed.ServerURL,
+		AuthType:   installed.AuthType,
+		Transport:  installed.Transport,
+	}
+
+	// Check for server_url override in user config
+	userConfig := m.pluginsConfig.GetPluginConfig(pluginID)
+	if serverURLOverride := userConfig["server_url"]; serverURLOverride != "" {
+		mcpConfig.ServerURL = serverURLOverride
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("[MCP] StartPlugin: Overriding server_url for '%s': %s → %s", pluginID, installed.ServerURL, serverURLOverride)
+		}
+	}
+
+	// For remote plugins, merge env vars from config into Env
+	switch plugin.InstallType {
+	case "remote":
+		// Get config which may contain auth headers
+		for k, v := range m.pluginsConfig.GetPluginConfig(pluginID) {
+			mcpConfig.Env[k] = v
+		}
+	}
+
+	// Substitute session template variables in environment
+	if m.currentSession != nil {
+		mcpConfig.Env = SubstituteSessionVars(mcpConfig.Env, m.currentSession.ID, m.currentSession.Name, m.dataDir)
 	}
 
 	if config.DebugLog != nil {

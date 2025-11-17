@@ -29,10 +29,7 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			return a, nil
 		}
 
-		// Remove loading message
-		if len(a.dataModel.Messages) > 0 && a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" {
-			a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
-		}
+		// Keep system message - spinner stays animated until first real content arrives
 
 		// Initialize typewriter effect
 		a.chunks = msg.Chunks
@@ -41,7 +38,7 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		a.currentResp.Reset()
 
 		// Start displaying chunks with typewriter effect after a brief delay
-		// This gives the spinner time to be visible
+		// System message with animated spinner stays visible during this delay
 		return a, tea.Tick(300*time.Millisecond, func(time.Time) tea.Msg {
 			return displayChunkTickMsg{}
 		})
@@ -88,7 +85,19 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		chunk := a.chunks[a.chunkIndex]
 		a.chunkIndex++
 		a.currentResp.WriteString(chunk)
-		a.updateStreamingMessage()
+
+		// Remove loading message AFTER first NON-EMPTY chunk is written
+		if a.currentResp.String() != "" {
+			if len(a.dataModel.Messages) > 0 && a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" {
+				a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
+			}
+		}
+
+		// Only update streaming message if system message is already gone
+		// (While system message exists, spinner animates via updateViewportContent in appview_update.go)
+		if len(a.dataModel.Messages) == 0 || a.dataModel.Messages[len(a.dataModel.Messages)-1].Role != "system" {
+			a.updateStreamingMessage()
+		}
 
 		// Schedule next chunk with delay (30ms, but first chunk is immediate)
 		delay := 30 * time.Millisecond

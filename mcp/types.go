@@ -19,6 +19,8 @@ type PluginProcess struct {
 	Tools     []mcptypes.Tool
 	Running   bool
 	Error     error
+	IsRemote  bool   // Remote plugins don't have local processes
+	ServerURL string // URL for remote plugins
 }
 
 type PluginConfig struct {
@@ -28,4 +30,7 @@ type PluginConfig struct {
 	Args       []string
 	Env        map[string]string
 	Config     map[string]string
+	ServerURL  string // For remote plugins
+	AuthType   string // "none", "headers", "oauth"
+	Transport  string // "sse" (default), "streamable-http"
 }

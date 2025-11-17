@@ -116,9 +116,28 @@ func (r *Registry) Refresh() error {
 }
 
 func (r *Registry) GetAll() []Plugin {
+	// Build map of custom plugin IDs for fast lookup
+	customIDs := make(map[string]bool)
+	for _, cp := range r.customPlugins {
+		customIDs[cp.ID] = true
+	}
+
+	// Add custom plugins first (they have precedence)
 	all := make([]Plugin, 0, len(r.plugins)+len(r.customPlugins))
-	all = append(all, r.plugins...)
 	all = append(all, r.customPlugins...)
+
+	// Add registry plugins only if no custom plugin has same ID
+	for _, rp := range r.plugins {
+		if customIDs[rp.ID] {
+			// Skip registry plugin - custom version takes precedence
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("[Registry] Hiding registry plugin '%s' - custom version installed", rp.ID)
+			}
+			continue
+		}
+		all = append(all, rp)
+	}
+
 	return all
 }
 
@@ -458,4 +477,55 @@ func containsTag(tags []string, query string) bool {
 		}
 	}
 	return false
+}
+
+// UpdateCustomPlugin updates an existing custom plugin in the registry
+// Updates both in-memory slice and custom_plugins.json file
+// Returns trust warnings and error
+func (r *Registry) UpdateCustomPlugin(pluginID string, updatedPlugin *Plugin) ([]string, error) {
+	// Validation
+	switch {
+	case pluginID == "":
+		return nil, fmt.Errorf("plugin ID cannot be empty")
+	case updatedPlugin == nil:
+		return nil, fmt.Errorf("updated plugin cannot be nil")
+	}
+
+	// Ensure it's marked as custom
+	updatedPlugin.Custom = true
+
+	// Find and update in customPlugins slice
+	found := false
+	for i, p := range r.customPlugins {
+		if p.ID == pluginID {
+			// Preserve original timestamps if not set
+			if updatedPlugin.UpdatedAt.IsZero() {
+				updatedPlugin.UpdatedAt = time.Now()
+			}
+
+			r.customPlugins[i] = *updatedPlugin
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return nil, fmt.Errorf("plugin %s not found in custom plugins", pluginID)
+	}
+
+	// Save to custom_plugins.json
+	if err := r.saveCustomPlugins(); err != nil {
+		return nil, fmt.Errorf("failed to save custom plugins: %w", err)
+	}
+
+	// Generate trust warnings (reuse existing logic)
+	trustWarnings := []string{}
+	if !updatedPlugin.Verified {
+		trustWarnings = append(trustWarnings, "⚠️  This plugin is not verified by the OTUI team")
+	}
+	if updatedPlugin.Repository == "" {
+		trustWarnings = append(trustWarnings, "⚠️  No repository URL provided")
+	}
+
+	return trustWarnings, nil
 }

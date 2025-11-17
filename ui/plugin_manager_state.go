@@ -98,8 +98,10 @@ type ConfirmationModalStates struct {
 
 // AddCustomModalState manages the add custom plugin form with sub-modals
 type AddCustomModalState struct {
-	visible  bool
-	urlInput textinput.Model
+	visible       bool
+	editMode      bool        // true when editing existing plugin
+	editingPlugin *mcp.Plugin // Plugin being edited
+	urlInput      textinput.Model
 
 	// Form fields
 	fields   map[string]textinput.Model

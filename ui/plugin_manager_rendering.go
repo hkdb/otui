@@ -124,7 +124,12 @@ func (a *AppView) renderPluginItem(plugin mcp.Plugin, selected bool, width int) 
 		}
 	}
 
-	description := stripEmojisAndSymbols(plugin.Description)
+	// Show plugin name in Installed tab, description in other tabs
+	displayText := plugin.Description
+	if a.pluginManagerState.selection.viewMode == "installed" {
+		displayText = plugin.Name
+	}
+	description := stripEmojisAndSymbols(displayText)
 	descWidth := 50
 
 	if runewidth.StringWidth(description) > descWidth {
@@ -171,7 +176,7 @@ func (a *AppView) renderPluginFooter() string {
 			"Alt+i", "Install",
 			"Esc", "Cancel",
 		)
-		return lipgloss.NewStyle().Padding(0, 2).Render(footer)
+		return lipgloss.NewStyle().Padding(1, 2, 0, 2).Render(footer)
 	}
 
 	// Base keys for all modes
@@ -188,6 +193,9 @@ func (a *AppView) renderPluginFooter() string {
 		plugins := a.getVisiblePlugins()
 		if len(plugins) > 0 && a.pluginManagerState.selection.selectedPluginIdx < len(plugins) {
 			plugin := plugins[a.pluginManagerState.selection.selectedPluginIdx]
+			if plugin.Custom {
+				footerParts = append(footerParts, "e", "Edit")
+			}
 			if !a.pluginManagerState.pluginState.Installer.IsInstalled(plugin.ID) {
 				footerParts = append(footerParts, "i", "Install")
 			}
@@ -217,7 +225,7 @@ func (a *AppView) renderPluginFooter() string {
 	footerParts = append(footerParts, "Alt+R", "Refresh", "Esc", "Close")
 
 	footer := FormatFooter(footerParts...)
-	return lipgloss.NewStyle().Padding(0, 2).Render(footer)
+	return lipgloss.NewStyle().Padding(1, 2, 0, 2).Render(footer)
 }
 
 // renderPluginDetails renders the detailed view of a selected plugin
@@ -274,10 +282,18 @@ func (a *AppView) renderPluginDetails() string {
 	// Dynamic footer based on install status
 	installed := a.pluginManagerState.pluginState.Installer.IsInstalled(plugin.ID)
 	var footer string
-	if installed {
-		footer = FormatFooter("u", "Uninstall", "c", "Configure", "Esc", "Close")
-	} else {
+
+	if !installed {
 		footer = FormatFooter("i", "Install", "Esc", "Close")
+		return RenderThreeSectionModal(plugin.Name, messageLines, footer, ModalTypeInfo, 80, a.width, a.height)
+	}
+
+	// Plugin is installed - show uninstall and configure options
+	footer = FormatFooter("u", "Uninstall", "c", "Configure", "Esc", "Close")
+
+	// Add edit option for custom plugins
+	if plugin.Custom {
+		footer = FormatFooter("u", "Uninstall", "c", "Configure", "e", "Edit", "Esc", "Close")
 	}
 
 	return RenderThreeSectionModal(plugin.Name, messageLines, footer, ModalTypeInfo, 80, a.width, a.height)

@@ -74,10 +74,7 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			return a, nil
 		}
 
-		// Remove loading message if present
-		if len(a.dataModel.Messages) > 0 && a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" {
-			a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
-		}
+		// Keep system message - spinner stays animated until first real content arrives
 
 		// Initialize typewriter effect (same as normal responses)
 		a.chunks = msg.Chunks
@@ -86,6 +83,7 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		a.currentResp.Reset()
 
 		// Start displaying chunks with typewriter effect
+		// System message with animated spinner stays visible during this delay
 		return a, tea.Tick(300*time.Millisecond, func(time.Time) tea.Msg {
 			return displayChunkTickMsg{}
 		})

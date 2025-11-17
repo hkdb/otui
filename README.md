@@ -245,7 +245,7 @@ rm -rf ~/.local/share/otui # or whatever data dir the user specified. This also 
 - 🚧 More Sophisticated session/context management
 
 **Future Features**:
-- 🪶 Data folder values encryption
+- 🪶 Session data encryption
 - 🪶 Keybindings modifier customization
 
 ## 🎬 Credits

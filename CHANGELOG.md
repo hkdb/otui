@@ -1,5 +1,27 @@
 # Changelog
 
+## [v0.04.00] - 2025-11-17
+
+** Features: **
+
+- Support separately managed remote MCP servers
+- Support for MCPs using streamable HTTP connection transport type
+- Added dynamic env var: `{{OTUI_SESSION_ID}}, {{OTUI_SESSION_NAME}}, {{OTUI_DATA_DIR}}, & {{OTUI_USER}}`
+- Added ability to parse args and env var default values from registry
+- Encrypt senstive env var for mcp plugins
+- Added the ability to edit custom plugin
+
+**Maintenance & Bug Fixes:**
+
+- Changed Plugin Manager's "Installed" tab to show name of plugin instead of description
+- Added some padding between end of plugin list and footer in Plugin Manager
+- Delayed clearing of "waiting for response" spinner for models that stream empty chunks in the beginning
+- Added the missing python3-venv package in Docker image
+
+[v0.04.00]: https://github.com/hkdb/otui/releases/tag/v0.04.00
+
+---
+
 ## [v0.03.04] - 2025-11-13
 
 **Maintenance & Bug Fixes:**

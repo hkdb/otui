@@ -4,6 +4,7 @@ import (
 	"context"
 
 	mcptypes "github.com/mark3labs/mcp-go/mcp"
+	"otui/config"
 )
 
 type Client struct {
@@ -11,8 +12,8 @@ type Client struct {
 	aggregator     *ToolAggregator
 }
 
-func NewClient(registry *Registry) *Client {
-	pm := NewProcessManager()
+func NewClient(registry *Registry, dataDir string, cfg *config.Config) *Client {
+	pm := NewProcessManager(dataDir, cfg)
 	return &Client{
 		processManager: pm,
 		aggregator:     NewToolAggregator(pm, registry),

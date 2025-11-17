@@ -4,13 +4,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
 
 type PluginConfigEntry struct {
-	Enabled bool              `toml:"enabled"`
-	Config  map[string]string `toml:"config,omitempty"`
+	Enabled       bool              `toml:"enabled"`
+	Config        map[string]string `toml:"config,omitempty"`         // Non-sensitive OR all values if plaintext
+	SensitiveKeys []string          `toml:"sensitive_keys,omitempty"` // Keys stored in CredentialStore
 }
 
 type PluginsConfig struct {
@@ -120,4 +122,101 @@ func (pc *PluginsConfig) DeletePlugin(pluginID string) {
 		return
 	}
 	delete(pc.Plugins, pluginID)
+}
+
+// isSensitiveKey determines if a key contains sensitive data
+func isSensitiveKey(key string) bool {
+	upperKey := strings.ToUpper(key)
+	sensitiveWords := []string{"KEY", "TOKEN", "SECRET", "PASSWORD", "AUTH", "CREDENTIAL", "BEARER"}
+	for _, word := range sensitiveWords {
+		switch {
+		case strings.Contains(upperKey, word):
+			return true
+		}
+	}
+	return false
+}
+
+// SavePluginConfigSecure saves plugin config with proper security handling
+func SavePluginConfigSecure(cfg *Config, dataDir string, pluginsConfig *PluginsConfig, pluginID string, configValues map[string]string) error {
+	switch cfg.Security.CredentialStorage {
+	case string(SecuritySSHKey):
+		// Separate sensitive from non-sensitive
+		sensitiveKeys := []string{}
+		plaintextConfig := make(map[string]string)
+
+		for key, value := range configValues {
+			isSensitive := isSensitiveKey(key)
+			switch {
+			case isSensitive:
+				// Store in CredentialStore (encrypted)
+				if err := cfg.CredentialStore.SetPlugin(pluginID, key, value); err != nil {
+					return fmt.Errorf("failed to save sensitive key %s: %w", key, err)
+				}
+				sensitiveKeys = append(sensitiveKeys, key)
+			default:
+				// Store in plaintext TOML
+				plaintextConfig[key] = value
+			}
+		}
+
+		// Save config entry
+		entry := PluginConfigEntry{
+			Enabled:       pluginsConfig.GetPluginEnabled(pluginID),
+			Config:        plaintextConfig,
+			SensitiveKeys: sensitiveKeys,
+		}
+		pluginsConfig.Plugins[pluginID] = entry
+
+		// Save encrypted credentials
+		return cfg.CredentialStore.Save(dataDir)
+
+	case string(SecurityPlainText):
+		// Store everything in plaintext
+		entry := PluginConfigEntry{
+			Enabled:       pluginsConfig.GetPluginEnabled(pluginID),
+			Config:        configValues,
+			SensitiveKeys: []string{}, // Empty - using plaintext
+		}
+		pluginsConfig.Plugins[pluginID] = entry
+		return nil
+
+	default:
+		return fmt.Errorf("unknown security method: %s", cfg.Security.CredentialStorage)
+	}
+}
+
+// LoadPluginConfigSecure loads plugin config with proper security handling
+func LoadPluginConfigSecure(cfg *Config, pluginsConfig *PluginsConfig, pluginID string) (map[string]string, error) {
+	entry, exists := pluginsConfig.Plugins[pluginID]
+	switch {
+	case !exists:
+		return make(map[string]string), nil
+	}
+
+	result := make(map[string]string)
+
+	// Load plaintext config
+	for key, value := range entry.Config {
+		result[key] = value
+	}
+
+	// Load sensitive keys from CredentialStore (only if using encryption)
+	switch cfg.Security.CredentialStorage {
+	case string(SecuritySSHKey):
+		for _, key := range entry.SensitiveKeys {
+			value := cfg.CredentialStore.GetPlugin(pluginID, key)
+			switch {
+			case value == "":
+				continue
+			}
+			result[key] = value
+		}
+	case string(SecurityPlainText):
+		// All values already in Config, nothing more to load
+	default:
+		return nil, fmt.Errorf("unknown security method: %s", cfg.Security.CredentialStorage)
+	}
+
+	return result, nil
 }

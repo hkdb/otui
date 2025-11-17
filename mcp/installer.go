@@ -75,6 +75,8 @@ func (i *Installer) InstallWithContext(ctx context.Context, plugin *Plugin, prog
 		return i.installGoWithContext(ctx, plugin, progressCh)
 	case "binary":
 		return i.installBinaryWithContext(ctx, plugin, progressCh)
+	case "remote":
+		return i.installRemoteWithContext(ctx, plugin, progressCh)
 	default:
 		// Treat all other install types (manual, docker, uvx, etc.) as manual installation
 		return i.installManualWithContext(ctx, plugin, progressCh)
@@ -151,6 +153,8 @@ func (i *Installer) ListInstalled() ([]storage.InstalledPlugin, error) {
 
 func (i *Installer) checkRuntimeDeps(plugin *Plugin) error {
 	switch plugin.InstallType {
+	case "remote":
+		return nil // No runtime dependencies for remote plugins
 	case "npm":
 		if _, err := i.runtimeChecker.CheckRuntime("node"); err != nil {
 			return fmt.Errorf("Node.js is required: %w", err)
@@ -611,4 +615,118 @@ func (i *Installer) installManualWithContext(ctx context.Context, plugin *Plugin
 	default:
 	}
 	return i.installManual(plugin, progressCh)
+}
+
+func (i *Installer) installRemoteWithContext(ctx context.Context, plugin *Plugin, progressCh chan<- InstallProgress) error {
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("installation cancelled")
+	default:
+	}
+
+	switch {
+	case plugin.ServerURL == "":
+		return fmt.Errorf("remote plugins require a server URL")
+	}
+
+	switch {
+	case progressCh != nil:
+		progressCh <- InstallProgress{Stage: "validating", Percent: 50, Message: "Validating URL format..."}
+	}
+
+	// Validate URL format
+	switch {
+	case strings.HasPrefix(plugin.ServerURL, "http://"):
+		// OK
+	case strings.HasPrefix(plugin.ServerURL, "https://"):
+		// OK
+	default:
+		return fmt.Errorf("server URL must start with http:// or https://")
+	}
+
+	// Set default auth type
+	switch plugin.AuthType {
+	case "":
+		plugin.AuthType = "none"
+	}
+
+	// NO connection test - runtime errors will surface naturally
+
+	// Save metadata
+	now := time.Now()
+	installedPlugin := storage.InstalledPlugin{
+		ID:            plugin.ID,
+		Name:          plugin.Name,
+		ServerURL:     plugin.ServerURL,
+		AuthType:      plugin.AuthType,
+		Transport:     plugin.Transport,
+		Version:       "",
+		InstallPath:   "",
+		InstallMethod: "remote",
+		InstalledAt:   now,
+		UpdatedAt:     now,
+	}
+
+	if err := i.storage.Save(installedPlugin); err != nil {
+		return fmt.Errorf("failed to save remote plugin: %w", err)
+	}
+
+	// Set plugin disabled by default (like other install types)
+	freshConfig, err := config.LoadPluginsConfig(i.dataDir)
+	switch {
+	case err == nil:
+		freshConfig.SetPluginEnabled(plugin.ID, false)
+		_ = config.SavePluginsConfig(i.dataDir, freshConfig)
+		i.pluginsConfig = freshConfig
+	}
+
+	switch {
+	case progressCh != nil:
+		progressCh <- InstallProgress{Stage: "complete", Percent: 100, Message: "Remote plugin added"}
+	}
+
+	return nil
+}
+
+// UpdateCustomPlugin updates an existing custom plugin in the database
+func (i *Installer) UpdateCustomPlugin(plugin *Plugin) error {
+	// Validation
+	switch {
+	case plugin == nil:
+		return fmt.Errorf("plugin cannot be nil")
+	case plugin.ID == "":
+		return fmt.Errorf("plugin ID cannot be empty")
+	}
+
+	// Check if plugin is installed
+	if !i.IsInstalled(plugin.ID) {
+		return fmt.Errorf("plugin %s is not installed", plugin.ID)
+	}
+
+	// Load existing metadata to preserve InstalledAt timestamp
+	existing, err := i.storage.Load(plugin.ID)
+	if err != nil {
+		return fmt.Errorf("failed to load existing plugin: %w", err)
+	}
+
+	// Build updated database record
+	installedPlugin := storage.InstalledPlugin{
+		ID:            plugin.ID,
+		Name:          plugin.Name,
+		Version:       existing.Version,     // Preserve version
+		InstallPath:   existing.InstallPath, // Preserve install path
+		InstallMethod: plugin.InstallType,
+		ServerURL:     plugin.ServerURL,
+		AuthType:      plugin.AuthType,
+		Transport:     plugin.Transport,
+		InstalledAt:   existing.InstalledAt, // Preserve original install time
+		UpdatedAt:     time.Now(),           // Update timestamp
+	}
+
+	// Update database
+	if err := i.storage.Update(installedPlugin); err != nil {
+		return fmt.Errorf("failed to update database: %w", err)
+	}
+
+	return nil
 }

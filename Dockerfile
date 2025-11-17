@@ -19,7 +19,7 @@ RUN apt-get update -y \
 RUN apt-get install -y golang
 
 # Install other required packages
-RUN apt-get install -y gnupg git curl libnotify4 libnss3 build-essential nano neovim emacs sudo python3 python3-pip
+RUN apt-get install -y gnupg git curl libnotify4 libnss3 build-essential nano neovim emacs sudo python3 python3-pip python3-venv
 
 # Clean up after installation
 RUN apt clean && rm -rf /var/lib/apt/lists/*
