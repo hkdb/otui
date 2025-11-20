@@ -6,6 +6,7 @@ import (
 	"otui/mcp"
 	"otui/model"
 	"otui/ollama"
+	"strings"
 
 	mcptypes "github.com/mark3labs/mcp-go/mcp"
 	"github.com/ollama/ollama/api"
@@ -105,18 +106,48 @@ func (p *OllamaProvider) ChatWithTools(ctx context.Context, messages []model.Mes
 		ollamaTools = mcp.ConvertMCPToolsToOllama(tools)
 	}
 
-	// Wrap the provider callback to convert Ollama tool calls
+	// Track content and tool calls for leak detection
+	var contentBuilder strings.Builder
+	var apiToolCallsDetected bool
+
+	// Wrap the provider callback to convert Ollama tool calls and track for leaks
 	ollamaCallback := func(chunk string, ollamaCalls []api.ToolCall) error {
 		if callback == nil {
 			return nil
 		}
 
+		// Track content for leak detection
+		contentBuilder.WriteString(chunk)
+
 		// Convert Ollama tool calls to provider-agnostic tool calls
 		providerCalls := ConvertToProviderToolCalls(ollamaCalls)
+		if len(providerCalls) > 0 {
+			apiToolCallsDetected = true
+		}
 		return callback(chunk, providerCalls)
 	}
 
-	return p.client.ChatWithTools(ctx, ollamaMessages, ollamaTools, ollamaCallback)
+	err := p.client.ChatWithTools(ctx, ollamaMessages, ollamaTools, ollamaCallback)
+	if err != nil {
+		return err
+	}
+
+	// Safety check: detect leaked tool calls if none were detected via API
+	if !apiToolCallsDetected && callback != nil {
+		fullContent := contentBuilder.String()
+
+		// Check for JSON leaked tool calls
+		if leakedCalls := ParseLeakedJSONToolCalls(fullContent); len(leakedCalls) > 0 {
+			callback("", leakedCalls)
+		}
+
+		// Check for XML leaked tool calls
+		if leakedCalls := ParseLeakedXMLToolCalls(fullContent); len(leakedCalls) > 0 {
+			callback("", leakedCalls)
+		}
+	}
+
+	return nil
 }
 
 // ListModels implements Provider.ListModels (direct passthrough).

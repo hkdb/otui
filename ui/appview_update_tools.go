@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"otui/config"
@@ -19,44 +18,33 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			config.DebugLog.Printf("Tool calls detected: %d calls", len(msg.ToolCalls))
 		}
 
-		// Set executing tool indicator (use first tool's plugin name)
-		if len(msg.ToolCalls) > 0 {
-			// Extract plugin ID from namespaced tool name (e.g., "ihor-sokoliuk-mcp-searxng.search" -> "ihor-sokoliuk-mcp-searxng")
-			toolName := msg.ToolCalls[0].Name
-			var pluginID string
-			if idx := strings.Index(toolName, "."); idx != -1 {
-				pluginID = toolName[:idx]
-			} else {
-				pluginID = toolName
-			}
+		// Sync iteration state
+		a.iterationCount = a.dataModel.CurrentIteration
+		a.maxIterations = a.dataModel.MaxIterations
 
-			// Get short display name from registry (e.g., "ihor-sokoliuk-mcp-searxng" -> "mcp-searxng")
-			if a.dataModel.MCPManager != nil {
-				shortName := a.dataModel.MCPManager.GetPluginShortName(pluginID)
-				if shortName != "" {
-					a.executingTool = shortName
-				} else {
-					a.executingTool = pluginID // Fallback
-				}
-			} else {
-				a.executingTool = pluginID
-			}
-
-			// Initialize and start tool execution spinner
-			a.toolExecutionSpinner = spinner.New()
-			a.toolExecutionSpinner.Spinner = spinner.Dot
-
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Starting tool execution for: %s", a.executingTool)
-			}
-
-			return a, tea.Batch(
-				a.toolExecutionSpinner.Tick,
-				a.dataModel.ExecuteToolsAndContinue(msg),
-			)
+		if len(msg.ToolCalls) == 0 {
+			return a, nil
 		}
 
-		return a, nil
+		// Remove "Waiting for response..." message
+		a.removeLastNonPersistentSystemMessage()
+
+		// Extract purpose and create step message
+		var firstToolCall *ToolCall
+		if len(msg.ToolCalls) > 0 {
+			firstToolCall = &msg.ToolCalls[0]
+		}
+		purpose := a.dataModel.ExtractPurpose(msg.ContextMessages, firstToolCall)
+		a.createStepMessage(purpose, a.iterationCount+1)
+
+		// Start tool execution
+		a.startToolExecution(msg.ToolCalls[0].Name)
+
+		return a, tea.Batch(
+			a.toolExecutionSpinner.Tick,
+			a.loadingSpinner.Tick,
+			a.dataModel.ExecuteToolsAndContinue(msg),
+		)
 
 	case toolExecutionCompleteMsg:
 		if config.DebugLog != nil {
@@ -66,44 +54,67 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		// Clear tool execution state
 		a.executingTool = ""
 
+		// CLEANUP: Remove temporarily allowed tools
+		a = a.cleanupTemporaryTools()
+
 		// Ignore if user cancelled
 		if !a.dataModel.Streaming {
 			if config.DebugLog != nil {
-				config.DebugLog.Printf("Ignoring toolExecutionCompleteMsg - user cancelled")
+				config.DebugLog.Printf("Ignoring toolExecutionCompleteMsg - cancelled")
 			}
 			return a, nil
 		}
 
-		// Keep system message - spinner stays animated until first real content arrives
+		// Complete the step (checkmark + persistent)
+		a.completeStepMessage()
 
-		// Initialize typewriter effect (same as normal responses)
-		a.chunks = msg.Chunks
-		a.chunkIndex = 0
-		a.dataModel.Streaming = true
-		a.currentResp.Reset()
+		// Show analyzing state
+		a.showAnalyzingResults()
 
-		// Start displaying chunks with typewriter effect
-		// System message with animated spinner stays visible during this delay
-		return a, tea.Tick(300*time.Millisecond, func(time.Time) tea.Msg {
-			return displayChunkTickMsg{}
-		})
+		// Store summary to add after typewriter completes
+		if msg.IterationSummary.TotalSteps > 0 {
+			a.pendingSummary = &msg.IterationSummary
+		}
+
+		// Store pending step info if iteration continues
+		if msg.HasMoreSteps {
+			a.pendingNextStep = true
+			a.pendingToolCalls = msg.NextToolCalls
+			a.pendingToolContext = msg.NextContext
+		}
+		if !msg.HasMoreSteps {
+			a.pendingNextStep = false
+			a.iterationCount = 0
+			a.dataModel.CurrentIteration = 0
+		}
+
+		// Start typewriter
+		return a, a.startTypewriter(msg.Chunks)
 
 	case toolExecutionErrorMsg:
 		if config.DebugLog != nil {
 			config.DebugLog.Printf("Tool execution error: %v", msg.Err)
 		}
 
-		// Clear execution state
+		// Clear state
 		a.executingTool = ""
 		a.dataModel.Streaming = false
 		a.currentResp.Reset()
+		a.iterationCount = 0
+		a.dataModel.CurrentIteration = 0
+		a.pendingNextStep = false
 
-		// Remove loading message
-		if len(a.dataModel.Messages) > 0 && a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" {
+		// CLEANUP: Remove temporarily allowed tools
+		a = a.cleanupTemporaryTools()
+
+		// Remove step message
+		if len(a.dataModel.Messages) > 0 &&
+			a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" &&
+			strings.HasPrefix(a.dataModel.Messages[len(a.dataModel.Messages)-1].Content, "🔧 ") {
 			a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
 		}
 
-		// Show error message
+		// Show error
 		a.dataModel.Messages = append(a.dataModel.Messages, Message{
 			Role:      "system",
 			Content:   fmt.Sprintf("❌ Tool execution error: %v", msg.Err),
@@ -113,7 +124,161 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 
 		a.updateViewportContent(true)
 		return a, nil
+
+	case toolPermissionRequestMsg:
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("Permission request for tool: %s", msg.ToolName)
+		}
+
+		// Clear tool execution state (we're paused for permission)
+		a.executingTool = ""
+
+		// Build permission content
+		details := a.dataModel.BuildToolDetails(msg.ToolCall)
+		content := buildPermissionContent(msg.ToolName, msg.Purpose, details)
+
+		// Add permission message to chat
+		a.dataModel.Messages = append(a.dataModel.Messages, Message{
+			Role:      "system",
+			Content:   content,
+			Rendered:  content,
+			Timestamp: time.Now(),
+		})
+
+		// Set waiting state
+		a.waitingForPermission = true
+		a.pendingPermission = &msg
+
+		a.updateViewportContent(true)
+		return a, nil
+
+	case toolPermissionResponseMsg:
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("Permission response - Approved: %v, AlwaysAllow: %v", msg.Approved, msg.AlwaysAllow)
+		}
+
+		// Remove permission message from chat
+		a = a.removeLastSystemMessage()
+
+		// Clear waiting state
+		a.waitingForPermission = false
+		a.pendingPermission = nil
+
+		// EARLY RETURN: Handle denial
+		if !msg.Approved {
+			a.dataModel.Streaming = false
+
+			// Remove "Waiting for response..." loading message (but not persistent step messages)
+			if len(a.dataModel.Messages) > 0 &&
+				a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" &&
+				!a.dataModel.Messages[len(a.dataModel.Messages)-1].Persistent {
+				a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
+			}
+
+			// Show error message
+			a.dataModel.Messages = append(a.dataModel.Messages, Message{
+				Role:      "system",
+				Content:   fmt.Sprintf("❌ Permission denied for tool: %s", msg.ToolName),
+				Rendered:  fmt.Sprintf("❌ Permission denied for tool: %s", msg.ToolName),
+				Timestamp: time.Now(),
+			})
+			a.updateViewportContent(true)
+			return a, nil
+		}
+
+		// EARLY RETURN: No session to work with
+		if a.dataModel.CurrentSession == nil {
+			return a, nil
+		}
+
+		// Tool approved - add to allowed list (both "once" and "always")
+		a.dataModel.CurrentSession.AllowedTools = append(
+			a.dataModel.CurrentSession.AllowedTools,
+			msg.ToolName,
+		)
+
+		// Handle persistence based on AlwaysAllow flag
+		if msg.AlwaysAllow {
+			// ALWAYS ALLOW: Mark session dirty for disk persistence
+			a.dataModel.SessionDirty = true
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("Added %s to session allowed tools (PERSISTENT)", msg.ToolName)
+			}
+		}
+
+		// NOT AlwaysAllow: Track for removal after execution
+		if !msg.AlwaysAllow {
+			a.temporarilyAllowedTools = append(a.temporarilyAllowedTools, msg.ToolName)
+			// DON'T mark session dirty (no disk persistence)
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("Added %s to session allowed tools (TEMPORARY)", msg.ToolName)
+			}
+		}
+
+		// Re-trigger tool execution with approved tool now in allowed list
+		toolMsg := toolCallsDetectedMsg{
+			ToolCalls:       []ToolCall{msg.ToolCall},
+			InitialResponse: "",
+			ContextMessages: msg.ContextMessages,
+		}
+
+		// Start tool execution with proper state
+		a.startToolExecution(msg.ToolCall.Name)
+
+		return a, tea.Batch(
+			a.toolExecutionSpinner.Tick,
+			a.dataModel.ExecuteToolsAndContinue(toolMsg),
+		)
 	}
 
 	return a, nil
+}
+
+// removeLastSystemMessage removes the last system message from the chat (used to clean up permission prompts)
+func (a AppView) removeLastSystemMessage() AppView {
+	if len(a.dataModel.Messages) == 0 {
+		return a
+	}
+
+	lastIdx := len(a.dataModel.Messages) - 1
+	if a.dataModel.Messages[lastIdx].Role == "system" {
+		a.dataModel.Messages = a.dataModel.Messages[:lastIdx]
+		a.updateViewportContent(false) // Don't auto-scroll when removing
+	}
+
+	return a
+}
+
+// cleanupTemporaryTools removes temporarily allowed tools from the session
+func (a AppView) cleanupTemporaryTools() AppView {
+	// EARLY RETURN: Nothing to clean up
+	if len(a.temporarilyAllowedTools) == 0 {
+		return a
+	}
+
+	// EARLY RETURN: No session to clean
+	if a.dataModel.CurrentSession == nil {
+		a.temporarilyAllowedTools = []string{}
+		return a
+	}
+
+	// Remove each temporary tool from session.AllowedTools
+	for _, tempTool := range a.temporarilyAllowedTools {
+		filtered := []string{}
+		for _, tool := range a.dataModel.CurrentSession.AllowedTools {
+			if tool != tempTool {
+				filtered = append(filtered, tool)
+			}
+		}
+		a.dataModel.CurrentSession.AllowedTools = filtered
+
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("Removed temporary tool from allowed list: %s", tempTool)
+		}
+	}
+
+	// Clear temporary list
+	a.temporarilyAllowedTools = []string{}
+
+	return a
 }

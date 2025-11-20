@@ -142,6 +142,10 @@ func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model
 	stream := p.client.Chat.Completions.NewStreaming(ctx, params)
 	acc := openai.ChatCompletionAccumulator{}
 
+	// Track if we got tool calls via API
+	var apiToolCallsDetected bool
+	var contentBuilder strings.Builder
+
 	// Process stream
 	for stream.Next() {
 		chunk := stream.Current()
@@ -149,6 +153,7 @@ func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model
 
 		// Handle finished tool calls
 		if tool, ok := acc.JustFinishedToolCall(); ok {
+			apiToolCallsDetected = true
 			if callback != nil {
 				// Convert to provider tool call (convert underscores back to dots)
 				args := ParseToolArguments(tool.Arguments)
@@ -160,10 +165,12 @@ func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model
 			}
 		}
 
-		// Send content delta
+		// Send content delta and accumulate for leak detection
 		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
+			content := chunk.Choices[0].Delta.Content
+			contentBuilder.WriteString(content)
 			if callback != nil {
-				callback(chunk.Choices[0].Delta.Content, nil)
+				callback(content, nil)
 			}
 		}
 	}
@@ -171,6 +178,32 @@ func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model
 	// Check for errors
 	if err := stream.Err(); err != nil {
 		return fmt.Errorf("OpenRouter streaming error: %w", err)
+	}
+
+	// Safety check: detect leaked tool calls if none were detected via API
+	if !apiToolCallsDetected && callback != nil {
+		fullContent := contentBuilder.String()
+
+		// Check for JSON leaked tool calls
+		if leakedCalls := ParseLeakedJSONToolCalls(fullContent); len(leakedCalls) > 0 {
+			// Convert tool names from OpenRouter format
+			for i := range leakedCalls {
+				leakedCalls[i].Name = convertToolNameFromOpenRouter(leakedCalls[i].Name)
+			}
+			callback("", leakedCalls)
+
+			// Note: Content was already streamed, but we could clean it in future
+			// by tracking and re-sending cleaned content
+		}
+
+		// Check for XML leaked tool calls
+		if leakedCalls := ParseLeakedXMLToolCalls(fullContent); len(leakedCalls) > 0 {
+			// Convert tool names from OpenRouter format
+			for i := range leakedCalls {
+				leakedCalls[i].Name = convertToolNameFromOpenRouter(leakedCalls[i].Name)
+			}
+			callback("", leakedCalls)
+		}
 	}
 
 	return nil

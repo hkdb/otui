@@ -24,7 +24,10 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	)
 
 	// Update spinner FIRST to handle TickMsg before anything else
-	if a.dataModel.Streaming && len(a.dataModel.Messages) > 0 && a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" {
+	// Only for non-persistent system messages (transient loading/analyzing messages that need spinner)
+	if a.dataModel.Streaming && len(a.dataModel.Messages) > 0 &&
+		a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" &&
+		!a.dataModel.Messages[len(a.dataModel.Messages)-1].Persistent {
 		a.loadingSpinner, cmd = a.loadingSpinner.Update(msg)
 		cmds = append(cmds, cmd)
 		// Update viewport to show animated spinner
@@ -180,6 +183,48 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = a.dataModel.SessionStorage.UnlockSession(a.dataModel.CurrentSession.ID)
 			}
 			return a, tea.Quit
+		}
+
+		// PRIORITY 0.5: Permission system key handling (blocks all other keys when active)
+		if a.waitingForPermission && a.pendingPermission != nil {
+			switch msg.String() {
+			case "y":
+				// Yes - Approve once
+				response := toolPermissionResponseMsg{
+					Approved:        true,
+					AlwaysAllow:     false,
+					ToolName:        a.pendingPermission.ToolName,
+					ToolCall:        a.pendingPermission.ToolCall,
+					ContextMessages: a.pendingPermission.ContextMessages,
+				}
+				return a.Update(response)
+
+			case "a":
+				// Always allow
+				response := toolPermissionResponseMsg{
+					Approved:        true,
+					AlwaysAllow:     true,
+					ToolName:        a.pendingPermission.ToolName,
+					ToolCall:        a.pendingPermission.ToolCall,
+					ContextMessages: a.pendingPermission.ContextMessages,
+				}
+				return a.Update(response)
+
+			case "n":
+				// No - Deny
+				response := toolPermissionResponseMsg{
+					Approved:        false,
+					AlwaysAllow:     false,
+					ToolName:        a.pendingPermission.ToolName,
+					ToolCall:        a.pendingPermission.ToolCall,
+					ContextMessages: a.pendingPermission.ContextMessages,
+				}
+				return a.Update(response)
+
+			default:
+				// Block all other keys while waiting for permission
+				return a, nil
+			}
 		}
 
 		// PRIORITY 1: Modal toggle shortcuts (close current modal, open new one)
@@ -547,7 +592,10 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			partialResp := a.currentResp.String()
 
-			if len(a.dataModel.Messages) > 0 && a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" {
+			// Remove loading message (but not persistent step messages)
+			if len(a.dataModel.Messages) > 0 &&
+				a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" &&
+				!a.dataModel.Messages[len(a.dataModel.Messages)-1].Persistent {
 				a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
 			}
 
@@ -779,7 +827,8 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Phase 6: Tool execution handlers
 	// Tool messages → appview_update_tools.go
-	case toolCallsDetectedMsg, toolExecutionCompleteMsg, toolExecutionErrorMsg:
+	case toolCallsDetectedMsg, toolExecutionCompleteMsg, toolExecutionErrorMsg,
+		toolPermissionRequestMsg, toolPermissionResponseMsg:
 		return a.handleToolMessage(msg)
 
 	// UI messages → appview_update_ui.go

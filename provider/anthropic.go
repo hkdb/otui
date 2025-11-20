@@ -7,6 +7,7 @@ import (
 	"otui/mcp"
 	"otui/model"
 	"otui/ollama"
+	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -105,6 +106,9 @@ func (p *AnthropicProvider) ChatWithTools(ctx context.Context, messages []model.
 	// Accumulate message
 	msg := anthropic.Message{}
 
+	// Track content for leak detection
+	var contentBuilder strings.Builder
+
 	// Process stream
 	for stream.Next() {
 		event := stream.Current()
@@ -121,6 +125,7 @@ func (p *AnthropicProvider) ChatWithTools(ctx context.Context, messages []model.
 			// Handle text deltas
 			switch deltaVariant := eventVariant.Delta.AsAny().(type) {
 			case anthropic.TextDelta:
+				contentBuilder.WriteString(deltaVariant.Text)
 				if callback != nil {
 					callback(deltaVariant.Text, nil)
 				}
@@ -138,6 +143,19 @@ func (p *AnthropicProvider) ChatWithTools(ctx context.Context, messages []model.
 		toolCalls := extractToolCalls(msg.Content)
 		if len(toolCalls) > 0 {
 			callback("", toolCalls)
+		} else {
+			// Safety check: detect leaked tool calls if none were detected via API
+			fullContent := contentBuilder.String()
+
+			// Check for JSON leaked tool calls
+			if leakedCalls := ParseLeakedJSONToolCalls(fullContent); len(leakedCalls) > 0 {
+				callback("", leakedCalls)
+			}
+
+			// Check for XML leaked tool calls
+			if leakedCalls := ParseLeakedXMLToolCalls(fullContent); len(leakedCalls) > 0 {
+				callback("", leakedCalls)
+			}
 		}
 	}
 

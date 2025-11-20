@@ -34,6 +34,11 @@ type Model struct {
 	NeedsInitialRender bool
 	Quitting           bool
 
+	// Multi-step iteration state (Phase 2)
+	CurrentIteration int             // Current step number (0 = no iteration)
+	MaxIterations    int             // Max steps from config
+	IterationHistory []IterationStep // ALL steps (including non-tool steps)
+
 	// Application metadata
 	Version string
 	License string
@@ -61,6 +66,12 @@ func NewModel(cfg *config.Config, providerClient Provider, sessionStorage *stora
 		needsRender = len(messages) > 0
 	}
 
+	// Initialize multi-step config (Phase 2)
+	maxIter := cfg.MaxIterations
+	if maxIter == 0 {
+		maxIter = 10 // Default
+	}
+
 	m := &Model{
 		Config:             cfg,
 		Provider:           providerClient,
@@ -77,6 +88,9 @@ func NewModel(cfg *config.Config, providerClient Provider, sessionStorage *stora
 		SessionDirty:       false,
 		NeedsInitialRender: needsRender,
 		Quitting:           false,
+		CurrentIteration:   0,
+		MaxIterations:      maxIter,
+		IterationHistory:   []IterationStep{},
 		Version:            version,
 		License:            license,
 	}

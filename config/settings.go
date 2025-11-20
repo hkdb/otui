@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -45,9 +46,32 @@ func LoadUserConfig(dataDir string) (*UserConfig, error) {
 		return cfg, nil
 	}
 
-	_, err := toml.DecodeFile(userConfigPath, cfg)
+	// Read file content for migration check
+	content, err := os.ReadFile(userConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read user config: %w", err)
+	}
+
+	_, err = toml.DecodeFile(userConfigPath, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse user config: %w", err)
+	}
+
+	// MIGRATION: Add enable_multi_step if not present (Phase 2 feature)
+	if !strings.Contains(string(content), "enable_multi_step") {
+		// Append to config file
+		migration := "\n# Multi-step execution (Phase 2)\nenable_multi_step = true\nmax_iterations = 10\n"
+		f, err := os.OpenFile(userConfigPath, os.O_APPEND|os.O_WRONLY, 0600)
+		if err == nil {
+			f.WriteString(migration)
+			f.Close()
+			if Debug && DebugLog != nil {
+				DebugLog.Printf("[Config] Migrated: added enable_multi_step and max_iterations to config")
+			}
+		}
+		// Set in memory (since we already decoded before migration)
+		cfg.EnableMultiStep = true
+		cfg.MaxIterations = 10
 	}
 
 	return cfg, nil

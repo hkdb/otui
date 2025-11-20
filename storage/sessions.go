@@ -31,6 +31,7 @@ type Session struct {
 	Messages       []Message `json:"messages"`
 	SystemPrompt   string    `json:"system_prompt,omitempty"`
 	EnabledPlugins []string  `json:"enabled_plugins,omitempty"`
+	AllowedTools   []string  `json:"allowed_tools,omitempty"` // Tools permanently approved for this session
 }
 
 // SessionMetadata is a lightweight version of Session for listing
@@ -44,6 +45,7 @@ type SessionMetadata struct {
 	MessageCount   int       `json:"message_count"`
 	SystemPrompt   string    `json:"system_prompt,omitempty"`
 	EnabledPlugins []string  `json:"enabled_plugins,omitempty"`
+	AllowedTools   []string  `json:"allowed_tools,omitempty"` // Tools permanently approved for this session
 }
 
 // SessionStorage handles session persistence
@@ -150,6 +152,7 @@ func (s *SessionStorage) List() ([]SessionMetadata, error) {
 			MessageCount:   len(session.Messages),
 			SystemPrompt:   session.SystemPrompt,
 			EnabledPlugins: session.EnabledPlugins,
+			AllowedTools:   session.AllowedTools,
 		})
 	}
 

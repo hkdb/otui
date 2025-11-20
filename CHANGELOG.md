@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.05.00] - 2025-11-20
+
+** Features: **
+
+- Added tool use permission request dialog
+- Enhanced tool use indication
+- Added multi-steps response handling
+- Improved tool calling leakage handling
+
+[v0.05.00]: https://github.com/hkdb/otui/releases/tag/v0.05.00
+
+---
+
 ## [v0.04.00] - 2025-11-17
 
 ** Features: **

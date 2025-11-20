@@ -41,6 +41,10 @@ type UserConfig struct {
 	PluginsEnabled      bool             `toml:"plugins_enabled"`
 	Security            SecurityConfig   `toml:"security"`
 	Providers           []ProviderConfig `toml:"providers,omitempty"`
+	AllowedTools        []string         `toml:"allowed_tools,omitempty"` // Global whitelist of tools that don't require approval
+	RequireApproval     bool             `toml:"require_approval"`        // Whether to ask for permission before executing tools
+	MaxIterations       int              `toml:"max_iterations"`          // Default: 10
+	EnableMultiStep     bool             `toml:"enable_multi_step"`       // Default: true
 }
 
 type Config struct {
@@ -54,6 +58,10 @@ type Config struct {
 	Security            SecurityConfig
 	Providers           []ProviderConfig
 	CredentialStore     *CredentialStore
+	AllowedTools        []string // Global whitelist of tools that don't require approval
+	RequireApproval     bool     // Whether to ask for permission before executing tools
+	MaxIterations       int      // Max iterations per user message
+	EnableMultiStep     bool     // Allow LLM to execute multiple steps
 }
 
 var Debug = false
@@ -203,6 +211,15 @@ func Load() (*Config, error) {
 		cfg.PluginsEnabled = userCfg.PluginsEnabled
 		cfg.Security = userCfg.Security
 		cfg.Providers = userCfg.Providers
+		cfg.AllowedTools = userCfg.AllowedTools
+		cfg.RequireApproval = userCfg.RequireApproval
+		cfg.MaxIterations = userCfg.MaxIterations
+		cfg.EnableMultiStep = userCfg.EnableMultiStep
+
+		// Set defaults for multi-step execution (Phase 2)
+		if cfg.MaxIterations == 0 {
+			cfg.MaxIterations = 10
+		}
 
 		// MIGRATION: Move Ollama.DefaultModel to top-level if needed
 		if cfg.DefaultModel == "" && userCfg.Ollama.DefaultModel != "" {
@@ -217,7 +234,8 @@ func Load() (*Config, error) {
 			// Infer from enabled providers or default to "ollama"
 			if len(cfg.Providers) > 0 && cfg.Providers[0].Enabled {
 				cfg.DefaultProvider = cfg.Providers[0].ID
-			} else {
+			}
+			if cfg.DefaultProvider == "" {
 				cfg.DefaultProvider = "ollama"
 			}
 			if Debug && DebugLog != nil {
@@ -251,6 +269,15 @@ func Load() (*Config, error) {
 		cfg.PluginsEnabled = userCfg.PluginsEnabled
 		cfg.Security = userCfg.Security
 		cfg.Providers = userCfg.Providers
+		cfg.AllowedTools = userCfg.AllowedTools
+		cfg.RequireApproval = userCfg.RequireApproval
+		cfg.MaxIterations = userCfg.MaxIterations
+		cfg.EnableMultiStep = userCfg.EnableMultiStep
+
+		// Set defaults for multi-step execution (Phase 2)
+		if cfg.MaxIterations == 0 {
+			cfg.MaxIterations = 10
+		}
 
 		// MIGRATION: Move Ollama.DefaultModel to top-level if needed
 		if cfg.DefaultModel == "" && userCfg.Ollama.DefaultModel != "" {
@@ -264,7 +291,8 @@ func Load() (*Config, error) {
 		if cfg.DefaultProvider == "" {
 			if len(cfg.Providers) > 0 && cfg.Providers[0].Enabled {
 				cfg.DefaultProvider = cfg.Providers[0].ID
-			} else {
+			}
+			if cfg.DefaultProvider == "" {
 				cfg.DefaultProvider = "ollama"
 			}
 			if Debug && DebugLog != nil {

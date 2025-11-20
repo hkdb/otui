@@ -58,25 +58,90 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			a.currentResp.Reset()
 
 			if config.DebugLog != nil {
-				config.DebugLog.Printf("Typewriter complete - finalizing message")
+				config.DebugLog.Printf("Typewriter complete - finalizing message (len=%d)", len(fullResp))
 			}
 
-			// Add final message and trigger markdown render
-			a.dataModel.Messages = append(a.dataModel.Messages, Message{
-				Role:      "assistant",
-				Content:   fullResp,
-				Rendered:  fullResp, // Start with plain text
-				Timestamp: time.Now(),
-			})
+			// Remove "Analyzing results..." message before adding response
+			a.removeLastNonPersistentSystemMessage()
+
+			// Check if iteration should continue (Phase 2)
+			// If continuing AND response is empty, skip adding empty message
+			if a.pendingNextStep {
+				toolMsg := toolCallsDetectedMsg{
+					ToolCalls:       a.pendingToolCalls,
+					InitialResponse: "",
+					ContextMessages: a.pendingToolContext,
+				}
+
+				// Clear pending state
+				a.pendingNextStep = false
+				a.pendingToolCalls = nil
+				a.pendingToolContext = nil
+
+				// Only add non-empty responses
+				if fullResp != "" {
+					a.dataModel.Messages = append(a.dataModel.Messages, Message{
+						Role:      "assistant",
+						Content:   fullResp,
+						Rendered:  fullResp,
+						Timestamp: time.Now(),
+					})
+					a.updateViewportContent(true)
+					a.dataModel.SessionDirty = true
+
+					messageIndex := len(a.dataModel.Messages) - 1
+					cmds = []tea.Cmd{
+						a.renderMarkdownAsync(messageIndex, fullResp),
+						a.dataModel.AutoSaveSession(),
+					}
+				}
+
+				// Trigger next iteration
+				newA, newCmd := a.handleToolMessage(toolMsg)
+				if newCmd != nil {
+					cmds = append(cmds, newCmd)
+				}
+				return newA, tea.Batch(cmds...)
+			}
+
+			// Final response - add message and summary
+			if fullResp != "" {
+				a.dataModel.Messages = append(a.dataModel.Messages, Message{
+					Role:      "assistant",
+					Content:   fullResp,
+					Rendered:  fullResp,
+					Timestamp: time.Now(),
+				})
+			}
 
 			messageIndex := len(a.dataModel.Messages) - 1
+
+			// Add summary after assistant message (Phase 2)
+			if a.pendingSummary != nil {
+				summaryContent := buildIterationSummary(*a.pendingSummary)
+				a.dataModel.Messages = append(a.dataModel.Messages, Message{
+					Role:       "system",
+					Content:    summaryContent,
+					Rendered:   summaryContent,
+					Timestamp:  time.Now(),
+					Persistent: true,
+				})
+				a.pendingSummary = nil
+			}
+
 			a.updateViewportContent(true)
 			a.dataModel.SessionDirty = true
 
-			// Auto-save session and render markdown
-			cmds = []tea.Cmd{
-				a.renderMarkdownAsync(messageIndex, fullResp),
-				a.dataModel.AutoSaveSession(),
+			// No more steps - done
+			if fullResp != "" {
+				cmds = []tea.Cmd{
+					a.renderMarkdownAsync(messageIndex, fullResp),
+					a.dataModel.AutoSaveSession(),
+				}
+			} else {
+				cmds = []tea.Cmd{
+					a.dataModel.AutoSaveSession(),
+				}
 			}
 			return a, tea.Batch(cmds...)
 		}
@@ -88,14 +153,15 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 
 		// Remove loading message AFTER first NON-EMPTY chunk is written
 		if a.currentResp.String() != "" {
-			if len(a.dataModel.Messages) > 0 && a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" {
-				a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
-			}
+			a.removeLastNonPersistentSystemMessage()
 		}
 
-		// Only update streaming message if system message is already gone
-		// (While system message exists, spinner animates via updateViewportContent in appview_update.go)
-		if len(a.dataModel.Messages) == 0 || a.dataModel.Messages[len(a.dataModel.Messages)-1].Role != "system" {
+		// Only update streaming message if transient system message is already gone
+		// (While transient system message exists, spinner animates via updateViewportContent in appview_update.go)
+		// Persistent system messages (step messages) don't block streaming display
+		if len(a.dataModel.Messages) == 0 ||
+			a.dataModel.Messages[len(a.dataModel.Messages)-1].Role != "system" ||
+			a.dataModel.Messages[len(a.dataModel.Messages)-1].Persistent {
 			a.updateStreamingMessage()
 		}
 
@@ -121,8 +187,10 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 
 		a.dataModel.Streaming = false
 
-		// Remove loading message (last system message)
-		if len(a.dataModel.Messages) > 0 && a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" {
+		// Remove loading message (last system message, but not persistent step messages)
+		if len(a.dataModel.Messages) > 0 &&
+			a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" &&
+			!a.dataModel.Messages[len(a.dataModel.Messages)-1].Persistent {
 			a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
 		}
 
@@ -170,8 +238,10 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		a.dataModel.Streaming = false
 		a.currentResp.Reset()
 
-		// Remove loading message
-		if len(a.dataModel.Messages) > 0 && a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" {
+		// Remove loading message (but not persistent step messages)
+		if len(a.dataModel.Messages) > 0 &&
+			a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" &&
+			!a.dataModel.Messages[len(a.dataModel.Messages)-1].Persistent {
 			a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
 		}
 

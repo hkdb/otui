@@ -6,6 +6,7 @@ import (
 
 // Message type aliases for backward compatibility
 type Message = model.Message
+type ToolCall = model.ToolCall
 
 // Message type aliases - these are now defined in model package
 type streamChunkMsg = model.StreamChunkMsg
@@ -16,6 +17,8 @@ type displayChunkTickMsg = model.DisplayChunkTickMsg
 type toolCallsDetectedMsg = model.ToolCallsDetectedMsg
 type toolExecutionCompleteMsg = model.ToolExecutionCompleteMsg
 type toolExecutionErrorMsg = model.ToolExecutionErrorMsg
+type toolPermissionRequestMsg = model.ToolPermissionRequestMsg
+type toolPermissionResponseMsg = model.ToolPermissionResponseMsg
 type markdownRenderedMsg = model.MarkdownRenderedMsg
 type modelsListMsg = model.ModelsListMsg
 type sessionsListMsg = model.SessionsListMsg
@@ -33,6 +36,10 @@ type pluginStartupCompleteMsg = model.PluginStartupCompleteMsg
 type registryRefreshCompleteMsg = model.RegistryRefreshCompleteMsg
 type editorContentMsg = model.EditorContentMsg
 type editorErrorMsg = model.EditorErrorMsg
+
+// Phase 2: Multi-step execution
+type IterationStep = model.IterationStep
+type IterationSummaryMsg = model.IterationSummaryMsg
 
 type SettingFieldType int
 

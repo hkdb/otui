@@ -341,6 +341,112 @@ func (a *AppView) resetUIStateForDataDirSwitch() {
 	}
 }
 
+// removeLastNonPersistentSystemMessage removes the last system message if it's not persistent
+// Used to clean up transient messages like "Waiting for response..." or "Analyzing results..."
+func (a *AppView) removeLastNonPersistentSystemMessage() {
+	if len(a.dataModel.Messages) == 0 {
+		return
+	}
+	lastIdx := len(a.dataModel.Messages) - 1
+	if a.dataModel.Messages[lastIdx].Role != "system" {
+		return
+	}
+	if a.dataModel.Messages[lastIdx].Persistent {
+		return
+	}
+	a.dataModel.Messages = a.dataModel.Messages[:lastIdx]
+}
+
+// createStepMessage creates a step message with spinner (Phase 2 multi-step)
+func (a *AppView) createStepMessage(purpose string, stepNum int) {
+	systemMsg := fmt.Sprintf("🔧 Step %d: %s...", stepNum, purpose)
+	a.dataModel.Messages = append(a.dataModel.Messages, Message{
+		Role:      "system",
+		Content:   systemMsg,
+		Rendered:  systemMsg,
+		Timestamp: time.Now(),
+	})
+	a.updateViewportContent(true)
+}
+
+// completeStepMessage adds checkmark to last step message and makes it persistent
+func (a *AppView) completeStepMessage() {
+	for i := len(a.dataModel.Messages) - 1; i >= 0; i-- {
+		msgPtr := &a.dataModel.Messages[i]
+		if msgPtr.Role != "system" {
+			continue
+		}
+		if !strings.HasPrefix(msgPtr.Content, "🔧 ") {
+			continue
+		}
+
+		checkmark := AssistantStyle.Render("✓")
+		content := strings.TrimSpace(msgPtr.Content)
+
+		// Remove spinner characters
+		for _, spinChar := range []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"} {
+			if idx := strings.LastIndex(content, spinChar); idx != -1 {
+				content = content[:idx]
+				break
+			}
+		}
+
+		msgPtr.Content = strings.TrimSpace(content) + " " + checkmark
+		msgPtr.Rendered = msgPtr.Content
+		msgPtr.Persistent = true
+		return
+	}
+}
+
+// showAnalyzingResults sets streaming state and shows "Analyzing results..." message
+func (a *AppView) showAnalyzingResults() {
+	a.dataModel.Streaming = true
+	a.dataModel.Messages = append(a.dataModel.Messages, Message{
+		Role:      "system",
+		Content:   "Analyzing results...",
+		Rendered:  "Analyzing results...",
+		Timestamp: time.Now(),
+	})
+	a.updateViewportContent(true)
+}
+
+// startTypewriter initializes typewriter state and returns tick command
+func (a *AppView) startTypewriter(chunks []string) tea.Cmd {
+	a.chunks = chunks
+	a.chunkIndex = 0
+	a.currentResp.Reset()
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
+		return displayChunkTickMsg{}
+	})
+}
+
+// getPluginShortName extracts plugin ID from tool name and gets short display name
+func (a *AppView) getPluginShortName(toolName string) string {
+	pluginID := toolName
+	if idx := strings.Index(toolName, "."); idx != -1 {
+		pluginID = toolName[:idx]
+	}
+
+	if a.dataModel.MCPManager == nil {
+		return pluginID
+	}
+
+	shortName := a.dataModel.MCPManager.GetPluginShortName(pluginID)
+	if shortName == "" {
+		return pluginID
+	}
+	return shortName
+}
+
+// startToolExecution sets up tool execution state
+func (a *AppView) startToolExecution(toolName string) {
+	a.executingTool = a.getPluginShortName(toolName)
+	a.dataModel.Streaming = true
+	// Initialize spinner for header indicator
+	a.toolExecutionSpinner = spinner.New()
+	a.toolExecutionSpinner.Spinner = spinner.Dot
+}
+
 // refreshProvidersAndModels re-initializes all providers and fetches models.
 // Called after config changes (provider settings, data dir switch, etc.)
 // This is the SINGLE place where provider refresh logic lives.

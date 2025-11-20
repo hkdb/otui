@@ -139,6 +139,7 @@ func (m *Model) AutoSaveSession() tea.Cmd {
 			CreatedAt:      time.Now(),
 			UpdatedAt:      time.Now(),
 			EnabledPlugins: []string{},
+			AllowedTools:   []string{}, // Initialize empty tool allowlist
 			SystemPrompt:   "",
 		}
 
@@ -404,6 +405,7 @@ func (m *Model) CreateAndSaveNewSession(name, systemPrompt string, enabledPlugin
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 		EnabledPlugins: enabledPlugins,
+		AllowedTools:   []string{}, // Initialize empty tool allowlist
 		SystemPrompt:   systemPrompt,
 	}
 

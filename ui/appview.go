@@ -189,12 +189,25 @@ type AppView struct {
 	executingTool        string        // Plugin name currently executing (e.g., "mcp-searxng")
 	toolExecutionSpinner spinner.Model // Spinner for tool execution indicator
 
+	// Permission system state (Phase 1: Permission System)
+	waitingForPermission    bool
+	pendingPermission       *appmodel.ToolPermissionRequestMsg
+	temporarilyAllowedTools []string // Tools approved once - removed after execution
+
 	// Plugin operation modal (enable/disable feedback for individual plugins in Plugin Manager)
 	showPluginOperationModal bool
 	pluginOperationPhase     string // "enabling", "disabling", "complete", "error"
 	pluginOperationName      string // Plugin display name
 	pluginOperationError     string // Error message if failed
 	pluginOperationSpinner   spinner.Model
+
+	// Multi-step iteration UI state (Phase 2)
+	iterationCount     int  // Current step number
+	maxIterations      int  // Max from config
+	pendingNextStep    bool // Continue after typewriter?
+	pendingToolCalls   []ToolCall
+	pendingToolContext []Message
+	pendingSummary     *IterationSummaryMsg // Summary to add after typewriter completes
 }
 
 // PluginSystemState is an alias to appmodel.PluginSystemState for backward compatibility

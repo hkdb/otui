@@ -55,16 +55,37 @@ func (a *AppView) updateViewportContent(gotoBottom bool) {
 
 		renderedContent := msg.Rendered
 
+		// Special handling for permission request messages
+		if msg.Role == "system" && strings.HasPrefix(msg.Content, "🔒 Permission Request") {
+			formattedPermission := formatPermissionMessage(timestamp, renderedContent)
+			content.WriteString(formattedPermission)
+			continue
+		}
+
+		// Special handling for loading spinner
 		if msg.Role == "system" && msg.Content == "Waiting for response..." {
 			renderedContent = fmt.Sprintf("%s %s", a.loadingSpinner.View(), msg.Content)
 		}
 
+		// Special handling for step message spinner (Phase 2)
+		if msg.Role == "system" && strings.HasPrefix(msg.Content, "🔧 ") && strings.HasSuffix(msg.Content, "...") {
+			renderedContent = fmt.Sprintf("%s %s", msg.Content, a.loadingSpinner.View())
+		}
+
+		// Special handling for "Analyzing results..." spinner (Phase 2)
+		if msg.Role == "system" && msg.Content == "Analyzing results..." {
+			renderedContent = fmt.Sprintf("%s %s", a.loadingSpinner.View(), msg.Content)
+		}
+
+		// User messages with vertical bar formatting
 		if msg.Role == "user" {
 			formattedUser := formatUserMessage(highlightPrefix, timestamp, role, renderedContent)
 			content.WriteString(formattedUser)
-		} else {
-			content.WriteString(fmt.Sprintf("%s%s %s\n%s\n\n", highlightPrefix, timestamp, role, renderedContent))
+			continue
 		}
+
+		// Default formatting for assistant and other system messages
+		content.WriteString(fmt.Sprintf("%s%s %s\n%s\n\n", highlightPrefix, timestamp, role, renderedContent))
 	}
 
 	a.viewport.SetContent(content.String())
@@ -301,4 +322,179 @@ func (a AppView) renderMarkdownAsync(messageIndex int, content string) tea.Cmd {
 			Rendered:     processed,
 		}
 	}
+}
+
+// wordWrapWithIndent wraps text to maxWidth while preserving indentation for continuation lines
+func wordWrapWithIndent(text string, prefix string, maxWidth int) string {
+	// Calculate available width for text
+	prefixLen := len(stripANSI(prefix))
+	availableWidth := maxWidth - prefixLen
+
+	if availableWidth <= 0 {
+		return prefix + text
+	}
+
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return prefix
+	}
+
+	var result strings.Builder
+	var currentLine strings.Builder
+	indent := strings.Repeat(" ", prefixLen)
+	isFirstLine := true
+
+	for _, word := range words {
+		// Check if adding this word would exceed width
+		testLen := currentLine.Len()
+		if testLen > 0 {
+			testLen++ // Space before word
+		}
+		testLen += len(word)
+
+		if testLen > availableWidth && currentLine.Len() > 0 {
+			// Flush current line
+			if isFirstLine {
+				result.WriteString(prefix)
+				isFirstLine = false
+			} else {
+				result.WriteString(indent)
+			}
+			result.WriteString(currentLine.String())
+			result.WriteString("\n")
+			currentLine.Reset()
+		}
+
+		// Add word to current line
+		if currentLine.Len() > 0 {
+			currentLine.WriteString(" ")
+		}
+		currentLine.WriteString(word)
+	}
+
+	// Flush remaining line
+	if currentLine.Len() > 0 {
+		if isFirstLine {
+			result.WriteString(prefix)
+		} else {
+			result.WriteString(indent)
+		}
+		result.WriteString(currentLine.String())
+		result.WriteString("\n")
+	}
+
+	return result.String()
+}
+
+// stripANSI removes ANSI escape codes for accurate length calculation
+func stripANSI(s string) string {
+	ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	return ansiRegex.ReplaceAllString(s, "")
+}
+
+// buildPermissionContent creates the formatted permission request content
+func buildPermissionContent(toolName, purpose string, details map[string]string) string {
+	var content strings.Builder
+	maxWidth := 60 // Conservative width for wrapping
+
+	// Title
+	content.WriteString("🔒 Permission Request\n\n")
+
+	// Tool name
+	toolLine := wordWrapWithIndent(toolName, "╰── Tool: ", maxWidth)
+	content.WriteString(toolLine)
+
+	// Purpose (with word wrapping)
+	if purpose != "" {
+		purposeLine := wordWrapWithIndent(purpose, "╰── Purpose: ", maxWidth)
+		content.WriteString(purposeLine)
+	}
+
+	// Details (file paths, commands, etc.)
+	if len(details) > 0 {
+		for key, value := range details {
+			// Capitalize first letter of key
+			displayKey := strings.ToUpper(key[:1]) + key[1:]
+			detailLine := wordWrapWithIndent(value, "╰── "+displayKey+": ", maxWidth)
+			content.WriteString(detailLine)
+		}
+	}
+
+	// Action prompt
+	content.WriteString("\n")
+	greenBold := "\x1b[32;1m"
+	blueBold := "\x1b[34;1m"
+	redBold := "\x1b[31;1m"
+	reset := "\x1b[0m"
+
+	content.WriteString(greenBold + "[y]" + reset + " Yes    ")
+	content.WriteString(blueBold + "[a]" + reset + " Always    ")
+	content.WriteString(redBold + "[n]" + reset + " No")
+
+	return content.String()
+}
+
+// formatPermissionMessage renders a permission request with vertical bar (like formatUserMessage)
+func formatPermissionMessage(timestamp, content string) string {
+	// Use accent color (cyan/assistant color) for permission messages
+	accentBold := "\x1b[36;1m"
+	reset := "\x1b[0m"
+	bar := accentBold + "│" + reset
+
+	lines := strings.Split(content, "\n")
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("%s %s %s\n", bar, timestamp, DimStyle.Render("System:")))
+
+	for _, line := range lines {
+		result.WriteString(fmt.Sprintf("%s %s\n", bar, line))
+	}
+
+	result.WriteString("\n")
+
+	return result.String()
+}
+
+// buildIterationSummary formats multi-step summary (Phase 2)
+func buildIterationSummary(summary IterationSummaryMsg) string {
+	var b strings.Builder
+
+	// Header
+	if summary.MaxReached {
+		b.WriteString("⚠️  Multi-step execution stopped (max iterations reached)\n")
+	}
+	if !summary.MaxReached {
+		b.WriteString(fmt.Sprintf("✓ Execution complete - %d step(s)\n", summary.TotalSteps))
+	}
+
+	// Step details (show PURPOSE, not tool names)
+	for _, step := range summary.Steps {
+		durationStr := formatDuration(step.Duration)
+
+		if step.Success {
+			b.WriteString(fmt.Sprintf("╰─ Step %d: %s (%s)\n",
+				step.StepNumber,
+				step.Purpose,
+				durationStr,
+			))
+		}
+		if !step.Success {
+			b.WriteString(fmt.Sprintf("╰─ Step %d: %s (failed: %s)\n",
+				step.StepNumber,
+				step.Purpose,
+				step.ErrorMsg,
+			))
+		}
+	}
+
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// formatDuration formats duration for display
+func formatDuration(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	seconds := float64(d.Milliseconds()) / 1000.0
+	return fmt.Sprintf("%.1fs", seconds)
 }

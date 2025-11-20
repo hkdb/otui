@@ -20,7 +20,11 @@ func DefaultUserConfig() *UserConfig {
 			CredentialStorage: string(SecurityPlainText),
 			SSHKeyPath:        "",
 		},
-		Providers: []ProviderConfig{},
+		Providers:       []ProviderConfig{},
+		AllowedTools:    []string{},
+		RequireApproval: true, // Default to requiring approval for safety
+		MaxIterations:   10,   // Default max iterations per user message
+		EnableMultiStep: true, // Default to allowing multi-step execution
 	}
 }
 
@@ -59,6 +63,17 @@ default_system_prompt = ""
 
 # Plugin System
 plugins_enabled = false
+
+# Tool Permissions
+# Require user approval before executing tools (default: true for safety)
+require_approval = true
+
+# Global whitelist of tools that don't require approval (e.g., ["filesystem.read_file"])
+# allowed_tools = []
+
+# Multi-step execution (Phase 2)
+enable_multi_step = true  # Allow LLM to execute multiple steps in sequence
+max_iterations = 10       # Maximum steps per user message
 
 [security]
 credential_storage = "plaintext"

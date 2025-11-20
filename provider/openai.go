@@ -6,6 +6,7 @@ import (
 	"otui/mcp"
 	"otui/model"
 	"otui/ollama"
+	"strings"
 
 	mcptypes "github.com/mark3labs/mcp-go/mcp"
 	"github.com/openai/openai-go/v3"
@@ -90,6 +91,10 @@ func (p *OpenAIProvider) ChatWithTools(ctx context.Context, messages []model.Mes
 	stream := p.client.Chat.Completions.NewStreaming(ctx, params)
 	acc := openai.ChatCompletionAccumulator{}
 
+	// Track if we got tool calls via API
+	var apiToolCallsDetected bool
+	var contentBuilder strings.Builder
+
 	// Process stream
 	for stream.Next() {
 		chunk := stream.Current()
@@ -97,6 +102,7 @@ func (p *OpenAIProvider) ChatWithTools(ctx context.Context, messages []model.Mes
 
 		// Handle finished tool calls
 		if tool, ok := acc.JustFinishedToolCall(); ok {
+			apiToolCallsDetected = true
 			if callback != nil {
 				// Convert to provider tool call
 				args := ParseToolArguments(tool.Arguments)
@@ -108,10 +114,12 @@ func (p *OpenAIProvider) ChatWithTools(ctx context.Context, messages []model.Mes
 			}
 		}
 
-		// Send content delta
+		// Send content delta and accumulate for leak detection
 		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
+			content := chunk.Choices[0].Delta.Content
+			contentBuilder.WriteString(content)
 			if callback != nil {
-				callback(chunk.Choices[0].Delta.Content, nil)
+				callback(content, nil)
 			}
 		}
 	}
@@ -119,6 +127,21 @@ func (p *OpenAIProvider) ChatWithTools(ctx context.Context, messages []model.Mes
 	// Check for errors
 	if err := stream.Err(); err != nil {
 		return fmt.Errorf("OpenAI streaming error: %w", err)
+	}
+
+	// Safety check: detect leaked tool calls if none were detected via API
+	if !apiToolCallsDetected && callback != nil {
+		fullContent := contentBuilder.String()
+
+		// Check for JSON leaked tool calls
+		if leakedCalls := ParseLeakedJSONToolCalls(fullContent); len(leakedCalls) > 0 {
+			callback("", leakedCalls)
+		}
+
+		// Check for XML leaked tool calls
+		if leakedCalls := ParseLeakedXMLToolCalls(fullContent); len(leakedCalls) > 0 {
+			callback("", leakedCalls)
+		}
 	}
 
 	return nil

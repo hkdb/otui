@@ -1,9 +1,34 @@
 package model
 
 import (
+	"time"
+
 	"otui/ollama"
 	"otui/storage"
 )
+
+// IterationStep records a single step in multi-step execution (Phase 2)
+// Each step = one LLM response (may have 0+ tool calls)
+type IterationStep struct {
+	StepNumber int    // 1, 2, 3...
+	Purpose    string // "Checking directory structure" (user-facing)
+	StartTime  time.Time
+	EndTime    time.Time
+	Duration   time.Duration // Computed: EndTime - StartTime
+	Success    bool
+	ErrorMsg   string // If failed
+
+	// Internal fields (not displayed to users)
+	ToolName  string // e.g., "mcp-filesystem.read_dir"
+	ShortName string // e.g., "read_dir"
+}
+
+// IterationSummaryMsg contains summary of all steps (Phase 2)
+type IterationSummaryMsg struct {
+	Steps      []IterationStep
+	TotalSteps int
+	MaxReached bool // True if max iterations reached (warning)
+}
 
 type StreamChunkMsg struct {
 	Chunk string
@@ -32,8 +57,14 @@ type ToolCallsDetectedMsg struct {
 }
 
 type ToolExecutionCompleteMsg struct {
-	Chunks       []string
-	FullResponse string
+	Chunks           []string
+	FullResponse     string
+	IterationSummary IterationSummaryMsg // Phase 2
+
+	// Phase 2: Multi-step continuation
+	HasMoreSteps  bool       // Continue iteration after typewriter?
+	NextToolCalls []ToolCall // Tools to execute in next step
+	NextContext   []Message  // Context for next iteration
 }
 
 type ToolExecutionErrorMsg struct {
@@ -129,4 +160,21 @@ type SingleProviderModelsMsg struct {
 	ProviderID string
 	Models     []ollama.ModelInfo
 	Err        error
+}
+
+// ToolPermissionRequestMsg is sent when the model wants to execute a tool that needs approval
+type ToolPermissionRequestMsg struct {
+	ToolName        string
+	Purpose         string
+	ToolCall        ToolCall
+	ContextMessages []Message
+}
+
+// ToolPermissionResponseMsg is sent when the user responds to a permission request
+type ToolPermissionResponseMsg struct {
+	Approved        bool
+	AlwaysAllow     bool   // User chose "Always Allow" for this tool
+	ToolName        string // Tool that was approved/denied
+	ToolCall        ToolCall
+	ContextMessages []Message
 }
