@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.05.01] - 2026-01-19
+
+** Maintenance & Bug Fixes: **
+
+- Added option to force delete lock file to handle stale lock file situations
+
+[v0.05.01]: https://github.com/hkdb/otui/releases/tag/v0.05.01
+
+---
+
 ## [v0.05.00] - 2025-11-20
 
 ** Features: **

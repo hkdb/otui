@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	Version = "v0.05.00"
+	Version = "v0.05.01"
 	License = "Apache-2.0"
 )
 
@@ -223,26 +223,31 @@ func main() {
 		os.Exit(1)
 	}
 	if isLocked {
-		// Another instance is running - show error modal and exit
-		errorMsg := fmt.Sprintf(
-			"Another OTUI instance is already running (PID %d).\n\n"+
-				"Only one instance of OTUI can run per system.\n\n"+
-				"To run multiple instances:\n"+
-				"• Use system containers (Incus/Podman)\n"+
-				"• Each container provides isolated environment\n\n"+
-				"Close the other instance or run OTUI in a container.",
-			runningPID)
-
-		errorModal := ui.NewErrorModal("⚠️  OTUI Already Running  ⚠️", errorMsg)
+		// Another instance is running - show modal with option to force delete lock file
+		lockModal := ui.NewInstanceLockedModal(runningPID)
 		p := tea.NewProgram(
-			errorModal,
+			lockModal,
 			tea.WithAltScreen(),
 		)
 
-		if _, err := p.Run(); err != nil {
+		finalModel, err := p.Run()
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
 		}
-		os.Exit(0)
+
+		modal := finalModel.(ui.InstanceLockedModal)
+		if modal.ForceDelete() {
+			// User chose to force delete the lock file
+			if err := sessionStorage.UnlockOTUIInstance(); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to delete lock file: %v\n", err)
+				os.Exit(1)
+			}
+			// Continue with normal startup
+		} else {
+			// User chose to exit
+			os.Exit(0)
+		}
 	}
 
 	// Lock this instance
