@@ -36,7 +36,7 @@ USER otui
 WORKDIR $HOME
 
 # Install Node.js
-RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+RUN curl -sL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 ENV NVM_DIR=/home/otui/.nvm
 ENV NODE_VERSION=22.21.1
 RUN . "$NVM_DIR/nvm.sh" && \

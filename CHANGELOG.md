@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.06.00] - 2026-01-31
+
+** Features: **
+
+Adjusted scroll keybindings for easier navigation:
+- Changed alt+j/k and alt+up/down to one line scroll
+- Changed alt+shift+j/k and alt+shift+up/down to half page scroll
+- alt+PgUp/PgDown remained full page scroll
+
+---
+
 ## [v0.05.01] - 2026-01-19
 
 ** Maintenance & Bug Fixes: **

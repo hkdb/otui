@@ -797,18 +797,26 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case "alt+j", "alt+down":
-			a.viewport.HalfPageDown()
+			a.viewport.LineDown(1)
 			return a, nil
 
 		case "alt+k", "alt+up":
+			a.viewport.LineUp(1)
+			return a, nil
+
+		case "alt+J", "alt+shift+down":
+			a.viewport.HalfPageDown()
+			return a, nil
+
+		case "alt+K", "alt+shift+up":
 			a.viewport.HalfPageUp()
 			return a, nil
 
-		case "alt+J", "pgdown":
+		case "alt+pgdown":
 			a.viewport.PageDown()
 			return a, nil
 
-		case "alt+K", "pgup":
+		case "alt+pgup":
 			a.viewport.PageUp()
 			return a, nil
 

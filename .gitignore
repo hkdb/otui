@@ -41,3 +41,5 @@ Thumbs.db
 # Temp Dir
 temp/
 context/
+.claude/
+.crush/

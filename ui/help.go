@@ -32,12 +32,11 @@ func renderHelpModal(width, height int) string {
 	chatNavigation := lipgloss.JoinVertical(
 		lipgloss.Left,
 		blue.Render("## Chat Navigation"),
-		"• "+"Alt+J / Alt+Down"+"     "+"Scroll down",
-		"• "+"Alt+K / Alt+Up"+"       "+"Scorll up",
-		"• "+"Alt+Shift+J / PgDn"+"   "+"Page down",
-		"• "+"Alt+Shift+K / PgUp"+"   "+"Page up",
-		"• "+"Alt+G"+"                "+"Jump to top",
-		"• "+"Alt+Shift+G"+"          "+"Jump to bottom",
+		"• "+"Alt+J/K"+"        "+"Scroll 1 line",
+		"• "+"Alt+Shift+J/K"+"  "+"Half page scroll",
+		"• "+"Alt+PgUp/PgDn"+"  "+"Full page scroll",
+		"• "+"Alt+G"+"          "+"Jump to top",
+		"• "+"Alt+Shift+G"+"    "+"Jump to bottom",
 	)
 
 	chatActions := lipgloss.JoinVertical(
