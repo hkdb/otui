@@ -480,11 +480,9 @@ OTUI will recreate the default configuration.
 ## See Also
 
 - [OTUI Documentation](../README.md)
-- [Configuration Guide](./CONFIGURATION.md)
-- [Plugin System](./PLUGINS.md)
 
 ## Feedback
 
 Found a keybinding conflict we should document? Have a useful configuration to share?
 
-Open an issue: https://github.com/your-repo/otui/issues
+Open an issue: https://github.com/hkdb/otui/issues
