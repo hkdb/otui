@@ -62,6 +62,7 @@ type Config struct {
 	RequireApproval     bool     // Whether to ask for permission before executing tools
 	MaxIterations       int      // Max iterations per user message
 	EnableMultiStep     bool     // Allow LLM to execute multiple steps
+	Keybindings         *KeyBindingsConfig
 }
 
 var Debug = false
@@ -334,6 +335,13 @@ func Load() (*Config, error) {
 		// For other errors, return nil
 		return nil, fmt.Errorf("failed to load credentials: %w", err)
 	}
+
+	// Load keybindings
+	keybindingsCfg, err := LoadKeybindings(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load keybindings: %w", err)
+	}
+	cfg.Keybindings = keybindingsCfg
 
 	return cfg, nil
 }

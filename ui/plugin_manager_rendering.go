@@ -46,7 +46,7 @@ func (a *AppView) renderPluginList(plugins []mcp.Plugin, height, width int) stri
 		allPlugins := a.pluginManagerState.pluginState.Registry.GetAll()
 		message := "No plugins available."
 		if len(allPlugins) == 0 {
-			message = "No plugins available. Press Alt+R to fetch plugins from the official OTUI registry."
+			message = fmt.Sprintf("No plugins available. Press %s to fetch plugins from the official OTUI registry.", a.formatKeyDisplay("primary", "R"))
 		}
 
 		empty := lipgloss.NewStyle().
@@ -171,9 +171,9 @@ func (a *AppView) renderPluginItem(plugin mcp.Plugin, selected bool, width int) 
 func (a *AppView) renderPluginFooter() string {
 	if a.pluginManagerState.selection.filterMode {
 		footer := FormatFooter(
-			"Alt+j/k", "Navigate",
+			a.formatKeyDisplay("primary", "j/k"), "Navigate",
 			"Enter", "Details",
-			"Alt+i", "Install",
+			a.formatKeyDisplay("primary", "i"), "Install",
 			"Esc", "Cancel",
 		)
 		return lipgloss.NewStyle().Padding(1, 2, 0, 2).Render(footer)
@@ -222,7 +222,7 @@ func (a *AppView) renderPluginFooter() string {
 	}
 
 	// Add common keys
-	footerParts = append(footerParts, "Alt+R", "Refresh", "Esc", "Close")
+	footerParts = append(footerParts, a.formatKeyDisplay("primary", "R"), "Refresh", "Esc", "Close")
 
 	footer := FormatFooter(footerParts...)
 	return lipgloss.NewStyle().Padding(1, 2, 0, 2).Render(footer)

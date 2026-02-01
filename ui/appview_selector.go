@@ -9,7 +9,7 @@ import (
 	"otui/ollama"
 )
 
-func renderModelSelector(models []ollama.ModelInfo, selectedIdx int, currentModel string, filterMode bool, filterInput textinput.Model, filteredModels []ollama.ModelInfo, multiProvider bool, width, height int) string {
+func renderModelSelector(a AppView, models []ollama.ModelInfo, selectedIdx int, currentModel string, filterMode bool, filterInput textinput.Model, filteredModels []ollama.ModelInfo, multiProvider bool, width, height int) string {
 	// Modal dimensions
 	modalWidth := width - 10
 	if modalWidth > 80 {
@@ -183,7 +183,7 @@ func renderModelSelector(models []ollama.ModelInfo, selectedIdx int, currentMode
 	// Footer
 	var footerText string
 	if filterMode {
-		footerText = FormatFooter("Type", "to filter", "Alt+J/K", "Navigate", "Enter", "Select", "Esc", "Cancel")
+		footerText = FormatFooter("Type", "to filter", a.formatKeyDisplay("primary", "J/K"), "Navigate", "Enter", "Select", "Esc", "Cancel")
 	} else {
 		footerText = FormatFooter("/", "Filter", "j/k", "Navigate", "Enter", "Select", "🔧", "Tool Support", "Esc", "Exit")
 	}

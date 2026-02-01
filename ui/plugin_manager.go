@@ -234,6 +234,7 @@ func (a *AppView) renderPluginManager() string {
 
 	if a.pluginManagerState.configModal.visible {
 		return renderConfigModal(
+			*a,
 			a.pluginManagerState.configModal.plugin,
 			a.pluginManagerState.configModal.fields,
 			a.pluginManagerState.configModal.customEnvVars,
@@ -310,7 +311,7 @@ func (a *AppView) renderPluginManager() string {
 		filterBar = lipgloss.NewStyle().
 			Foreground(dimColor).
 			Padding(0, 2).
-			Render("Press / to filter, alt+r to refresh registry")
+			Render(fmt.Sprintf("Press / to filter, %s to refresh registry", a.formatKeyDisplay("primary", "r")))
 	}
 
 	footer := a.renderPluginFooter()

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -360,7 +361,7 @@ func RenderPluginOperationModal(phase string, spinnerView string, pluginName str
 
 // buildSystemPromptToolWarningLines creates the formatted message lines for the system prompt + tools warning modal
 // Returns lines ready for RenderThreeSectionModal (pre-formatted with proper alignment)
-func buildSystemPromptToolWarningLines(systemPrompt string, enabledPlugins []string, modalWidth int) []string {
+func buildSystemPromptToolWarningLines(a AppView, systemPrompt string, enabledPlugins []string, modalWidth int) []string {
 	var lines []string
 
 	// Style definitions
@@ -396,7 +397,7 @@ func buildSystemPromptToolWarningLines(systemPrompt string, enabledPlugins []str
 	lines = append(lines, strings.Repeat(" ", modalWidth)) // Empty line
 
 	// Recommendation
-	recommendation := "Recommended: Remove the system prompt (Alt+E) or disable plugins."
+	recommendation := fmt.Sprintf("Recommended: Remove the system prompt (%s) or disable plugins.", a.formatKeyDisplay("primary", "E"))
 	lines = append(lines, leftAlignedStyle.Render(recommendation))
 	lines = append(lines, strings.Repeat(" ", modalWidth)) // Empty line
 

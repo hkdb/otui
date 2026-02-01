@@ -9,7 +9,7 @@ import (
 	"otui/storage"
 )
 
-func renderMessageSearch(searchInput textinput.Model, results []storage.MessageMatch, selectedIdx, scrollIdx, width, height int) string {
+func renderMessageSearch(a AppView, searchInput textinput.Model, results []storage.MessageMatch, selectedIdx, scrollIdx, width, height int) string {
 	modalWidth := width - 4
 	if modalWidth > 100 {
 		modalWidth = 100
@@ -91,7 +91,7 @@ func renderMessageSearch(searchInput textinput.Model, results []storage.MessageM
 		}
 	}
 
-	footer := FormatFooter("Type", "to search", "Alt+J/K", "Navigate", "Enter", "Select", "Esc", "Close")
+	footer := FormatFooter("Type", "to search", a.formatKeyDisplay("primary", "J/K"), "Navigate", "Enter", "Select", "Esc", "Close")
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -108,7 +108,7 @@ func renderMessageSearch(searchInput textinput.Model, results []storage.MessageM
 		modalStyle.Width(modalWidth).Render(content))
 }
 
-func renderGlobalSearch(searchInput textinput.Model, results []storage.SessionMessageMatch, selectedIdx, scrollIdx, width, height int) string {
+func renderGlobalSearch(a AppView, searchInput textinput.Model, results []storage.SessionMessageMatch, selectedIdx, scrollIdx, width, height int) string {
 	modalWidth := width - 4
 	if modalWidth > 100 {
 		modalWidth = 100
@@ -191,7 +191,7 @@ func renderGlobalSearch(searchInput textinput.Model, results []storage.SessionMe
 		}
 	}
 
-	footer := FormatFooter("Type", "to search", "Alt+J/K", "Navigate", "Enter", "View Session", "Esc", "Close")
+	footer := FormatFooter("Type", "to search", a.formatKeyDisplay("primary", "J/K"), "Navigate", "Enter", "View Session", "Esc", "Close")
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,

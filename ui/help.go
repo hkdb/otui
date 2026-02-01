@@ -1,10 +1,14 @@
 package ui
 
 import (
+	"fmt"
+
 	"github.com/charmbracelet/lipgloss"
 )
 
-func renderHelpModal(width, height int) string {
+func (a AppView) renderHelpModal(width, height int) string {
+	kb := a.dataModel.Config.Keybindings
+
 	green := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(successColor)
@@ -16,35 +20,38 @@ func renderHelpModal(width, height int) string {
 	globalActions := lipgloss.JoinVertical(
 		lipgloss.Left,
 		blue.Render("## Global Actions"),
-		"• "+"Alt+N"+"        "+"New chat",
-		"• "+"Alt+S"+"        "+"Session Manager",
-		"• "+"Alt+E"+"        "+"Edit session",
-		"• "+"Alt+M"+"        "+"Model selection",
-		"• "+"Alt+P"+"        "+"Plugin Manager",
-		"• "+"Alt+F"+"        "+"Search session",
-		"• "+"Alt+Shift+F"+"  "+"Search all sessions",
-		"• "+"Alt+Shift+S"+"  "+"Settings",
-		"• "+"Alt+Shift+A"+"  "+"About",
-		"• "+"Alt+H"+"        "+"Toggle this help",
-		"• "+"Alt+Q"+"        "+"Quit",
+		fmt.Sprintf("• %-13s New chat", kb.DisplayActionKey("new_session")),
+		fmt.Sprintf("• %-13s Session Manager", kb.DisplayActionKey("session_manager")),
+		fmt.Sprintf("• %-13s Edit session", kb.DisplayActionKey("edit_session")),
+		fmt.Sprintf("• %-13s Model selection", kb.DisplayActionKey("model_selector")),
+		fmt.Sprintf("• %-13s Search session", kb.DisplayActionKey("search_messages")),
+		fmt.Sprintf("• %-13s Search all", kb.DisplayActionKey("search_all_sessions")),
+		fmt.Sprintf("• %-13s Plugin Manager", kb.DisplayActionKey("plugin_manager")),
+		fmt.Sprintf("• %-13s Settings", kb.DisplayActionKey("settings")),
+		fmt.Sprintf("• %-13s About", kb.DisplayActionKey("about")),
+		fmt.Sprintf("• %-13s Toggle this help", kb.DisplayActionKey("help")),
+		fmt.Sprintf("• %-13s Quit", kb.DisplayActionKey("quit")),
 	)
 
 	chatNavigation := lipgloss.JoinVertical(
 		lipgloss.Left,
 		blue.Render("## Chat Navigation"),
-		"• "+"Alt+J/K"+"        "+"Scroll 1 line",
-		"• "+"Alt+Shift+J/K"+"  "+"Half page scroll",
-		"• "+"Alt+PgUp/PgDn"+"  "+"Full page scroll",
-		"• "+"Alt+G"+"          "+"Jump to top",
-		"• "+"Alt+Shift+G"+"    "+"Jump to bottom",
+		fmt.Sprintf("• %-13s Scroll down 1 line", kb.DisplayActionKey("scroll_down")),
+		fmt.Sprintf("• %-13s Scroll up 1 line", kb.DisplayActionKey("scroll_up")),
+		fmt.Sprintf("• %-13s Half page down", kb.DisplayActionKey("half_page_down")),
+		fmt.Sprintf("• %-13s Half page up", kb.DisplayActionKey("half_page_up")),
+		fmt.Sprintf("• %-13s Full page down", kb.DisplayActionKey("page_down")),
+		fmt.Sprintf("• %-13s Full page up", kb.DisplayActionKey("page_up")),
+		fmt.Sprintf("• %-13s Jump to top", kb.DisplayActionKey("scroll_to_top")),
+		fmt.Sprintf("• %-13s Jump to bottom", kb.DisplayActionKey("scroll_to_bottom")),
 	)
 
 	chatActions := lipgloss.JoinVertical(
 		lipgloss.Left,
 		blue.Render("## Chat Actions"),
-		"• "+"Enter"+"  "+"Send message",
-		"• "+"Alt+Y"+"  "+"Copy last response",
-		"• "+"Alt+C"+"  "+"Copy entire conversation",
+		"• Enter         Send message",
+		fmt.Sprintf("• %-13s Copy last response", kb.DisplayActionKey("yank_last_response")),
+		fmt.Sprintf("• %-13s Copy conversation", kb.DisplayActionKey("yank_conversation")),
 	)
 
 	tips := lipgloss.JoinVertical(
@@ -80,7 +87,7 @@ func renderHelpModal(width, height int) string {
 
 	footer := lipgloss.NewStyle().
 		Foreground(dimColor).
-		Render("      Press Alt+H or Esc to close this help")
+		Render(fmt.Sprintf("      Press %s or Esc to close this help", kb.DisplayActionKey("help")))
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Center,

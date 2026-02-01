@@ -13,7 +13,7 @@ import (
 	"otui/storage"
 )
 
-func renderSessionManager(sessions []storage.SessionMetadata, selectedIdx int, currentSessionID string, renameMode bool, renameInput textinput.Model, exportMode bool, exportInput textinput.Model, exporting bool, exportCleaningUp bool, exportSpinner spinner.Model, exportSuccess string, importPicker FilePickerState, importSuccess *storage.Session, confirmDelete *storage.SessionMetadata, filterMode bool, filterInput textinput.Model, filteredSessions []storage.SessionMetadata, width, height int) string {
+func renderSessionManager(a AppView,sessions []storage.SessionMetadata, selectedIdx int, currentSessionID string, renameMode bool, renameInput textinput.Model, exportMode bool, exportInput textinput.Model, exporting bool, exportCleaningUp bool, exportSpinner spinner.Model, exportSuccess string, importPicker FilePickerState, importSuccess *storage.Session, confirmDelete *storage.SessionMetadata, filterMode bool, filterInput textinput.Model, filteredSessions []storage.SessionMetadata, width, height int) string {
 	// Modal dimensions
 	modalWidth := width - 10
 	if modalWidth > 110 {
@@ -38,7 +38,7 @@ func renderSessionManager(sessions []storage.SessionMetadata, selectedIdx int, c
 
 	// Show export modal if in export mode
 	if exportMode {
-		return renderExportModal(exportInput, exporting, exportCleaningUp, exportSpinner, exportSuccess, width, height)
+		return renderExportModal(a, exportInput, exporting, exportCleaningUp, exportSpinner, exportSuccess, width, height)
 	}
 
 	// Title section (no borders)
@@ -247,9 +247,9 @@ func renderSessionManager(sessions []storage.SessionMetadata, selectedIdx int, c
 	// Footer
 	var footerText string
 	if renameMode {
-		footerText = FormatFooter("Alt+U", "Clear", "Enter", "Save", "Esc", "Cancel")
+		footerText = FormatFooter(a.formatKeyDisplay("primary", "U"), "Clear", "Enter", "Save", "Esc", "Cancel")
 	} else if filterMode {
-		footerText = FormatFooter("Type", "to filter", "Alt+J/K", "Navigate", "Enter", "Load", "Esc", "Cancel")
+		footerText = FormatFooter("Type", "to filter", a.formatKeyDisplay("primary", "J/K"), "Navigate", "Enter", "Load", "Esc", "Cancel")
 	} else {
 		footerText = FormatFooter("/", "Filter", "j/k", "Navigate", "Enter", "Load", "e", "Edit", "i", "Import", "n", "New", "r", "Rename", "x", "Export", "d", "Delete", "Esc", "Exit")
 	}
@@ -306,7 +306,7 @@ func formatTimeAgo(t time.Time) string {
 	}
 }
 
-func renderExportModal(exportInput textinput.Model, exporting bool, cleaningUp bool, exportSpinner spinner.Model, successPath string, width, height int) string {
+func renderExportModal(a AppView, exportInput textinput.Model, exporting bool, cleaningUp bool, exportSpinner spinner.Model, successPath string, width, height int) string {
 	// Check for success state first
 	if successPath != "" {
 		return renderExportSuccess(successPath, "Export", width, height)
@@ -397,7 +397,7 @@ func renderExportModal(exportInput textinput.Model, exporting bool, cleaningUp b
 	messageLines = append(messageLines, inputLine)
 	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
 
-	footer := "Esc Cancel  Enter Export  Alt+U Clear"
+	footer := fmt.Sprintf("Esc Cancel  Enter Export  %s Clear", a.formatKeyDisplay("primary", "U"))
 
 	return RenderThreeSectionModal(
 		title,
@@ -550,7 +550,7 @@ func renderImportSuccess(session *storage.Session, width, height int) string {
 	)
 }
 
-func renderSessionModal(title string, nameInput textinput.Model, promptInput textarea.Model, focusedField int, width, height int, availablePlugins []mcp.Plugin, enabledPluginIDs []string, unavailablePluginIDs []string, selectedPluginIdx int) string {
+func renderSessionModal(a AppView, title string, nameInput textinput.Model, promptInput textarea.Model, focusedField int, width, height int, availablePlugins []mcp.Plugin, enabledPluginIDs []string, unavailablePluginIDs []string, selectedPluginIdx int) string {
 	modalWidth := width - 10
 	if modalWidth > 80 {
 		modalWidth = 80
@@ -727,9 +727,9 @@ func renderSessionModal(title string, nameInput textinput.Model, promptInput tex
 	if title == "Edit session" {
 		if focusedField == 2 {
 			// In plugins section
-			footer = FormatFooter("j/k", "Navigate", "e", "Enable", "d", "Disable", "Tab", "Next Field", "Alt+Enter", "Save", "Esc", "Cancel")
+			footer = FormatFooter("j/k", "Navigate", "e", "Enable", "d", "Disable", "Tab", "Next Field", a.formatKeyDisplay("primary", "Enter"), "Save", "Esc", "Cancel")
 		} else {
-			footer = FormatFooter("Tab/Shift+Tab", "Switch Fields", "Alt+U", "Clear", "Alt+Enter", "Save", "Esc", "Cancel")
+			footer = FormatFooter("Tab/Shift+Tab", "Switch Fields", a.formatKeyDisplay("primary", "U"), "Clear", a.formatKeyDisplay("primary", "Enter"), "Save", "Esc", "Cancel")
 		}
 	} else {
 		footer = FormatFooter("Tab/Shift+Tab", "Switch Fields", "Enter", "Create", "Esc", "Cancel")

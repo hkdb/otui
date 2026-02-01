@@ -619,6 +619,7 @@ func (a AppView) handleSettingsNavigationMode(msg tea.KeyMsg) (tea.Model, tea.Cm
 
 func (a AppView) handleDataExportMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	kb := a.dataModel.Config.Keybindings
 
 	// Handle success acknowledgment
 	if a.dataExportSuccess != "" {
@@ -668,7 +669,7 @@ func (a AppView) handleDataExportMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.dataExportSpinner.Tick,
 		)
 
-	case "alt+u":
+	case kb.GetActionKey("clear_input"):
 		a.dataExportInput.SetValue("")
 		return a, nil
 	}
@@ -679,6 +680,7 @@ func (a AppView) handleDataExportMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (a AppView) handleSettingsEditMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	kb := a.dataModel.Config.Keybindings
 
 	switch msg.String() {
 	case "esc":
@@ -709,7 +711,7 @@ func (a AppView) handleSettingsEditMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.settingsEditInput.Blur()
 		return a, nil
 
-	case "alt+u":
+	case kb.GetActionKey("clear_input"):
 		// Clear input
 		a.settingsEditInput.SetValue("")
 		return a, nil
@@ -875,7 +877,7 @@ func (a AppView) saveSettingsCmd() tea.Cmd {
 	}
 }
 
-func renderDataExportModal(exportInput textinput.Model, exporting bool, cleaningUp bool, exportSpinner spinner.Model, successPath string, width, height int) string {
+func renderDataExportModal(a AppView, exportInput textinput.Model, exporting bool, cleaningUp bool, exportSpinner spinner.Model, successPath string, width, height int) string {
 	// Check for success state first
 	if successPath != "" {
 		return renderExportSuccess(successPath, "✓ Data Export Successful", width, height)
@@ -968,7 +970,7 @@ func renderDataExportModal(exportInput textinput.Model, exporting bool, cleaning
 			Foreground(dimColor).
 			Align(lipgloss.Center).
 			Width(modalWidth - 2).
-			Render("Esc Cancel  Enter Export  Alt+U Clear")
+			Render(fmt.Sprintf("Esc Cancel  Enter Export  %s Clear", a.formatKeyDisplay("primary", "U")))
 
 		content.WriteString("│" + footer + "│\n")
 	}
@@ -984,7 +986,7 @@ func renderDataExportModal(exportInput textinput.Model, exporting bool, cleaning
 	)
 }
 
-func renderSettings(fields []SettingField, selectedIdx int, editMode bool, editInput textinput.Model, hasChanges bool, confirmExit bool, loadedInfo string, saveError string, dataExportMode bool, dataExportInput textinput.Model, exportingDataDir bool, dataExportCleaningUp bool, dataExportSpinner spinner.Model, dataExportSuccess string, dataDirNotFound bool, newDataDirPath string, width, height int) string {
+func renderSettings(a AppView, fields []SettingField, selectedIdx int, editMode bool, editInput textinput.Model, hasChanges bool, confirmExit bool, loadedInfo string, saveError string, dataExportMode bool, dataExportInput textinput.Model, exportingDataDir bool, dataExportCleaningUp bool, dataExportSpinner spinner.Model, dataExportSuccess string, dataDirNotFound bool, newDataDirPath string, width, height int) string {
 	// Check for new data directory confirmation modal first
 	if dataDirNotFound {
 		return renderDataDirNotFoundModal(newDataDirPath, width, height)
@@ -992,7 +994,7 @@ func renderSettings(fields []SettingField, selectedIdx int, editMode bool, editI
 
 	// Check for data export modal
 	if dataExportMode {
-		return renderDataExportModal(dataExportInput, exportingDataDir, dataExportCleaningUp, dataExportSpinner, dataExportSuccess, width, height)
+		return renderDataExportModal(a, dataExportInput, exportingDataDir, dataExportCleaningUp, dataExportSpinner, dataExportSuccess, width, height)
 	}
 
 	if confirmExit {
@@ -1021,7 +1023,7 @@ func renderSettings(fields []SettingField, selectedIdx int, editMode bool, editI
 		Foreground(accentColor).
 		Align(lipgloss.Center).
 		Width(modalWidth).
-		Render("Settings (Alt+Shift+S)")
+		Render(fmt.Sprintf("Settings (%s)", a.formatKeyDisplay("secondary", "S")))
 
 	// Separator (simple horizontal line - following modal_helpers.go pattern)
 	separator := lipgloss.NewStyle().
@@ -1095,9 +1097,9 @@ func renderSettings(fields []SettingField, selectedIdx int, editMode bool, editI
 	// Footer
 	var footerText string
 	if editMode {
-		footerText = FormatFooter("Enter", "Save", "Alt+U", "Clear", "Esc", "Cancel")
+		footerText = FormatFooter("Enter", "Save", a.formatKeyDisplay("primary", "U"), "Clear", "Esc", "Cancel")
 	} else if hasChanges {
-		footerText = FormatFooter("Alt+Enter", "Save", "x", "Export Data", "r", "Reset", "Esc", "Cancel")
+		footerText = FormatFooter(a.formatKeyDisplay("primary", "Enter"), "Save", "x", "Export Data", "r", "Reset", "Esc", "Cancel")
 	} else {
 		footerText = FormatFooter("j/k", "Navigate", "Enter", "Edit", "x", "Export Data", "r", "Reset", "Esc", "Close")
 	}

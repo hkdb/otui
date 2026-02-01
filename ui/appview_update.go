@@ -138,8 +138,10 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case tea.KeyMsg:
+		kb := a.dataModel.Config.Keybindings
+
 		// PRIORITY 0: Always-global shortcuts (quit, help toggle)
-		if msg.String() == "alt+q" {
+		if msg.String() == kb.PrimaryKey("q") {
 			if config.DebugLog != nil {
 				config.DebugLog.Printf("[UI] Alt+Q pressed (location 1) - beginning quit sequence")
 			}
@@ -229,11 +231,11 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// PRIORITY 1: Modal toggle shortcuts (close current modal, open new one)
 		switch msg.String() {
-		case "alt+h":
+		case kb.GetActionKey("help"):
 			a.showHelp = !a.showHelp
 			return a, nil
 
-		case "alt+n":
+		case kb.GetActionKey("new_session"):
 			a.closeAllModals()
 
 			// Unlock current session before clearing
@@ -261,7 +263,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.updateViewportContent(true)
 			return a, nil
 
-		case "alt+s":
+		case kb.GetActionKey("session_manager"):
 			wasOpen := a.showSessionManager
 			a.closeAllModals()
 			a.showSessionManager = !wasOpen
@@ -270,7 +272,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 
-		case "alt+e":
+		case kb.GetActionKey("edit_session"):
 			// Only allow editing if we have a current session
 			if a.dataModel.CurrentSession != nil {
 				a.closeAllModals()
@@ -304,7 +306,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 
-		case "alt+m":
+		case kb.GetActionKey("model_selector"):
 			wasOpen := a.showModelSelector
 			a.closeAllModals()
 			a.showModelSelector = !wasOpen
@@ -318,7 +320,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 
-		case "alt+f":
+		case kb.GetActionKey("search_messages"):
 			wasOpen := a.showMessageSearch
 			a.closeAllModals()
 			a.showMessageSearch = !wasOpen
@@ -331,7 +333,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 
-		case "alt+F":
+		case kb.GetActionKey("search_all_sessions"):
 			wasOpen := a.showGlobalSearch
 			a.closeAllModals()
 			a.showGlobalSearch = !wasOpen
@@ -344,7 +346,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 
-		case "alt+S":
+		case kb.GetActionKey("settings"):
 			wasOpen := a.showSettings
 			a.closeAllModals()
 			a.showSettings = !wasOpen
@@ -398,19 +400,19 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 
-		case "alt+A":
+		case kb.GetActionKey("about"):
 			wasOpen := a.showAbout
 			a.closeAllModals()
 			a.showAbout = !wasOpen
 			return a, nil
 
-		case "alt+p":
+		case kb.GetActionKey("plugin_manager"):
 			// Check if plugin system is enabled
 			if !a.dataModel.Config.PluginsEnabled {
 				a.closeAllModals()
 				a.showAcknowledgeModal = true
 				a.acknowledgeModalTitle = "⚠️  Plugin System Disabled"
-				a.acknowledgeModalMsg = "The plugin system is currently disabled.\n\nEnable it in Settings (Alt+Shift+S) to use plugins."
+				a.acknowledgeModalMsg = fmt.Sprintf("The plugin system is currently disabled.\n\nEnable it in Settings (%s) to use plugins.", a.formatKeyDisplay("secondary", "S"))
 				a.acknowledgeModalType = ModalTypeWarning
 				return a, nil
 			}
@@ -715,7 +717,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "alt+q":
+		case kb.GetActionKey("quit"):
 			if config.DebugLog != nil {
 				config.DebugLog.Printf("[UI] Alt+Q pressed (location 2) - beginning quit sequence")
 			}
@@ -749,11 +751,11 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, tea.Quit
 
-		case "alt+A":
+		case kb.GetActionKey("about"):
 			a.showAbout = !a.showAbout
 			return a, nil
 
-		case "alt+i":
+		case kb.GetActionKey("external_editor"):
 			// Open external editor (only if not streaming)
 			if !a.dataModel.Streaming {
 				return a, a.dataModel.OpenExternalEditor(a.textarea.Value())
@@ -767,7 +769,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Fall through to other esc handlers
 
-		case "alt+y":
+		case kb.GetActionKey("yank_last_response"):
 			// Copy last assistant message
 			for i := len(a.dataModel.Messages) - 1; i >= 0; i-- {
 				if a.dataModel.Messages[i].Role == "assistant" {
@@ -777,7 +779,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 
-		case "alt+c":
+		case kb.GetActionKey("yank_conversation"):
 			// Copy all messages
 			var allText strings.Builder
 			for _, msg := range a.dataModel.Messages {
@@ -796,35 +798,35 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			clipboard.WriteAll(allText.String())
 			return a, nil
 
-		case "alt+j", "alt+down":
+		case kb.GetActionKey("scroll_down"), kb.GetActionKey("scroll_down_arrow"):
 			a.viewport.LineDown(1)
 			return a, nil
 
-		case "alt+k", "alt+up":
+		case kb.GetActionKey("scroll_up"), kb.GetActionKey("scroll_up_arrow"):
 			a.viewport.LineUp(1)
 			return a, nil
 
-		case "alt+J", "alt+shift+down":
+		case kb.GetActionKey("half_page_down"), kb.GetActionKey("half_page_down_arrow"):
 			a.viewport.HalfPageDown()
 			return a, nil
 
-		case "alt+K", "alt+shift+up":
+		case kb.GetActionKey("half_page_up"), kb.GetActionKey("half_page_up_arrow"):
 			a.viewport.HalfPageUp()
 			return a, nil
 
-		case "alt+pgdown":
+		case kb.GetActionKey("page_down"):
 			a.viewport.PageDown()
 			return a, nil
 
-		case "alt+pgup":
+		case kb.GetActionKey("page_up"):
 			a.viewport.PageUp()
 			return a, nil
 
-		case "alt+g":
+		case kb.GetActionKey("scroll_to_top"):
 			a.viewport.GotoTop()
 			return a, nil
 
-		case "alt+G":
+		case kb.GetActionKey("scroll_to_bottom"):
 			a.viewport.GotoBottom()
 			return a, nil
 		}
@@ -1104,7 +1106,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				errMsg.WriteString(fmt.Sprintf("• %s: %v\n", pluginName, err))
 			}
-			errMsg.WriteString("\nYou can try disabling and re-enabling these plugins in the Plugin Manager (Alt+P).")
+			errMsg.WriteString(fmt.Sprintf("\nYou can try disabling and re-enabling these plugins in the Plugin Manager (%s).", a.formatKeyDisplay("primary", "P")))
 
 			// Show acknowledge modal with error
 			a.showAcknowledgeModal = true

@@ -262,7 +262,7 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 	}
 
 	ta := textarea.New()
-	ta.Placeholder = "Type your message here or press Alt+I to use your favorite text editor..."
+	ta.Placeholder = fmt.Sprintf("Type your message here or press %s to use your favorite text editor...", cfg.Keybindings.PrimaryDisplay()+"+I")
 	ta.Focus()
 	ta.CharLimit = 0
 	ta.ShowLineNumbers = false
@@ -472,13 +472,13 @@ func (a AppView) View() string {
 
 	// Show help modal if toggled (top layer - can appear over other modals)
 	if a.showHelp {
-		return renderHelpModal(a.width, a.height)
+		return a.renderHelpModal(a.width, a.height)
 	}
 
 	// Show model selector if toggled
 	if a.showModelSelector {
 		multiProvider := len(a.dataModel.Providers) > 1
-		return renderModelSelector(a.modelList, a.selectedModelIdx, a.dataModel.Provider.GetModel(), a.modelFilterMode, a.modelFilterInput, a.filteredModelList, multiProvider, a.width, a.height)
+		return renderModelSelector(a, a.modelList, a.selectedModelIdx, a.dataModel.Provider.GetModel(), a.modelFilterMode, a.modelFilterInput, a.filteredModelList, multiProvider, a.width, a.height)
 	}
 
 	// Show settings modal if toggled
@@ -491,7 +491,7 @@ func (a AppView) View() string {
 			}
 			return a.renderProviderSettings(a.width, a.height)
 		}
-		return renderSettings(a.settingsFields, a.selectedSettingIdx, a.settingsEditMode, a.settingsEditInput, a.settingsHasChanges, a.settingsConfirmExit, a.settingsLoadedInfo, a.settingsSaveError, a.dataExportMode, a.dataExportInput, a.exportingDataDir, a.dataExportCleaningUp, a.dataExportSpinner, a.dataExportSuccess, a.settingsDataDirNotFound, a.settingsNewDataDirPath, a.width, a.height)
+		return renderSettings(a, a.settingsFields, a.selectedSettingIdx, a.settingsEditMode, a.settingsEditInput, a.settingsHasChanges, a.settingsConfirmExit, a.settingsLoadedInfo, a.settingsSaveError, a.dataExportMode, a.dataExportInput, a.exportingDataDir, a.dataExportCleaningUp, a.dataExportSpinner, a.dataExportSuccess, a.settingsDataDirNotFound, a.settingsNewDataDirPath, a.width, a.height)
 	}
 
 	// Show new session modal (must be before session manager)
@@ -525,7 +525,7 @@ func (a AppView) View() string {
 			}
 		}
 
-		return renderSessionModal("New session", a.newSessionNameInput, a.newSessionPromptInput, a.newSessionFocusedField, a.width, a.height, availablePlugins, a.newSessionEnabledPlugins, unavailablePluginIDs, a.newSessionPluginIdx)
+		return renderSessionModal(a, "New session", a.newSessionNameInput, a.newSessionPromptInput, a.newSessionFocusedField, a.width, a.height, availablePlugins, a.newSessionEnabledPlugins, unavailablePluginIDs, a.newSessionPluginIdx)
 	}
 
 	// Show edit session modal (must be before session manager)
@@ -559,7 +559,7 @@ func (a AppView) View() string {
 			}
 		}
 
-		return renderSessionModal("Edit session", a.newSessionNameInput, a.newSessionPromptInput, a.newSessionFocusedField, a.width, a.height, availablePlugins, a.editSessionEnabledPlugins, unavailablePluginIDs, a.editSessionPluginIdx)
+		return renderSessionModal(a, "Edit session", a.newSessionNameInput, a.newSessionPromptInput, a.newSessionFocusedField, a.width, a.height, availablePlugins, a.editSessionEnabledPlugins, unavailablePluginIDs, a.editSessionPluginIdx)
 	}
 
 	// Show session manager if toggled
@@ -568,7 +568,7 @@ func (a AppView) View() string {
 		if a.dataModel.CurrentSession != nil {
 			currentSessionID = a.dataModel.CurrentSession.ID
 		}
-		return renderSessionManager(a.sessionList, a.selectedSessionIdx, currentSessionID, a.sessionRenameMode, a.sessionRenameInput, a.sessionExportMode, a.sessionExportInput, a.exportingSession, a.exportCleaningUp, a.exportSpinner, a.sessionExportSuccess, a.sessionImportPicker, a.sessionImportSuccess, a.confirmDeleteSession, a.sessionFilterMode, a.sessionFilterInput, a.filteredSessionList, a.width, a.height)
+		return renderSessionManager(a, a.sessionList, a.selectedSessionIdx, currentSessionID, a.sessionRenameMode, a.sessionRenameInput, a.sessionExportMode, a.sessionExportInput, a.exportingSession, a.exportCleaningUp, a.exportSpinner, a.sessionExportSuccess, a.sessionImportPicker, a.sessionImportSuccess, a.confirmDeleteSession, a.sessionFilterMode, a.sessionFilterInput, a.filteredSessionList, a.width, a.height)
 	}
 
 	// Show plugin manager if toggled
@@ -577,16 +577,16 @@ func (a AppView) View() string {
 	}
 
 	if a.showGlobalSearch {
-		return renderGlobalSearch(a.globalSearchInput, a.globalSearchResults, a.selectedGlobalIdx, a.globalSearchScrollIdx, a.width, a.height)
+		return renderGlobalSearch(a, a.globalSearchInput, a.globalSearchResults, a.selectedGlobalIdx, a.globalSearchScrollIdx, a.width, a.height)
 	}
 
 	if a.showMessageSearch {
-		return renderMessageSearch(a.messageSearchInput, a.messageSearchResults, a.selectedSearchIdx, a.messageSearchScrollIdx, a.width, a.height)
+		return renderMessageSearch(a, a.messageSearchInput, a.messageSearchResults, a.selectedSearchIdx, a.messageSearchScrollIdx, a.width, a.height)
 	}
 
 	// Show about modal if toggled
 	if a.showAbout {
-		return renderAboutModal(a.width, a.height, a.dataModel.Version, a.dataModel.License)
+		return renderAboutModal(a, a.width, a.height, a.dataModel.Version, a.dataModel.License)
 	}
 
 	// Show tool warning modal if triggered
@@ -604,6 +604,7 @@ func (a AppView) View() string {
 
 		// Build message lines
 		messageLines := buildSystemPromptToolWarningLines(
+			a,
 			a.dataModel.CurrentSession.SystemPrompt,
 			enabledPluginNames,
 			70, // modal width
@@ -678,14 +679,21 @@ func (a AppView) View() string {
 
 	// Status bar with bold user green descriptions (main chat uses user green)
 	descStyle := lipgloss.NewStyle().Foreground(successColor).Bold(true)
-	statusBar := fmt.Sprintf("Alt+Q %s  Alt+E %s  Alt+S %s  Alt+M %s  Alt+F %s  Alt+Enter %s  Enter %s  Alt+Y %s",
+	statusBar := fmt.Sprintf("%s %s  %s %s  %s %s  %s %s  %s %s  %s %s  Enter %s  %s %s",
+		a.formatKeyDisplay("primary", "Q"),
 		descStyle.Render("Quit"),
+		a.formatKeyDisplay("primary", "E"),
 		descStyle.Render("Edit session"),
+		a.formatKeyDisplay("primary", "S"),
 		descStyle.Render("Sessions"),
+		a.formatKeyDisplay("primary", "M"),
 		descStyle.Render("Models"),
+		a.formatKeyDisplay("primary", "F"),
 		descStyle.Render("Search"),
+		a.formatKeyDisplay("primary", "Enter"),
 		descStyle.Render("New Line"),
 		descStyle.Render("Send"),
+		a.formatKeyDisplay("primary", "Y"),
 		descStyle.Render("Copy"),
 	)
 	statusBar = StatusStyle.Render(statusBar)
@@ -713,6 +721,19 @@ func (a AppView) getModelList() []ollama.ModelInfo {
 		return a.filteredModelList
 	}
 	return a.modelList
+}
+
+// formatKeyDisplay returns a formatted keybinding string for display in footers
+// modifier should be "primary" or "secondary", key is the action key (e.g., "J/K")
+func (a AppView) formatKeyDisplay(modifier, key string) string {
+	kb := a.dataModel.Config.Keybindings
+	var mod string
+	if modifier == "primary" {
+		mod = kb.PrimaryDisplay()
+	} else if modifier == "secondary" {
+		mod = kb.SecondaryDisplay()
+	}
+	return mod + "+" + key
 }
 
 // setCurrentSession sets the current session and syncs it with the MCP manager

@@ -45,6 +45,9 @@ type WelcomeModel struct {
 	// Track if this is a restart scenario (creating new data dir from Settings)
 	isRestartScenario bool
 
+	// Keybindings
+	keybindings *config.KeyBindingsConfig
+
 	// Security configuration
 	securityMethod        config.SecurityMethod
 	sshKeySource          int // 0 = create OTUI, 1 = use existing
@@ -129,7 +132,7 @@ var (
 			Padding(0, 1)
 )
 
-func NewWelcomeModel() WelcomeModel {
+func NewWelcomeModel(kb *config.KeyBindingsConfig) WelcomeModel {
 	urlInput := textinput.New()
 	urlInput.Placeholder = "http://localhost:11434"
 	urlInput.Width = 50
@@ -204,6 +207,7 @@ func NewWelcomeModel() WelcomeModel {
 
 	return WelcomeModel{
 		isRestartScenario:     isRestart,
+		keybindings:           kb,
 		step:                  stepWelcome,
 		selectedButton:        0,
 		securityMethod:        config.SecurityPlainText,
@@ -530,7 +534,7 @@ func (m WelcomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m WelcomeModel) updateWelcomeScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "alt+q":
+	case m.getActionKey("welcome_quit"):
 		return m, tea.Quit
 
 	case "up", "k":
@@ -637,7 +641,7 @@ func (m WelcomeModel) updateOllamaURLScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	var cmd tea.Cmd
 
 	switch msg.String() {
-	case "alt+q":
+	case m.getActionKey("welcome_quit"):
 		return m, tea.Quit
 
 	case "esc":
@@ -654,7 +658,7 @@ func (m WelcomeModel) updateOllamaURLScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		m.err = ""
 		return m, validateOllamaURL(m.urlInput.Value())
 
-	case "alt+u":
+	case m.getActionKey("clear_input"):
 		m.urlInput.SetValue("")
 		return m, nil
 	}
@@ -696,7 +700,7 @@ func (m WelcomeModel) updateModelSelectionScreen(msg tea.KeyMsg) (tea.Model, tea
 			}
 			return m, nil
 
-		case "alt+j", "alt+down", "down":
+		case m.getActionKey("welcome_down"), m.getActionKey("welcome_down_arrow"), "down":
 			displayList := m.allModels
 			if m.modelFilterMode && len(m.filteredWizardModels) > 0 {
 				displayList = m.filteredWizardModels
@@ -706,7 +710,7 @@ func (m WelcomeModel) updateModelSelectionScreen(msg tea.KeyMsg) (tea.Model, tea
 			}
 			return m, nil
 
-		case "alt+k", "alt+up", "up":
+		case m.getActionKey("welcome_up"), m.getActionKey("welcome_up_arrow"), "up":
 			if m.selectedModel > 0 {
 				m.selectedModel--
 			}
@@ -743,7 +747,7 @@ func (m WelcomeModel) updateModelSelectionScreen(msg tea.KeyMsg) (tea.Model, tea
 
 	// Normal mode (no filter)
 	switch msg.String() {
-	case "alt+q":
+	case m.getActionKey("welcome_quit"):
 		return m, tea.Quit
 
 	case "esc":
@@ -805,7 +809,7 @@ func (m WelcomeModel) updateDataDirectoryScreen(msg tea.KeyMsg) (tea.Model, tea.
 	var cmd tea.Cmd
 
 	switch msg.String() {
-	case "alt+q":
+	case m.getActionKey("welcome_quit"):
 		return m, tea.Quit
 
 	case "esc":
@@ -889,7 +893,7 @@ func (m WelcomeModel) updateDataDirectoryScreen(msg tea.KeyMsg) (tea.Model, tea.
 		m.step = stepComplete
 		return m, tea.Quit
 
-	case "alt+u":
+	case m.getActionKey("clear_input"):
 		m.dirInput.SetValue("")
 		return m, nil
 	}
@@ -979,7 +983,7 @@ continueRendering:
 	sb.WriteString(buttons)
 	sb.WriteString("\n\n")
 
-	hint := "Press ↑/↓ or j/k to switch • Enter to select • Alt+Q Quit"
+	hint := fmt.Sprintf("Press ↑/↓ or j/k to switch • Enter to select • %s+Q Quit", m.primaryDisplay())
 	sb.WriteString(featureStyle.Render(hint))
 	sb.WriteString("\n")
 
@@ -1008,7 +1012,7 @@ func (m WelcomeModel) viewOllamaURLScreen() string {
 	if m.loading {
 		sb.WriteString(centerText(featureStyle.Render("⏳ Validating connection..."), m.width))
 	} else {
-		sb.WriteString(centerText(featureStyle.Render("Alt+U Clear • Enter Continue • Esc Back • Alt+Q Quit"), m.width))
+		sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("%s+U Clear • Enter Continue • Esc Back • %s+Q Quit", m.primaryDisplay())), m.width))
 	}
 
 	if m.err != "" {
@@ -1034,7 +1038,7 @@ func (m WelcomeModel) viewModelSelectionScreen() string {
 	if len(m.allModels) == 0 {
 		sb.WriteString(centerText(errorStyle.Render("No models found!"), m.width))
 		sb.WriteString("\n\n")
-		sb.WriteString(centerText(featureStyle.Render("Press Esc to go back • Alt+Q Quit"), m.width))
+		sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("Press Esc to go back • %s+Q Quit", m.primaryDisplay())), m.width))
 		return sb.String()
 	}
 
@@ -1107,7 +1111,7 @@ func (m WelcomeModel) viewModelSelectionScreen() string {
 	if m.modelFilterMode {
 		footerText = FormatFooter(
 			"Type", "to filter",
-			"Alt+J/K", "Navigate",
+			fmt.Sprintf("%s+J/K", m.primaryDisplay()), "Navigate",
 			"Enter", "Select",
 			"Esc", "Cancel",
 		)
@@ -1117,7 +1121,7 @@ func (m WelcomeModel) viewModelSelectionScreen() string {
 			"j/k", "Navigate",
 			"Enter", "Select",
 			"Esc", "Back",
-			"Alt+Q", "Quit",
+			fmt.Sprintf("%s+Q", m.primaryDisplay()), "Quit",
 		)
 	}
 	sb.WriteString(centerText(featureStyle.Render(footerText), m.width))
@@ -1143,7 +1147,7 @@ func (m WelcomeModel) viewDataDirectoryScreen() string {
 	sb.WriteString(centerText(inputStyle.Render(m.dirInput.View()), m.width))
 	sb.WriteString("\n\n\n")
 
-	sb.WriteString(centerText(featureStyle.Render("Alt+U Clear • Enter Finish • Esc Back • Alt+Q Quit"), m.width))
+	sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("%s+U Clear • Enter Finish • Esc Back • %s+Q Quit", m.primaryDisplay())), m.width))
 
 	if m.err != "" {
 		sb.WriteString("\n\n")
@@ -1179,7 +1183,7 @@ func centerText(text string, width int) string {
 
 func (m WelcomeModel) updateSecurityMethodScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "alt+q":
+	case m.getActionKey("welcome_quit"):
 		return m, tea.Quit
 	case "esc":
 		m.step = stepWelcome
@@ -1239,7 +1243,7 @@ func (m WelcomeModel) viewSecurityMethodScreen() string {
 	sb.WriteString(centerText(featureStyle.Render("    Use for: Cloud providers, sensitive data"), m.width))
 	sb.WriteString("\n\n\n")
 
-	sb.WriteString(centerText(featureStyle.Render("j/k Navigate • Enter Select • Esc Back • Alt+Q Quit"), m.width))
+	sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("j/k Navigate • Enter Select • Esc Back • %s+Q Quit", m.primaryDisplay())), m.width))
 
 	if m.err != "" {
 		sb.WriteString("\n\n")
@@ -1253,7 +1257,7 @@ func (m WelcomeModel) viewSecurityMethodScreen() string {
 
 func (m WelcomeModel) updateSSHKeySourceScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "alt+q":
+	case m.getActionKey("welcome_quit"):
 		return m, tea.Quit
 	case "esc":
 		m.step = stepSecurityMethod
@@ -1317,7 +1321,7 @@ func (m WelcomeModel) viewSSHKeySourceScreen() string {
 	sb.WriteString(centerText(featureStyle.Render("    Reuse your current SSH key"), m.width))
 	sb.WriteString("\n\n\n")
 
-	sb.WriteString(centerText(featureStyle.Render("j/k Navigate • Enter Select • Esc Back • Alt+Q Quit"), m.width))
+	sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("j/k Navigate • Enter Select • Esc Back • %s+Q Quit", m.primaryDisplay())), m.width))
 
 	if m.err != "" {
 		sb.WriteString("\n\n")
@@ -1331,7 +1335,7 @@ func (m WelcomeModel) viewSSHKeySourceScreen() string {
 
 func (m WelcomeModel) updateCreateOTUIKeyScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "alt+q":
+	case m.getActionKey("welcome_quit"):
 		return m, tea.Quit
 	case "esc":
 		m.step = stepSSHKeySource
@@ -1400,7 +1404,7 @@ func (m WelcomeModel) viewCreateOTUIKeyScreen() string {
 	sb.WriteString(centerText(featureStyle.Render("   OTUI data (credentials, sessions)."), m.width))
 	sb.WriteString("\n\n\n")
 
-	sb.WriteString(centerText(featureStyle.Render("j/k Navigate • Enter Select • Esc Back • Alt+Q Quit"), m.width))
+	sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("j/k Navigate • Enter Select • Esc Back • %s+Q Quit", m.primaryDisplay())), m.width))
 
 	if m.err != "" {
 		sb.WriteString("\n\n")
@@ -1416,7 +1420,7 @@ func (m WelcomeModel) updateSetPassphraseScreen(msg tea.KeyMsg) (tea.Model, tea.
 	var cmd tea.Cmd
 
 	switch msg.String() {
-	case "alt+q":
+	case m.getActionKey("welcome_quit"):
 		return m, tea.Quit
 	case "esc":
 		m.step = stepCreateOTUIKey
@@ -1492,7 +1496,7 @@ func (m WelcomeModel) viewSetPassphraseScreen() string {
 	sb.WriteString(centerText(featureStyle.Render("• Accessing encrypted data"), m.width))
 	sb.WriteString("\n\n\n")
 
-	sb.WriteString(centerText(featureStyle.Render("Tab Next Field • Enter Continue • Esc Cancel • Alt+Q Quit"), m.width))
+	sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("Tab Next Field • Enter Continue • Esc Cancel • %s+Q Quit", m.primaryDisplay())), m.width))
 
 	if m.err != "" {
 		sb.WriteString("\n\n")
@@ -1506,7 +1510,7 @@ func (m WelcomeModel) viewSetPassphraseScreen() string {
 
 func (m WelcomeModel) updateSelectExistingKeyScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "alt+q":
+	case m.getActionKey("welcome_quit"):
 		return m, tea.Quit
 	case "esc":
 		m.step = stepSSHKeySource
@@ -1575,7 +1579,7 @@ func (m WelcomeModel) viewSelectExistingKeyScreen() string {
 	sb.WriteString(centerText(featureStyle.Render("   you'll be prompted each time you start OTUI."), m.width))
 	sb.WriteString("\n\n\n")
 
-	sb.WriteString(centerText(featureStyle.Render("j/k Navigate • Enter Select • Esc Back • Alt+Q Quit"), m.width))
+	sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("j/k Navigate • Enter Select • Esc Back • %s+Q Quit", m.primaryDisplay())), m.width))
 
 	if m.err != "" {
 		sb.WriteString("\n\n")
@@ -1589,7 +1593,7 @@ func (m WelcomeModel) viewSelectExistingKeyScreen() string {
 
 func (m WelcomeModel) updateBackupReminderScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "alt+q":
+	case m.getActionKey("welcome_quit"):
 		return m, tea.Quit
 	case "g":
 		m.step = stepProviderSelection
@@ -1603,7 +1607,7 @@ func (m WelcomeModel) updateVerifyExistingKeyPassphraseScreen(msg tea.KeyMsg) (t
 	var cmd tea.Cmd
 
 	switch msg.String() {
-	case "alt+q":
+	case m.getActionKey("welcome_quit"):
 		return m, tea.Quit
 
 	case "esc":
@@ -1634,7 +1638,7 @@ func (m WelcomeModel) updateVerifyExistingKeyPassphraseScreen(msg tea.KeyMsg) (t
 		m.err = ""
 		return m, nil
 
-	case "alt+u":
+	case m.getActionKey("clear_input"):
 		m.existingKeyPassphrase.SetValue("")
 		return m, nil
 	}
@@ -1686,7 +1690,7 @@ func (m WelcomeModel) viewBackupReminderScreen() string {
 	sb.WriteString(centerText(featureStyle.Render("• Save to encrypted cloud storage"), m.width))
 	sb.WriteString("\n\n\n")
 
-	sb.WriteString(centerText(featureStyle.Render("g Got it! • Alt+Q Quit"), m.width))
+	sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("g Got it! • %s+Q Quit", m.primaryDisplay())), m.width))
 
 	return sb.String()
 }
@@ -1695,7 +1699,7 @@ func (m WelcomeModel) viewBackupReminderScreen() string {
 
 func (m WelcomeModel) updateProviderSelectionScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "alt+q":
+	case m.getActionKey("welcome_quit"):
 		return m, tea.Quit
 	case "esc":
 		if m.securityMethod == config.SecuritySSHKey {
@@ -1796,7 +1800,7 @@ func (m WelcomeModel) viewProviderSelectionScreen() string {
 	}
 
 	sb.WriteString("\n\n")
-	sb.WriteString(centerText(featureStyle.Render("j/k Navigate • Space Toggle • Enter Continue • Esc Back • Alt+Q Quit"), m.width))
+	sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("j/k Navigate • Space Toggle • Enter Continue • Esc Back • %s+Q Quit", m.primaryDisplay())), m.width))
 
 	if m.err != "" {
 		sb.WriteString("\n\n")
@@ -1812,7 +1816,7 @@ func (m WelcomeModel) updateConfigureProviderScreen(msg tea.KeyMsg) (tea.Model, 
 	var cmd tea.Cmd
 
 	switch msg.String() {
-	case "alt+q":
+	case m.getActionKey("welcome_quit"):
 		return m, tea.Quit
 	case "esc":
 		m.step = stepProviderSelection
@@ -1854,7 +1858,7 @@ func (m WelcomeModel) viewConfigureProviderScreen() string {
 	sb.WriteString(centerText(inputStyle.Render(m.apiKeyInput.View()), m.width))
 	sb.WriteString("\n\n\n")
 
-	sb.WriteString(centerText(featureStyle.Render("Enter Continue • Esc Back • Alt+Q Quit"), m.width))
+	sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("Enter Continue • Esc Back • %s+Q Quit", m.primaryDisplay())), m.width))
 
 	if m.err != "" {
 		sb.WriteString("\n\n")
@@ -1866,4 +1870,20 @@ func (m WelcomeModel) viewConfigureProviderScreen() string {
 
 func (m WelcomeModel) IsComplete() bool {
 	return m.step == stepComplete
+}
+
+// Helper methods for keybindings
+func (m WelcomeModel) getActionKey(action string) string {
+	if m.keybindings == nil {
+		// Fallback to default keybindings if not initialized
+		return config.DefaultKeybindings().GetActionKey(action)
+	}
+	return m.keybindings.GetActionKey(action)
+}
+
+func (m WelcomeModel) primaryDisplay() string {
+	if m.keybindings == nil {
+		return "Alt"
+	}
+	return m.keybindings.PrimaryDisplay()
 }

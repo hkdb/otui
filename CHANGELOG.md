@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.07.00] - 2026-02-01
+
+** Features: **
+
+- Custom keybindings. See details at [docs/KEYBINDINGS.md](https://github.com/hkdb/otui/blob/main/docs/KEYBINDINGS.md)
+
+---
+
 ## [v0.06.00] - 2026-01-31
 
 ** Features: **

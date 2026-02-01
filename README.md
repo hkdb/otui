@@ -104,10 +104,9 @@ OTUI was designed to be hopefully intuitive enough to any user that is already f
 
 At any point in time, users can press Alt+H to bring up the `help` screen to see what the keybindings are:
 
+![keybindings](docs/keybindings-v0.07.00.png)
 
-![keybindings](docs/keybindings.png)
-
-In the future, I will likely add the ability to at least customize modifiers if not all keybindings since some of these key combinations might clash with tiling wm environments.
+For those of you who wish to customize your keyboard shortcuts, check out [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md). It's not likely that I will ever implement a UI for customization cause keyboard warriors that want to vear off from the defaults are more than likely well versed in editing text config files.
 
 #### 🗺️ UI Components:
 
@@ -238,21 +237,23 @@ rm -rf ~/.local/share/otui # or whatever data dir the user specified. This also 
 - ✅ [OpenRouter](https://openrouter.com) Support
 - ✅ Anthropic Support
 - ✅ OpenAI Support
+- ✅ Keybindings modifier customization
+- ✅ Keybindings per-action customization
 
 **Work in Progress**:
 - 🚧 Bug Fixes (On-Going)
-- 🚧 Adding Other Providers (Github Copilot, Gemini? TBD)
+- 🚧 Adding Other Providers (Github Copilot, Gemini, Synthetic? TBD)
 - 🚧 More Sophisticated session/context management
 
 **Future Features**:
 - 🪶 Session data encryption
-- 🪶 Keybindings modifier customization
 
 ## 🎬 Credits
 
 - A lot of OTUI was made possible with: [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 - Some of OTUI was originally inspired by: [LIT TUI](https://github.com/Positronic-AI/lit-tui)
 - Most of the project was vibe coded with [OpenCode](https://opencode.ai) + [Claude Sonnet 4.5](https://www.anthropic.com/claude/sonnet)
+- The project is currently switched to using Claud Code instead of OpenCode due to recent changes imposed by Anthropic.
 
 ## 🦾 Support this Project
 

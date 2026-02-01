@@ -38,7 +38,7 @@ func (a *AppView) renderProviderSettings(width, height int) string {
 	fieldList := a.renderProviderFields(fields, modalWidth)
 
 	// Footer
-	footerText := "h/l Tabs  j/k Navigate  Enter Edit/Toggle  Alt+Enter Save  Esc Close"
+	footerText := fmt.Sprintf("h/l Tabs  j/k Navigate  Enter Edit/Toggle  %s Save  Esc Close", a.formatKeyDisplay("primary", "Enter"))
 	footer := lipgloss.NewStyle().
 		Foreground(dimColor).
 		Align(lipgloss.Center).

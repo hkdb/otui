@@ -98,6 +98,7 @@ func (a AppView) handleSessionManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 	}
 
 	if a.sessionFilterMode {
+		kb := a.dataModel.Config.Keybindings
 		switch msg.String() {
 		case "esc":
 			a.sessionFilterMode = false
@@ -117,14 +118,14 @@ func (a AppView) handleSessionManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 			}
 			return a, nil
 
-		case "alt+j", "alt+down", "down":
+		case kb.GetActionKey("model_selector_down"), kb.GetActionKey("model_selector_down_arrow"), "down":
 			list := a.getSessionList()
 			if a.selectedSessionIdx < len(list)-1 {
 				a.selectedSessionIdx++
 			}
 			return a, nil
 
-		case "alt+k", "alt+up", "up":
+		case kb.GetActionKey("model_selector_up"), kb.GetActionKey("model_selector_up_arrow"), "up":
 			if a.selectedSessionIdx > 0 {
 				a.selectedSessionIdx--
 			}
@@ -298,6 +299,7 @@ func (a AppView) handleSessionManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 }
 
 func (a AppView) handleNewSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
+	kb := a.dataModel.Config.Keybindings
 	switch msg.String() {
 	case "esc":
 		a.showNewSessionModal = false
@@ -436,6 +438,16 @@ func (a AppView) handleNewSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) 
 		}
 		// Fall through to update input fields
 
+	case kb.GetActionKey("clear_input"):
+		// Clear the focused field
+		switch a.newSessionFocusedField {
+		case 0: // Name field
+			a.newSessionNameInput.SetValue("")
+		case 1: // Prompt field
+			a.newSessionPromptInput.SetValue("")
+		}
+		return a, nil
+
 	case "enter":
 		if a.newSessionFocusedField == 1 {
 			var cmd tea.Cmd
@@ -530,6 +542,8 @@ func (a AppView) handleNewSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) 
 }
 
 func (a AppView) handleModelSelectorUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
+	kb := a.dataModel.Config.Keybindings
+
 	// Handle model filter mode
 	if a.modelFilterMode {
 		switch msg.String() {
@@ -576,14 +590,14 @@ func (a AppView) handleModelSelectorUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 			}
 			return a, nil
 
-		case "alt+j", "alt+down", "down":
+		case kb.GetActionKey("model_selector_down_filtered"), kb.GetActionKey("model_selector_down_arrow_filtered"):
 			list := a.getModelList()
 			if a.selectedModelIdx < len(list)-1 {
 				a.selectedModelIdx++
 			}
 			return a, nil
 
-		case "alt+k", "alt+up", "up":
+		case kb.GetActionKey("model_selector_up_filtered"), kb.GetActionKey("model_selector_up_arrow_filtered"):
 			if a.selectedModelIdx > 0 {
 				a.selectedModelIdx--
 			}
@@ -627,19 +641,19 @@ func (a AppView) handleModelSelectorUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 			a.filteredModelList = a.modelList
 			return a, textinput.Blink
 		}
-	case "esc", "alt+m":
+	case "esc", kb.GetActionKey("close_model_selector"):
 		a.showModelSelector = false
 		return a, nil
-	case "alt+r":
+	case kb.GetActionKey("model_selector_refresh"):
 		// Refresh model list (user-initiated, keep selector open)
 		return a, a.dataModel.FetchModelList(true)
-	case "j", "down":
+	case kb.GetActionKey("model_selector_down"), kb.GetActionKey("model_selector_down_arrow"):
 		list := a.getModelList()
 		if a.selectedModelIdx < len(list)-1 {
 			a.selectedModelIdx++
 		}
 		return a, nil
-	case "k", "up":
+	case kb.GetActionKey("model_selector_up"), kb.GetActionKey("model_selector_up_arrow"):
 		if a.selectedModelIdx > 0 {
 			a.selectedModelIdx--
 		}
@@ -669,7 +683,8 @@ func (a AppView) handleModelSelectorUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 }
 
 func (a AppView) handleAboutUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
-	if msg.String() == "esc" || msg.String() == "alt+a" {
+	kb := a.dataModel.Config.Keybindings
+	if msg.String() == "esc" || msg.String() == kb.GetActionKey("close_about") {
 		a.showAbout = false
 		return a, nil
 	}
@@ -682,16 +697,17 @@ func (a AppView) handleSettingsUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 }
 
 func (a AppView) handleMessageSearchUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
+	kb := a.dataModel.Config.Keybindings
 	switch msg.String() {
 	case "esc":
 		a.showMessageSearch = false
 		return a, nil
-	case "up", "alt+k":
+	case "up", kb.GetActionKey("model_selector_up"):
 		if a.selectedSearchIdx > 0 {
 			a.selectedSearchIdx--
 		}
 		return a, nil
-	case "down", "alt+j":
+	case "down", kb.GetActionKey("model_selector_down"):
 		if a.selectedSearchIdx < len(a.messageSearchResults)-1 {
 			a.selectedSearchIdx++
 		}
@@ -781,16 +797,17 @@ func (a AppView) handleMessageSearchUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 }
 
 func (a AppView) handleGlobalSearchUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
+	kb := a.dataModel.Config.Keybindings
 	switch msg.String() {
 	case "esc":
 		a.showGlobalSearch = false
 		return a, nil
-	case "up", "alt+k":
+	case "up", kb.GetActionKey("model_selector_up"):
 		if a.selectedGlobalIdx > 0 {
 			a.selectedGlobalIdx--
 		}
 		return a, nil
-	case "down", "alt+j":
+	case "down", kb.GetActionKey("model_selector_down"):
 		if a.selectedGlobalIdx < len(a.globalSearchResults)-1 {
 			a.selectedGlobalIdx++
 		}
@@ -821,6 +838,7 @@ func (a AppView) handleGlobalSearchUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 }
 
 func (a AppView) handleEditSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
+	kb := a.dataModel.Config.Keybindings
 	switch msg.String() {
 	case "esc":
 		a.showEditSessionModal = false
@@ -958,7 +976,7 @@ func (a AppView) handleEditSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd)
 		}
 		// Fall through to update input fields
 
-	case "alt+u":
+	case kb.GetActionKey("clear_input"):
 		// Clear the focused field
 		switch a.newSessionFocusedField {
 		case 0: // Name field

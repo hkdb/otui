@@ -124,6 +124,7 @@ func (a *AppView) renderInstallModal() string {
 
 // renderConfigModal is a pure function that renders the plugin configuration modal
 func renderConfigModal(
+	a AppView,
 	plugin *mcp.Plugin,
 	configFields map[string]string,
 	customEnvVars []EnvVarPair,
@@ -407,9 +408,9 @@ func renderConfigModal(
 	if addingCustomEnv {
 		footer = FormatFooter("Tab", "Next", "Enter", "Add", "Esc", "Cancel")
 	} else if configEditMode {
-		footer = FormatFooter("Tab", "Next", "Enter", "Save", "Alt+U", "Clear", "Esc", "Cancel")
+		footer = FormatFooter("Tab", "Next", "Enter", "Save", a.formatKeyDisplay("primary", "U"), "Clear", "Esc", "Cancel")
 	} else {
-		footer = FormatFooter("j/k", "Nav", "Enter", "Edit", "d", "Del", "Alt+Enter", "Save", "Esc", "Close")
+		footer = FormatFooter("j/k", "Nav", "Enter", "Edit", "d", "Del", a.formatKeyDisplay("primary", "Enter"), "Save", "Esc", "Close")
 	}
 
 	footerSection := lipgloss.NewStyle().
@@ -619,7 +620,7 @@ func (a *AppView) renderAddCustomModal() string {
 	if a.pluginManagerState.addCustomModal.editMode {
 		footerAction = "Save"
 	}
-	footer := FormatFooter("Tab/Shift+Tab", "Navigate", "Enter", "Edit", "Alt+Enter", footerAction, "Esc", "Cancel")
+	footer := FormatFooter("Tab/Shift+Tab", "Navigate", "Enter", "Edit", a.formatKeyDisplay("primary", "Enter"), footerAction, "Esc", "Cancel")
 
 	footerSection := lipgloss.NewStyle().
 		Foreground(dimColor).
@@ -725,7 +726,7 @@ func (a *AppView) renderEnvEditModal() string {
 	if a.pluginManagerState.configModal.addingCustomEnv {
 		footer = FormatFooter("Enter", "Add", "Esc", "Cancel")
 	} else if a.pluginManagerState.addCustomModal.envEditMode {
-		footer = FormatFooter("Enter", "Save", "Alt+U", "Clear", "Esc", "Cancel")
+		footer = FormatFooter("Enter", "Save", a.formatKeyDisplay("primary", "U"), "Clear", "Esc", "Cancel")
 	} else {
 		footer = FormatFooter("j/k", "Nav", "Enter", "Edit", "d", "Del", "Esc", "Back")
 	}
@@ -832,7 +833,7 @@ func (a *AppView) renderArgsEditModal() string {
 
 	var footer string
 	if a.pluginManagerState.addCustomModal.argsEditMode {
-		footer = FormatFooter("Alt+Enter", "Add", "Esc", "Cancel")
+		footer = FormatFooter(a.formatKeyDisplay("primary", "Enter"), "Add", "Esc", "Cancel")
 	} else {
 		footer = FormatFooter("j/k", "Nav", "Enter", "Add/Edit", "d", "Del", "Esc", "Back")
 	}
@@ -960,9 +961,9 @@ func (a *AppView) renderArgEditForm() string {
 
 	var footer string
 	if a.pluginManagerState.addCustomModal.argFocusField == 1 {
-		footer = FormatFooter("Tab", "Next Field", "j/k", "Cycle", "Space/Enter", "Select", "Alt+Enter", "Add", "Esc", "Cancel")
+		footer = FormatFooter("Tab", "Next Field", "j/k", "Cycle", "Space/Enter", "Select", a.formatKeyDisplay("primary", "Enter"), "Add", "Esc", "Cancel")
 	} else {
-		footer = FormatFooter("Tab", "Next Field", "Alt+U", "Clear", "Alt+Enter", "Add", "Esc", "Cancel")
+		footer = FormatFooter("Tab", "Next Field", a.formatKeyDisplay("primary", "U"), "Clear", a.formatKeyDisplay("primary", "Enter"), "Add", "Esc", "Cancel")
 	}
 
 	footerSection := lipgloss.NewStyle().

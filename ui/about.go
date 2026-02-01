@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -8,7 +9,7 @@ import (
 
 const GitHubURL = "github.com/hkdb/otui"
 
-func renderAboutModal(width, height int, version, license string) string {
+func renderAboutModal(a AppView, width, height int, version, license string) string {
 	var sb strings.Builder
 
 	asciiStyle := lipgloss.NewStyle().
@@ -48,7 +49,7 @@ func renderAboutModal(width, height int, version, license string) string {
 	sb.WriteString(valueStyle.Render(GitHubURL))
 	sb.WriteString("\n\n\n")
 
-	sb.WriteString(featureStyle.Render("Press Esc or Alt+Shift+A to close"))
+	sb.WriteString(featureStyle.Render(fmt.Sprintf("Press Esc or %s to close", a.formatKeyDisplay("secondary", "A"))))
 	sb.WriteString("\n")
 
 	content := sb.String()

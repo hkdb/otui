@@ -257,7 +257,7 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			displayMsg = fmt.Sprintf("❌ Error: %s does not support tool calling.\n\n"+
 				"Your session has enabled plugins that require tool support.\n"+
 				"Switch to a tool-capable model marked with [🔧] next to it.\n\n"+
-				"Press Alt+M to change model.", currentModel)
+				"Press %s to change model.", currentModel, a.formatKeyDisplay("primary", "M"))
 		}
 
 		// Wrap error message to fit viewport width

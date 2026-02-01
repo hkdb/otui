@@ -16,6 +16,7 @@ import (
 
 // handleConfigModalUpdate handles all input for the configure modal
 func (a AppView) handleConfigModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
+	kb := a.dataModel.Config.Keybindings
 	plugin := a.pluginManagerState.configModal.plugin
 	if plugin == nil {
 		return a, nil
@@ -55,6 +56,13 @@ func (a AppView) handleConfigModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 				a.pluginManagerState.configModal.customEnvFocusField = 0
 				a.pluginManagerState.configModal.customEnvValInput.Blur()
 				a.pluginManagerState.configModal.customEnvKeyInput.Focus()
+			}
+		case kb.GetActionKey("clear_input"):
+			// Clear current input field
+			if a.pluginManagerState.configModal.customEnvFocusField == 0 {
+				a.pluginManagerState.configModal.customEnvKeyInput.SetValue("")
+			} else {
+				a.pluginManagerState.configModal.customEnvValInput.SetValue("")
 			}
 		case "enter":
 			// Add the new env var
@@ -112,7 +120,7 @@ func (a AppView) handleConfigModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 					a.pluginManagerState.configModal.customEnvKeyInput.Focus()
 				}
 			}
-		case "alt+u":
+		case kb.GetActionKey("clear_input"):
 			// Clear current input
 			if selectedIdx < numSchemaFields {
 				a.pluginManagerState.configModal.editInput.SetValue("")
@@ -550,6 +558,19 @@ func (a AppView) handleAddCustomFormUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 		return a, nil
 	}
 
+	// Handle clear input
+	kb := a.dataModel.Config.Keybindings
+	if msg.String() == kb.GetActionKey("clear_input") {
+		// Clear the currently focused text field
+		if a.pluginManagerState.addCustomModal.fieldIdx < len(fieldKeys) {
+			key := fieldKeys[a.pluginManagerState.addCustomModal.fieldIdx]
+			field := a.pluginManagerState.addCustomModal.fields[key]
+			field.SetValue("")
+			a.pluginManagerState.addCustomModal.fields[key] = field
+		}
+		return a, nil
+	}
+
 	// Forward input to the focused field (only if on a text field)
 	if a.pluginManagerState.addCustomModal.fieldIdx < len(fieldKeys) {
 		key := fieldKeys[a.pluginManagerState.addCustomModal.fieldIdx]
@@ -759,6 +780,8 @@ func (a AppView) handleArgsEditModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 
 // handleArgEditFormUpdate handles the add/edit argument form
 func (a AppView) handleArgEditFormUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
+	kb := a.dataModel.Config.Keybindings
+
 	switch msg.String() {
 	case "esc":
 		// Cancel arg edit
@@ -831,7 +854,7 @@ func (a AppView) handleArgEditFormUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 		}
 		return a, nil
 
-	case "alt+u":
+	case kb.GetActionKey("clear_input"):
 		// Clear current field
 		switch a.pluginManagerState.addCustomModal.argFocusField {
 		case 0:
@@ -890,6 +913,8 @@ func (a *AppView) updateArgEditFormFocus() {
 
 // handlePluginManagerUpdate handles keyboard input for the plugin manager
 func (a AppView) handlePluginManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
+	kb := a.dataModel.Config.Keybindings
+
 	if a.pluginManagerState.warnings.showSecurity {
 		switch msg.String() {
 		case "y":
@@ -1243,15 +1268,15 @@ func (a AppView) handlePluginManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 				a.pluginManagerState.detailsModal.visible = true
 				a.pluginManagerState.detailsModal.plugin = &plugins[a.pluginManagerState.selection.selectedPluginIdx]
 			}
-		case "up", "alt+k":
+		case kb.GetActionKey("plugin_up_filtered"), kb.GetActionKey("plugin_up_arrow_filtered"):
 			if a.pluginManagerState.selection.selectedPluginIdx > 0 {
 				a.pluginManagerState.selection.selectedPluginIdx--
 			}
-		case "down", "alt+j":
+		case kb.GetActionKey("plugin_down_filtered"), kb.GetActionKey("plugin_down_arrow_filtered"):
 			if a.pluginManagerState.selection.selectedPluginIdx < len(plugins)-1 {
 				a.pluginManagerState.selection.selectedPluginIdx++
 			}
-		case "alt+i":
+		case kb.GetActionKey("plugin_install_filtered"):
 			if len(plugins) > 0 && a.pluginManagerState.selection.selectedPluginIdx < len(plugins) {
 				plugin := &plugins[a.pluginManagerState.selection.selectedPluginIdx]
 				if !a.pluginManagerState.pluginState.Installer.IsInstalled(plugin.ID) {
@@ -1282,11 +1307,11 @@ func (a AppView) handlePluginManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		a.showPluginManager = false
-	case "up", "k":
+	case kb.GetActionKey("plugin_up"), kb.GetActionKey("plugin_up_arrow"):
 		if a.pluginManagerState.selection.selectedPluginIdx > 0 {
 			a.pluginManagerState.selection.selectedPluginIdx--
 		}
-	case "down", "j":
+	case kb.GetActionKey("plugin_down"), kb.GetActionKey("plugin_down_arrow"):
 		if a.pluginManagerState.selection.selectedPluginIdx < len(plugins)-1 {
 			a.pluginManagerState.selection.selectedPluginIdx++
 		}
@@ -1328,7 +1353,7 @@ func (a AppView) handlePluginManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 	case "/":
 		a.pluginManagerState.selection.filterMode = true
 		a.pluginManagerState.selection.filterInput.Focus()
-	case "alt+r":
+	case kb.GetActionKey("plugin_refresh"):
 		// Show modal with spinner
 		a.pluginManagerState.registryRefresh.visible = true
 		a.pluginManagerState.registryRefresh.phase = "fetching"
@@ -1341,7 +1366,7 @@ func (a AppView) handlePluginManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 			a.pluginManagerState.registryRefresh.spinner.Tick,
 			a.dataModel.RefreshRegistry(),
 		)
-	case "i":
+	case kb.GetActionKey("plugin_install"):
 		if len(plugins) > 0 && a.pluginManagerState.selection.selectedPluginIdx < len(plugins) {
 			plugin := &plugins[a.pluginManagerState.selection.selectedPluginIdx]
 			if !a.pluginManagerState.pluginState.Installer.IsInstalled(plugin.ID) {

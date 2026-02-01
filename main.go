@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	Version = "v0.06.00"
+	Version = "v0.07.00"
 	License = "Apache-2.0"
 )
 
@@ -115,7 +115,9 @@ func main() {
 	}
 
 	if isFirstRun {
-		welcomeModel := ui.NewWelcomeModel()
+		// Load default keybindings for wizard
+		kb := config.DefaultKeybindings()
+		welcomeModel := ui.NewWelcomeModel(kb)
 		p := tea.NewProgram(
 			welcomeModel,
 			tea.WithAltScreen(),

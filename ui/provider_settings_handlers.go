@@ -11,6 +11,8 @@ import (
 
 // handleProviderSettingsInput handles keyboard input for provider settings sub-screen
 func (a AppView) handleProviderSettingsInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	kb := a.dataModel.Config.Keybindings
+
 	// Handle confirmation modal if active (takes priority over everything)
 	if a.providerSettingsConfirmExit {
 		switch msg.String() {
@@ -38,6 +40,10 @@ func (a AppView) handleProviderSettingsInput(msg tea.KeyMsg) (tea.Model, tea.Cmd
 			// Cancel edit
 			a.providerSettingsState.editMode = false
 			a.providerSettingsState.editInput.Blur()
+			return a, nil
+		case kb.GetActionKey("clear_input"):
+			// Clear input
+			a.providerSettingsState.editInput.SetValue("")
 			return a, nil
 		default:
 			// Update textinput
@@ -71,7 +77,7 @@ func (a AppView) handleProviderSettingsInput(msg tea.KeyMsg) (tea.Model, tea.Cmd
 		}
 		return a, nil
 
-	case "j", "down":
+	case "j", "down", kb.GetActionKey("provider_down"), kb.GetActionKey("provider_down_arrow"):
 		// Next field (with wrap)
 		currentFields := a.providerSettingsState.currentFieldsMap[a.providerSettingsState.selectedProviderID]
 		if len(currentFields) > 0 {
@@ -79,7 +85,7 @@ func (a AppView) handleProviderSettingsInput(msg tea.KeyMsg) (tea.Model, tea.Cmd
 		}
 		return a, nil
 
-	case "k", "up":
+	case "k", "up", kb.GetActionKey("provider_up"), kb.GetActionKey("provider_up_arrow"):
 		// Previous field (with wrap)
 		currentFields := a.providerSettingsState.currentFieldsMap[a.providerSettingsState.selectedProviderID]
 		if len(currentFields) > 0 {

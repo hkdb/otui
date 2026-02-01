@@ -15,6 +15,7 @@ import (
 
 func (a AppView) handleSessionRenameMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	kb := a.dataModel.Config.Keybindings
 
 	switch msg.String() {
 	case "esc":
@@ -39,7 +40,7 @@ func (a AppView) handleSessionRenameMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		return a, a.dataModel.RenameSessionCmd(sessionID, newName)
 
-	case "alt+u":
+	case kb.GetActionKey("clear_input"):
 		a.sessionRenameInput.SetValue("")
 		return a, nil
 	}
@@ -125,6 +126,7 @@ func (a AppView) handlePassphraseForDataDir(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (a AppView) handleSessionExportMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
+	kb := a.dataModel.Config.Keybindings
 
 	// Handle success acknowledgment (Enter or ESC to dismiss)
 	if a.sessionExportSuccess != "" {
@@ -184,7 +186,7 @@ func (a AppView) handleSessionExportMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.exportSpinner.Tick,
 		)
 
-	case "alt+u":
+	case kb.GetActionKey("clear_input"):
 		a.sessionExportInput.SetValue("")
 		return a, nil
 	}
