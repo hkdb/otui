@@ -1012,7 +1012,7 @@ func (m WelcomeModel) viewOllamaURLScreen() string {
 	if m.loading {
 		sb.WriteString(centerText(featureStyle.Render("⏳ Validating connection..."), m.width))
 	} else {
-		sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("%s+U Clear • Enter Continue • Esc Back • %s+Q Quit", m.primaryDisplay())), m.width))
+		sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("%s+U Clear • Enter Continue • Esc Back • %s+Q Quit", m.primaryDisplay(), m.primaryDisplay())), m.width))
 	}
 
 	if m.err != "" {
@@ -1147,7 +1147,7 @@ func (m WelcomeModel) viewDataDirectoryScreen() string {
 	sb.WriteString(centerText(inputStyle.Render(m.dirInput.View()), m.width))
 	sb.WriteString("\n\n\n")
 
-	sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("%s+U Clear • Enter Finish • Esc Back • %s+Q Quit", m.primaryDisplay())), m.width))
+	sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("%s+U Clear • Enter Finish • Esc Back • %s+Q Quit", m.primaryDisplay(), m.primaryDisplay())), m.width))
 
 	if m.err != "" {
 		sb.WriteString("\n\n")
