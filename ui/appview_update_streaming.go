@@ -53,6 +53,7 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			// All chunks displayed - finalize
 			fullResp := a.currentResp.String()
 			a.dataModel.Streaming = false
+			a.userScrolledUp = false
 			a.chunks = nil
 			a.chunkIndex = 0
 			a.currentResp.Reset()
@@ -93,6 +94,7 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 					cmds = []tea.Cmd{
 						a.renderMarkdownAsync(messageIndex, fullResp),
 						a.dataModel.AutoSaveSession(),
+						a.dataModel.CheckAutoCompactionCmd(), // Check if auto-compaction should trigger
 					}
 				}
 
@@ -137,10 +139,12 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 				cmds = []tea.Cmd{
 					a.renderMarkdownAsync(messageIndex, fullResp),
 					a.dataModel.AutoSaveSession(),
+					a.dataModel.CheckAutoCompactionCmd(), // Check if auto-compaction should trigger
 				}
 			} else {
 				cmds = []tea.Cmd{
 					a.dataModel.AutoSaveSession(),
+					a.dataModel.CheckAutoCompactionCmd(), // Check if auto-compaction should trigger
 				}
 			}
 			return a, tea.Batch(cmds...)
@@ -186,6 +190,7 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		}
 
 		a.dataModel.Streaming = false
+		a.userScrolledUp = false
 
 		// Remove loading message (last system message, but not persistent step messages)
 		if len(a.dataModel.Messages) > 0 &&
@@ -236,6 +241,7 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		}
 
 		a.dataModel.Streaming = false
+		a.userScrolledUp = false
 		a.currentResp.Reset()
 
 		// Remove loading message (but not persistent step messages)

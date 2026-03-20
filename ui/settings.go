@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -867,6 +868,18 @@ func (a AppView) saveSettingsCmd() tea.Cmd {
 		existingCfg.DefaultModel = a.settingsFields[2].Value
 		existingCfg.DefaultSystemPrompt = a.settingsFields[3].Value
 		existingCfg.PluginsEnabled = stringToBool(a.settingsFields[4].Value)
+
+		// Update compaction settings (fields 5-8)
+		existingCfg.Compaction.AutoCompact = stringToBool(a.settingsFields[5].Value)
+		if threshold, err := strconv.ParseFloat(a.settingsFields[6].Value, 64); err == nil {
+			existingCfg.Compaction.AutoCompactThreshold = threshold / 100.0
+		}
+		if keep, err := strconv.ParseFloat(a.settingsFields[7].Value, 64); err == nil {
+			existingCfg.Compaction.KeepPercentage = keep / 100.0
+		}
+		if warn, err := strconv.ParseFloat(a.settingsFields[8].Value, 64); err == nil {
+			existingCfg.Compaction.WarnAtPercentage = warn / 100.0
+		}
 
 		// Save updated config (preserves DefaultProvider, Providers[], Security, etc.)
 		if err := config.SaveUserConfig(existingCfg, dataDir); err != nil {

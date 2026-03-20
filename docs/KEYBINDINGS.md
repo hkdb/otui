@@ -245,6 +245,8 @@ page_down = "ctrl+shift+pgdown"     # Page keys
 | `yank_last_response` | `Alt+Y` | Copy last AI response |
 | `yank_conversation` | `Alt+C` | Copy entire conversation |
 | `external_editor` | `Alt+I` | Open external editor for prompt |
+| `toggle_compacted_messages` | `Alt+V` | Toggle visibility of compacted messages |
+| `compact_session` | `Alt+Shift+C` | Manually compact session (context window management) |
 
 ### Model Selector
 

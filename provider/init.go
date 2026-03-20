@@ -90,10 +90,16 @@ func InitializeProviders(cfg *config.Config) map[string]model.Provider {
 // initializeOllama creates the Ollama provider instance.
 // Returns nil if initialization fails (allows offline mode).
 func initializeOllama(cfg *config.Config) model.Provider {
+	apiKey := ""
+	if cfg.CredentialStore != nil {
+		apiKey = cfg.CredentialStore.Get("ollama")
+	}
+
 	providerCfg := Config{
 		Type:    ProviderTypeOllama,
 		BaseURL: cfg.OllamaURL(),
 		Model:   cfg.Model(),
+		APIKey:  apiKey,
 	}
 
 	p, err := NewProvider(providerCfg)

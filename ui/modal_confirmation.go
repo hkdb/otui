@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -155,5 +156,37 @@ func RenderUnsavedChangesModal(width, height int) string {
 		Title:   "Unsaved Changes",
 		Message: "You have unsaved changes. Discard them?",
 	}
+	return RenderConfirmationModal(state, width, height)
+}
+
+// RenderCompactionConfirmModal shows compaction confirmation with before/after stats
+func RenderCompactionConfirmModal(
+	currentTokens, contextWindow int,
+	afterTokens int,
+	compactedCount, keepCount int,
+	width, height int,
+) string {
+	currentPct := float64(currentTokens) / float64(contextWindow) * 100
+	afterPct := float64(afterTokens) / float64(contextWindow) * 100
+
+	message := fmt.Sprintf(
+		"Current: %d / %d tokens (%.0f%%)\n"+
+			"After:   %d / %d tokens (%.0f%%)\n\n"+
+			"Will compact %d messages\n"+
+			"Keeping last %d messages\n\n"+
+			"⚠  Compacted messages won't be sent to LLM\n"+
+			"but remain visible in history\n\n"+
+			"Press Y to compact, N to cancel",
+		currentTokens, contextWindow, currentPct,
+		afterTokens, contextWindow, afterPct,
+		compactedCount, keepCount,
+	)
+
+	state := ConfirmationState{
+		Active:  true,
+		Title:   "Compact Session",
+		Message: message,
+	}
+
 	return RenderConfirmationModal(state, width, height)
 }

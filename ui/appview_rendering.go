@@ -30,6 +30,7 @@ func (a *AppView) updateViewportContent(gotoBottom bool) {
 	var content strings.Builder
 
 	for i, msg := range a.dataModel.Messages {
+
 		highlightPrefix := ""
 		if i == a.highlightedMessageIdx && a.highlightFlashCount%2 == 1 {
 			highlightPrefix = HighlightStyle.Render(">>> ")
@@ -142,7 +143,9 @@ func (a *AppView) updateStreamingMessage() {
 	content.WriteString(fmt.Sprintf("%s %s\n%s\n\n", timestamp, role, streamContent))
 
 	a.viewport.SetContent(content.String())
-	a.viewport.GotoBottom()
+	if !a.userScrolledUp {
+		a.viewport.GotoBottom()
+	}
 }
 
 func formatUserMessage(highlightPrefix, timestamp, role, content string) string {

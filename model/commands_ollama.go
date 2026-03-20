@@ -137,7 +137,56 @@ func (m *Model) SendToOllama() tea.Cmd {
 
 	mcpManager := m.MCPManager
 	systemPrompt := m.BuildSystemPrompt()
-	uiMessages := m.Messages
+
+	// Filter messages based on compaction marker
+	// Use m.Messages directly (UI messages) and filter by compaction marker
+	var uiMessages []Message
+	compactionMarker := 0
+	if m.CurrentSession != nil {
+		compactionMarker = m.CurrentSession.CompactionMarker
+	}
+
+	// Apply compaction filtering to m.Messages
+	if compactionMarker == 0 {
+		// No compaction - send all messages
+		uiMessages = m.Messages
+	} else {
+		// Only send messages after the compaction marker
+		// The LLM summary is injected as synthetic user/assistant messages below
+		// Note: m.Messages includes system messages, but we only count user/assistant for marker
+		userAssistantCount := 0
+		for _, msg := range m.Messages {
+			if msg.Role == "user" || msg.Role == "assistant" {
+				if userAssistantCount >= compactionMarker {
+					uiMessages = append(uiMessages, msg)
+				}
+				userAssistantCount++
+			}
+		}
+	}
+
+	// Inject compaction context as user/assistant exchange so LLM reliably reads it
+	// All LLMs treat user messages as conversational context, unlike system messages
+	// which some models (especially local Ollama models) ignore
+	if compactionMarker > 0 && m.CurrentSession != nil && m.CurrentSession.LLMSummary != "" {
+		contextMsg := Message{
+			Role:    "user",
+			Content: "[Earlier conversation context]:\n\n" + m.CurrentSession.LLMSummary,
+		}
+		ackMsg := Message{
+			Role:    "assistant",
+			Content: "I have the context from our earlier conversation and will use it to inform my responses.",
+		}
+		uiMessages = append([]Message{contextMsg, ackMsg}, uiMessages...)
+		if config.Debug && config.DebugLog != nil {
+			config.DebugLog.Printf("[Model] Injected compaction context as user/assistant exchange (summary length: %d)", len(m.CurrentSession.LLMSummary))
+		}
+	}
+
+	if config.Debug && config.DebugLog != nil {
+		config.DebugLog.Printf("[Model] Sending %d messages to provider (compaction marker at %d, total messages: %d)",
+			len(uiMessages), compactionMarker, len(m.Messages))
+	}
 
 	return func() tea.Msg {
 		// Reset iteration state for new user message (Phase 2)
@@ -173,6 +222,17 @@ func (m *Model) SendToOllama() tea.Cmd {
 		}
 
 		// Build API messages with minimal tool instructions (universal approach for all model sizes)
+		if config.Debug && config.DebugLog != nil {
+			config.DebugLog.Printf("[Model] buildAPIMessages: uiMessages=%d, systemPrompt length=%d, tools=%d",
+				len(uiMessages), len(systemPrompt), len(mcpTools))
+			for i, msg := range uiMessages {
+				preview := msg.Content
+				if len(preview) > 80 {
+					preview = preview[:80] + "..."
+				}
+				config.DebugLog.Printf("[Model]   uiMessage[%d]: role=%s content=%q", i, msg.Role, preview)
+			}
+		}
 		messages := buildAPIMessages(uiMessages, systemPrompt, mcpTools)
 
 		var chunks []string

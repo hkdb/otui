@@ -259,6 +259,63 @@ func (p *OpenRouterProvider) Ping(ctx context.Context) error {
 	return nil
 }
 
+// GetModelMetadata returns metadata for the specified model
+// TODO: OpenRouter API returns context_length in model data - we should parse it from the API response
+// For now, using fallback metadata based on model name patterns
+func (p *OpenRouterProvider) GetModelMetadata(ctx context.Context, modelName string) (model.ModelMetadata, error) {
+	// Try to fetch from API first
+	modelsPage, err := p.client.Models.List(ctx)
+	if err == nil {
+		// Search for the model in the response
+		for _, m := range modelsPage.Data {
+			if m.ID == modelName {
+				// Check if context window info is available in the model object
+				// The OpenAI SDK model object might have this field - needs investigation
+				// For now, fall through to fallback
+				break
+			}
+		}
+	}
+
+	// Fallback to hardcoded metadata
+	// Strip provider prefix for lookup (e.g., "anthropic/claude-sonnet-4" → "claude-sonnet-4")
+	lookupName := stripProviderPrefix(modelName)
+
+	// Try Anthropic models first (common on OpenRouter)
+	if meta := GetFallbackMetadata(lookupName, AnthropicFallbackMetadata); meta.ContextWindow > 8192 {
+		return model.ModelMetadata{
+			ContextWindow: meta.ContextWindow,
+			MaxOutput:     meta.MaxOutput,
+			SupportsTools: meta.SupportsTools,
+		}, nil
+	}
+
+	// Try OpenAI models
+	if meta := GetFallbackMetadata(lookupName, OpenAIFallbackMetadata); meta.ContextWindow > 8192 {
+		return model.ModelMetadata{
+			ContextWindow: meta.ContextWindow,
+			MaxOutput:     meta.MaxOutput,
+			SupportsTools: meta.SupportsTools,
+		}, nil
+	}
+
+	// Try Ollama models (for local models exposed via OpenRouter)
+	if meta := GetFallbackMetadata(lookupName, OllamaFallbackMetadata); meta.ContextWindow > 8192 {
+		return model.ModelMetadata{
+			ContextWindow: meta.ContextWindow,
+			MaxOutput:     meta.MaxOutput,
+			SupportsTools: meta.SupportsTools,
+		}, nil
+	}
+
+	// Ultimate fallback
+	return model.ModelMetadata{
+		ContextWindow: 8192,
+		MaxOutput:     2048,
+		SupportsTools: false,
+	}, nil
+}
+
 // stripProviderPrefix removes vendor prefixes from OpenRouter model names.
 // "meta-llama/llama-3.2-90b-instruct" → "llama-3.2-90b-instruct"
 // "anthropic/claude-sonnet-4" → "claude-sonnet-4"

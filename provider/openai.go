@@ -194,3 +194,15 @@ func (p *OpenAIProvider) Ping(ctx context.Context) error {
 	}
 	return nil
 }
+
+// GetModelMetadata returns metadata for the specified model
+// OpenAI API doesn't expose context window info in responses, so we use fallback metadata
+func (p *OpenAIProvider) GetModelMetadata(ctx context.Context, modelName string) (model.ModelMetadata, error) {
+	meta := GetFallbackMetadata(modelName, OpenAIFallbackMetadata)
+
+	return model.ModelMetadata{
+		ContextWindow: meta.ContextWindow,
+		MaxOutput:     meta.MaxOutput,
+		SupportsTools: meta.SupportsTools,
+	}, nil
+}

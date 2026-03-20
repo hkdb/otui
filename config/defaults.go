@@ -25,6 +25,13 @@ func DefaultUserConfig() *UserConfig {
 		RequireApproval: true, // Default to requiring approval for safety
 		MaxIterations:   10,   // Default max iterations per user message
 		EnableMultiStep: true, // Default to allowing multi-step execution
+		Compaction: CompactionConfig{
+			AutoCompact:          false, // Manual compaction by default
+			AutoCompactThreshold: 0.75,  // Trigger at 75% context usage
+			KeepPercentage:       0.50,  // Keep last 50% when compacting
+			WarnAtPercentage:     0.85,  // Show warning at 85% usage
+		},
+		ModelContextOverrides: make(map[string]int), // Empty by default
 	}
 }
 
@@ -74,6 +81,19 @@ require_approval = true
 # Multi-step execution (Phase 2)
 enable_multi_step = true  # Allow LLM to execute multiple steps in sequence
 max_iterations = 10       # Maximum steps per user message
+
+# Context Window Management
+[compaction]
+auto_compact = false            # Automatically compact when context usage exceeds threshold
+auto_compact_threshold = 0.75   # Trigger auto-compact at 75% context usage (0.0-1.0)
+keep_percentage = 0.50          # Keep last 50% of context when compacting (0.0-1.0)
+warn_at_percentage = 0.85       # Show warning indicator at 85% usage (0.0-1.0)
+
+# Per-Model Context Window Overrides (optional)
+# Override context window size for specific models (in tokens)
+# [model_context_overrides]
+# "custom-model:latest" = 64000
+# "qwen3-coder:70b" = 131072
 
 [security]
 credential_storage = "plaintext"

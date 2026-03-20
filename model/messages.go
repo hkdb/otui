@@ -178,3 +178,37 @@ type ToolPermissionResponseMsg struct {
 	ToolCall        ToolCall
 	ContextMessages []Message
 }
+
+// CompactionRequestMsg is sent when compaction approval is needed
+type CompactionRequestMsg struct {
+	MarkerIndex       int
+	CurrentTokens     int
+	ContextWindow     int
+	MessageCount      int
+	UserMessageCount  int
+	AssistantCount    int
+}
+
+// CompactionResponseMsg is sent when user responds to compaction request
+type CompactionResponseMsg struct {
+	Approved    bool
+	MarkerIndex int
+}
+
+// CompactionCompleteMsg is sent when compaction finishes
+type CompactionCompleteMsg struct {
+	Success    bool
+	Err        error
+	Summary    string // wrapped: "Compacted N messages... - Summary: ..."
+	LLMSummary string // raw LLM output (just the summary text)
+}
+
+// TokenUsageUpdatedMsg is sent when token usage is recalculated
+type TokenUsageUpdatedMsg struct {
+	Usage storage.TokenUsage
+}
+
+// CompactionWarningMsg is sent when context usage exceeds warning threshold
+type CompactionWarningMsg struct {
+	Percentage float64
+}

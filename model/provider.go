@@ -38,6 +38,17 @@ type Provider interface {
 
 	// Ping checks if the provider is reachable.
 	Ping(ctx context.Context) error
+
+	// GetModelMetadata returns metadata for a specific model (context window, etc.)
+	// Fetches from provider API if available, falls back to hardcoded defaults
+	GetModelMetadata(ctx context.Context, modelName string) (ModelMetadata, error)
+}
+
+// ModelMetadata contains metadata about a model's capabilities
+type ModelMetadata struct {
+	ContextWindow int
+	MaxOutput     int
+	SupportsTools bool
 }
 
 // StreamCallback is called for each chunk of streamed response.

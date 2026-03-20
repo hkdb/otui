@@ -42,6 +42,9 @@ type AppView struct {
 	chunks     []string // Chunks to display with typewriter effect
 	chunkIndex int      // Current chunk being displayed
 
+	// Scroll-during-streaming state
+	userScrolledUp bool // User scrolled up during streaming; suppress auto-scroll
+
 	// Loading spinner (bubbles/spinner)
 	loadingSpinner spinner.Model
 
@@ -192,6 +195,8 @@ type AppView struct {
 	// Permission system state (Phase 1: Permission System)
 	waitingForPermission    bool
 	pendingPermission       *appmodel.ToolPermissionRequestMsg
+	waitingForCompaction    bool
+	pendingCompaction       *appmodel.CompactionRequestMsg
 	temporarilyAllowedTools []string // Tools approved once - removed after execution
 
 	// Plugin operation modal (enable/disable feedback for individual plugins in Plugin Manager)
@@ -208,6 +213,8 @@ type AppView struct {
 	pendingToolCalls   []ToolCall
 	pendingToolContext []Message
 	pendingSummary     *IterationSummaryMsg // Summary to add after typewriter completes
+
+	// Context window tracking & compaction UI state
 }
 
 // PluginSystemState is an alias to appmodel.PluginSystemState for backward compatibility
@@ -667,6 +674,41 @@ func (a AppView) View() string {
 		toolIndicator := fmt.Sprintf(" | 🔧: %s %s", a.executingTool, a.toolExecutionSpinner.View())
 		title += TitleStyle.Render(toolIndicator)
 	}
+
+	// Build context usage indicator (right-aligned)
+	contextIndicator := ""
+	if a.dataModel.CurrentSession != nil {
+		percentage := a.dataModel.GetContextUsagePercentage()
+		metadata := a.dataModel.GetModelMetadata()
+
+		// Color coding for percentage based on thresholds
+		var percentageStyle lipgloss.Style
+		switch {
+		case percentage >= a.dataModel.Config.Compaction.WarnAtPercentage:
+			percentageStyle = lipgloss.NewStyle().Foreground(dangerColor) // Red - warning level
+		case percentage >= a.dataModel.Config.Compaction.AutoCompactThreshold:
+			percentageStyle = lipgloss.NewStyle().Foreground(warningColor) // Yellow - approaching threshold
+		default:
+			percentageStyle = DimStyle // Normal
+		}
+
+		// Format: "ctx:" (assistant color, bold) + percentage (color-coded) + " | max:" (assistant color, bold) + size (dim)
+		contextIndicator = AssistantStyle.Bold(true).Render("ctx:") +
+			percentageStyle.Render(fmt.Sprintf(" %.0f%%", percentage*100)) +
+			AssistantStyle.Bold(true).Render(" | max:") +
+			DimStyle.Render(fmt.Sprintf(" %d", metadata.ContextWindow))
+	}
+
+	// Combine title (left) and context (right) with spacing
+	titleWidth := lipgloss.Width(title)
+	contextWidth := lipgloss.Width(contextIndicator)
+	availableWidth := a.width
+	spacing := availableWidth - titleWidth - contextWidth
+	if spacing < 1 {
+		spacing = 1
+	}
+	headerLine := title + strings.Repeat(" ", spacing) + contextIndicator
+	title = headerLine
 
 	// Separator with bottom margin for header (empty line forces spacing)
 	separator := ""

@@ -14,6 +14,7 @@ import (
 
 	"otui/config"
 	"otui/mcp"
+	appmodel "otui/model"
 	"otui/storage"
 )
 
@@ -31,7 +32,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.loadingSpinner, cmd = a.loadingSpinner.Update(msg)
 		cmds = append(cmds, cmd)
 		// Update viewport to show animated spinner
-		a.updateViewportContent(true)
+		a.updateViewportContent(!a.userScrolledUp)
 	}
 
 	// Update import spinner if processing or cleaning up
@@ -229,6 +230,31 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// PRIORITY 0.6: Compaction approval key handling (blocks all other keys when active)
+		if a.waitingForCompaction && a.pendingCompaction != nil {
+			switch msg.String() {
+			case "y":
+				// Yes - Approve compaction
+				response := appmodel.CompactionResponseMsg{
+					Approved:    true,
+					MarkerIndex: a.pendingCompaction.MarkerIndex,
+				}
+				return a.Update(response)
+
+			case "n":
+				// No - Cancel compaction
+				response := appmodel.CompactionResponseMsg{
+					Approved:    false,
+					MarkerIndex: 0,
+				}
+				return a.Update(response)
+
+			default:
+				// Block all other keys while waiting for compaction approval
+				return a, nil
+			}
+		}
+
 		// PRIORITY 1: Modal toggle shortcuts (close current modal, open new one)
 		switch msg.String() {
 		case kb.GetActionKey("help"):
@@ -387,6 +413,34 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						Type:         SettingTypePluginsEnabled,
 						Validation:   FieldValidationNone,
 					},
+					{
+						Label:        "Auto-Compact",
+						Value:        boolToString(a.dataModel.Config.Compaction.AutoCompact),
+						DefaultValue: "false",
+						Type:         SettingTypeAutoCompact,
+						Validation:   FieldValidationNone,
+					},
+					{
+						Label:        "Compact At (%)",
+						Value:        fmt.Sprintf("%.0f", a.dataModel.Config.Compaction.AutoCompactThreshold*100),
+						DefaultValue: "75",
+						Type:         SettingTypeAutoCompactThreshold,
+						Validation:   FieldValidationNone,
+					},
+					{
+						Label:        "Keep After (%)",
+						Value:        fmt.Sprintf("%.0f", a.dataModel.Config.Compaction.KeepPercentage*100),
+						DefaultValue: "50",
+						Type:         SettingTypeKeepPercentage,
+						Validation:   FieldValidationNone,
+					},
+					{
+						Label:        "Warn At (%)",
+						Value:        fmt.Sprintf("%.0f", a.dataModel.Config.Compaction.WarnAtPercentage*100),
+						DefaultValue: "85",
+						Type:         SettingTypeWarnAtPercentage,
+						Validation:   FieldValidationNone,
+					},
 				}
 				a.selectedSettingIdx = 0
 				a.settingsEditMode = false
@@ -424,6 +478,71 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.initPluginManager()
 			}
 			return a, nil
+
+		case kb.GetActionKey("compact_session"):
+			// Manual compaction trigger from main view (Alt+Shift+C)
+			if a.dataModel.CurrentSession == nil {
+				a.showAcknowledgeModal = true
+				a.acknowledgeModalTitle = "No Session"
+				a.acknowledgeModalMsg = "No active session to compact."
+				a.acknowledgeModalType = ModalTypeWarning
+				return a, nil
+			}
+
+			// Count user/assistant messages
+			messageCount := 0
+			for _, msg := range a.dataModel.Messages {
+				if msg.Role == "user" || msg.Role == "assistant" {
+					messageCount++
+				}
+			}
+
+			// Need at least 2 messages to compact
+			if messageCount < 2 {
+				a.showAcknowledgeModal = true
+				a.acknowledgeModalTitle = "Cannot Compact"
+				a.acknowledgeModalMsg = "Need at least 2 messages to compact.\n\nCurrent: " + fmt.Sprintf("%d message(s)", messageCount)
+				a.acknowledgeModalType = ModalTypeWarning
+				return a, nil
+			}
+
+			// Manual compaction: compact EVERYTHING up to this point
+			// This resets context to 0% and the marker stays at this position
+			// Future messages will appear below the marker
+			markerIndex := messageCount
+
+			// Calculate stats for approval message
+			usage := a.dataModel.CalculateTokenUsage()
+			metadata := a.dataModel.GetModelMetadata()
+
+			// Count user/assistant messages to be compacted
+			// Since markerIndex = messageCount, we're compacting ALL messages
+			userCount := 0
+			assistantCount := 0
+			for _, msg := range a.dataModel.Messages {
+				switch msg.Role {
+				case "user":
+					userCount++
+				case "assistant":
+					assistantCount++
+				}
+			}
+
+			// Trigger compaction request (inline approval like tool permissions)
+			req := appmodel.CompactionRequestMsg{
+				MarkerIndex:      markerIndex,
+				CurrentTokens:    usage.ActiveTokens,
+				ContextWindow:    metadata.ContextWindow,
+				MessageCount:     messageCount,
+				UserMessageCount: userCount,
+				AssistantCount:   assistantCount,
+			}
+
+			if config.Debug && config.DebugLog != nil {
+				config.DebugLog.Printf("[compaction] Manual compaction requested: marker=%d (total messages: %d)", markerIndex, messageCount)
+			}
+
+			return a.Update(req)
 		}
 
 		// PRIORITY 2: Modal-specific key handling (order matches View rendering)
@@ -591,6 +710,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// PRIORITY 4: Streaming cancellation (only if no modal open)
 		if msg.String() == "esc" && a.dataModel.Streaming {
 			a.dataModel.Streaming = false
+			a.userScrolledUp = false
 
 			partialResp := a.currentResp.String()
 
@@ -800,34 +920,56 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case kb.GetActionKey("scroll_down"), kb.GetActionKey("scroll_down_arrow"):
 			a.viewport.LineDown(1)
+			if a.dataModel.Streaming && a.viewport.AtBottom() {
+				a.userScrolledUp = false
+			}
 			return a, nil
 
 		case kb.GetActionKey("scroll_up"), kb.GetActionKey("scroll_up_arrow"):
 			a.viewport.LineUp(1)
+			if a.dataModel.Streaming {
+				a.userScrolledUp = true
+			}
 			return a, nil
 
 		case kb.GetActionKey("half_page_down"), kb.GetActionKey("half_page_down_arrow"):
 			a.viewport.HalfPageDown()
+			if a.dataModel.Streaming && a.viewport.AtBottom() {
+				a.userScrolledUp = false
+			}
 			return a, nil
 
 		case kb.GetActionKey("half_page_up"), kb.GetActionKey("half_page_up_arrow"):
 			a.viewport.HalfPageUp()
+			if a.dataModel.Streaming {
+				a.userScrolledUp = true
+			}
 			return a, nil
 
 		case kb.GetActionKey("page_down"):
 			a.viewport.PageDown()
+			if a.dataModel.Streaming && a.viewport.AtBottom() {
+				a.userScrolledUp = false
+			}
 			return a, nil
 
 		case kb.GetActionKey("page_up"):
 			a.viewport.PageUp()
+			if a.dataModel.Streaming {
+				a.userScrolledUp = true
+			}
 			return a, nil
 
 		case kb.GetActionKey("scroll_to_top"):
 			a.viewport.GotoTop()
+			if a.dataModel.Streaming {
+				a.userScrolledUp = true
+			}
 			return a, nil
 
 		case kb.GetActionKey("scroll_to_bottom"):
 			a.viewport.GotoBottom()
+			a.userScrolledUp = false
 			return a, nil
 		}
 
@@ -840,6 +982,10 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case toolCallsDetectedMsg, toolExecutionCompleteMsg, toolExecutionErrorMsg,
 		toolPermissionRequestMsg, toolPermissionResponseMsg:
 		return a.handleToolMessage(msg)
+
+	// Compaction messages → appview_update_compaction.go
+	case compactionRequestMsg, compactionResponseMsg, compactionCompleteMsg, tokenUsageUpdatedMsg, compactionWarningMsg:
+		return a.handleCompactionMessage(msg)
 
 	// UI messages → appview_update_ui.go
 	case flashTickMsg, markdownRenderedMsg, modelsListMsg, sessionsListMsg:

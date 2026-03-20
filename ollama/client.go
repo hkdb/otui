@@ -19,7 +19,19 @@ type Client struct {
 
 type StreamCallback func(chunk string, toolCalls []api.ToolCall) error
 
-func NewClient(baseURL, model string) (*Client, error) {
+// authTransport injects an Authorization: Bearer header on every request.
+type authTransport struct {
+	base   http.RoundTripper
+	apiKey string
+}
+
+func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.Header.Set("Authorization", "Bearer "+t.apiKey)
+	return t.base.RoundTrip(req)
+}
+
+func NewClient(baseURL, model, apiKey string) (*Client, error) {
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
 	}
@@ -32,7 +44,17 @@ func NewClient(baseURL, model string) (*Client, error) {
 		return nil, fmt.Errorf("invalid Ollama URL: %w", err)
 	}
 
-	client := api.NewClient(parsedURL, http.DefaultClient)
+	httpClient := http.DefaultClient
+	if apiKey != "" {
+		httpClient = &http.Client{
+			Transport: &authTransport{
+				base:   http.DefaultTransport,
+				apiKey: apiKey,
+			},
+		}
+	}
+
+	client := api.NewClient(parsedURL, httpClient)
 
 	return &Client{
 		client:  client,

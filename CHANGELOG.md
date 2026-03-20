@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.08.00] - 2026-03-20
+
+** Features: **
+
+- Added context window tracking
+- Added ability to scroll while streaming response
+- Added auth header for auth proxy protected ollama instances
+
+---
+
 ## [v0.07.00] - 2026-02-01
 
 ** Features: **

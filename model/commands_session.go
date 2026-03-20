@@ -83,9 +83,10 @@ func (m *Model) SaveCurrentSession() tea.Cmd {
 	}
 
 	// Convert UI messages to storage messages
+	// Save user, assistant, and persistent system messages (like compaction markers)
 	var sessionMessages []storage.Message
 	for _, msg := range m.Messages {
-		if msg.Role == "user" || msg.Role == "assistant" {
+		if msg.Role == "user" || msg.Role == "assistant" || (msg.Role == "system" && msg.Persistent) {
 			sessionMessages = append(sessionMessages, storage.Message{
 				Role:      msg.Role,
 				Content:   msg.Content,

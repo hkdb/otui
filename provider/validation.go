@@ -73,7 +73,7 @@ func FetchSingleProviderModels(providerID, baseURL, apiKey, ollamaURL string) te
 
 		switch providerID {
 		case "ollama":
-			client, err := ollama.NewClient(ollamaURL, "")
+			client, err := ollama.NewClient(ollamaURL, "", apiKey)
 			if err != nil {
 				return SingleProviderModelsMsg{
 					ProviderID: providerID,

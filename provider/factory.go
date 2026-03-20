@@ -46,7 +46,7 @@ import (
 func NewProvider(cfg Config) (model.Provider, error) {
 	switch cfg.Type {
 	case ProviderTypeOllama:
-		return NewOllamaProvider(cfg.BaseURL, cfg.Model)
+		return NewOllamaProvider(cfg.BaseURL, cfg.Model, cfg.APIKey)
 	case ProviderTypeOpenRouter:
 		return NewOpenRouterProvider(cfg.BaseURL, cfg.APIKey, cfg.Model)
 	case ProviderTypeOpenAI:

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"otui/config"
 )
 
 // Message represents a chat message
@@ -18,6 +19,15 @@ type Message struct {
 	Content   string    `json:"content"`
 	Rendered  string    `json:"rendered,omitempty"` // Cached markdown rendering
 	Timestamp time.Time `json:"timestamp"`
+}
+
+// TokenUsage tracks token consumption for a session
+type TokenUsage struct {
+	TotalTokens      int       `json:"total_tokens"`
+	ActiveTokens     int       `json:"active_tokens"`
+	CompactedTokens  int       `json:"compacted_tokens"`
+	LastUpdated      time.Time `json:"last_updated"`
+	EstimationMethod string    `json:"estimation_method"` // "character_based" or provider-specific
 }
 
 // Session represents a chat session
@@ -32,6 +42,13 @@ type Session struct {
 	SystemPrompt   string    `json:"system_prompt,omitempty"`
 	EnabledPlugins []string  `json:"enabled_plugins,omitempty"`
 	AllowedTools   []string  `json:"allowed_tools,omitempty"` // Tools permanently approved for this session
+
+	// Context Management
+	CompactionMarker    int        `json:"compaction_marker,omitempty"`
+	CompactedSummary    string     `json:"compacted_summary,omitempty"`
+	LLMSummary          string     `json:"llm_summary,omitempty"` // Raw LLM summary text for context injection
+	CompactionTimestamp time.Time  `json:"compaction_timestamp,omitempty"`
+	TokenUsage          TokenUsage `json:"token_usage,omitempty"`
 }
 
 // SessionMetadata is a lightweight version of Session for listing
@@ -112,6 +129,12 @@ func (s *SessionStorage) Load(id string) (*Session, error) {
 	// MIGRATION: Default to "ollama" for existing sessions without provider
 	if session.Provider == "" {
 		session.Provider = "ollama"
+	}
+
+	// Debug: Log compaction state after load
+	if config.Debug && config.DebugLog != nil && session.CompactionMarker > 0 {
+		config.DebugLog.Printf("[storage] Loaded session with compaction: marker=%d, summary=%q",
+			session.CompactionMarker, session.CompactedSummary)
 	}
 
 	return &session, nil

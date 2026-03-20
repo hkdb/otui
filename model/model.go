@@ -39,6 +39,13 @@ type Model struct {
 	MaxIterations    int             // Max steps from config
 	IterationHistory []IterationStep // ALL steps (including non-tool steps)
 
+	// Context window tracking cache (to avoid recalculating every render frame)
+	cachedUsagePercentage  float64
+	cachedMessageCount     int
+	cachedCompactionMarker int
+	cachedModelName        string
+	cachedModelMetadata    ModelMetadata
+
 	// Application metadata
 	Version string
 	License string

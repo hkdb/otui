@@ -38,8 +38,8 @@ type OllamaProvider struct {
 //	    log.Fatal(err)
 //	}
 //	// Use provider for chat operations
-func NewOllamaProvider(baseURL, model string) (*OllamaProvider, error) {
-	client, err := ollama.NewClient(baseURL, model)
+func NewOllamaProvider(baseURL, model, apiKey string) (*OllamaProvider, error) {
+	client, err := ollama.NewClient(baseURL, model, apiKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Ollama client: %w", err)
 	}
@@ -213,4 +213,17 @@ func (p *OllamaProvider) SetModel(model string) {
 //	}
 func (p *OllamaProvider) Ping(ctx context.Context) error {
 	return p.client.Ping(ctx)
+}
+
+// GetModelMetadata returns metadata for the specified model
+// Ollama API doesn't currently expose context window info, so we use fallback metadata
+// based on model name patterns (e.g., "llama3.1:8b" matches "llama3.1")
+func (p *OllamaProvider) GetModelMetadata(ctx context.Context, modelName string) (model.ModelMetadata, error) {
+	meta := GetFallbackMetadata(modelName, OllamaFallbackMetadata)
+
+	return model.ModelMetadata{
+		ContextWindow: meta.ContextWindow,
+		MaxOutput:     meta.MaxOutput,
+		SupportsTools: meta.SupportsTools,
+	}, nil
 }

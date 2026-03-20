@@ -27,7 +27,7 @@ func ExampleNewProvider() {
 
 // ExampleNewOllamaProvider demonstrates creating an Ollama provider directly.
 func ExampleNewOllamaProvider() {
-	p, err := provider.NewOllamaProvider("http://localhost:11434", "llama3.1")
+	p, err := provider.NewOllamaProvider("http://localhost:11434", "llama3.1", "")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func ExampleNewOllamaProvider() {
 // It's provided for documentation purposes.
 func ExampleOllamaProvider_Chat() {
 	// Create provider
-	p, err := provider.NewOllamaProvider("http://localhost:11434", "llama3.1")
+	p, err := provider.NewOllamaProvider("http://localhost:11434", "llama3.1", "")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func ExampleOllamaProvider_Chat() {
 // and MCP tools setup. It's provided for documentation purposes.
 func ExampleOllamaProvider_ChatWithTools() {
 	// Create provider
-	p, err := provider.NewOllamaProvider("http://localhost:11434", "llama3.1")
+	p, err := provider.NewOllamaProvider("http://localhost:11434", "llama3.1", "")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func ExampleOllamaProvider_ChatWithTools() {
 // It's provided for documentation purposes.
 func ExampleOllamaProvider_ListModels() {
 	// Create provider
-	p, err := provider.NewOllamaProvider("http://localhost:11434", "llama3.1")
+	p, err := provider.NewOllamaProvider("http://localhost:11434", "llama3.1", "")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func ExampleOllamaProvider_ListModels() {
 // It's provided for documentation purposes.
 func ExampleOllamaProvider_Ping() {
 	// Create provider
-	p, err := provider.NewOllamaProvider("http://localhost:11434", "llama3.1")
+	p, err := provider.NewOllamaProvider("http://localhost:11434", "llama3.1", "")
 	if err != nil {
 		log.Fatal(err)
 	}

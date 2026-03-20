@@ -32,37 +32,49 @@ type ProviderConfig struct {
 	// API Key is stored separately in CredentialStore, not in config
 }
 
+// CompactionConfig defines settings for context window management
+type CompactionConfig struct {
+	AutoCompact          bool    `toml:"auto_compact"`           // Whether to auto-compact when threshold reached
+	AutoCompactThreshold float64 `toml:"auto_compact_threshold"` // Percentage (0.0-1.0) at which to trigger auto-compact
+	KeepPercentage       float64 `toml:"keep_percentage"`        // Percentage (0.0-1.0) of context to keep when compacting
+	WarnAtPercentage     float64 `toml:"warn_at_percentage"`     // Percentage (0.0-1.0) at which to show warning
+}
+
 type UserConfig struct {
-	DefaultProvider     string           `toml:"default_provider,omitempty"`   // Which provider to use for new sessions
-	DefaultModel        string           `toml:"default_model,omitempty"`      // Default model (moved from Ollama)
-	LastUsedProvider    string           `toml:"last_used_provider,omitempty"` // Last provider user switched to
-	Ollama              OllamaConfig     `toml:"ollama"`
-	DefaultSystemPrompt string           `toml:"default_system_prompt,omitempty"`
-	PluginsEnabled      bool             `toml:"plugins_enabled"`
-	Security            SecurityConfig   `toml:"security"`
-	Providers           []ProviderConfig `toml:"providers,omitempty"`
-	AllowedTools        []string         `toml:"allowed_tools,omitempty"` // Global whitelist of tools that don't require approval
-	RequireApproval     bool             `toml:"require_approval"`        // Whether to ask for permission before executing tools
-	MaxIterations       int              `toml:"max_iterations"`          // Default: 10
-	EnableMultiStep     bool             `toml:"enable_multi_step"`       // Default: true
+	DefaultProvider        string           `toml:"default_provider,omitempty"`   // Which provider to use for new sessions
+	DefaultModel           string           `toml:"default_model,omitempty"`      // Default model (moved from Ollama)
+	LastUsedProvider       string           `toml:"last_used_provider,omitempty"` // Last provider user switched to
+	Ollama                 OllamaConfig     `toml:"ollama"`
+	DefaultSystemPrompt    string           `toml:"default_system_prompt,omitempty"`
+	PluginsEnabled         bool             `toml:"plugins_enabled"`
+	Security               SecurityConfig   `toml:"security"`
+	Providers              []ProviderConfig `toml:"providers,omitempty"`
+	AllowedTools           []string         `toml:"allowed_tools,omitempty"` // Global whitelist of tools that don't require approval
+	RequireApproval        bool             `toml:"require_approval"`        // Whether to ask for permission before executing tools
+	MaxIterations          int              `toml:"max_iterations"`          // Default: 10
+	EnableMultiStep        bool             `toml:"enable_multi_step"`       // Default: true
+	Compaction             CompactionConfig `toml:"compaction,omitempty"`    // Context window management settings
+	ModelContextOverrides  map[string]int   `toml:"model_context_overrides,omitempty"` // Per-model context window overrides
 }
 
 type Config struct {
-	DataDirectory       string
-	OllamaHost          string
-	DefaultModel        string
-	DefaultProvider     string // Which provider to use for new sessions
-	LastUsedProvider    string // Last provider user switched to
-	DefaultSystemPrompt string
-	PluginsEnabled      bool
-	Security            SecurityConfig
-	Providers           []ProviderConfig
-	CredentialStore     *CredentialStore
-	AllowedTools        []string // Global whitelist of tools that don't require approval
-	RequireApproval     bool     // Whether to ask for permission before executing tools
-	MaxIterations       int      // Max iterations per user message
-	EnableMultiStep     bool     // Allow LLM to execute multiple steps
-	Keybindings         *KeyBindingsConfig
+	DataDirectory         string
+	OllamaHost            string
+	DefaultModel          string
+	DefaultProvider       string // Which provider to use for new sessions
+	LastUsedProvider      string // Last provider user switched to
+	DefaultSystemPrompt   string
+	PluginsEnabled        bool
+	Security              SecurityConfig
+	Providers             []ProviderConfig
+	CredentialStore       *CredentialStore
+	AllowedTools          []string // Global whitelist of tools that don't require approval
+	RequireApproval       bool     // Whether to ask for permission before executing tools
+	MaxIterations         int      // Max iterations per user message
+	EnableMultiStep       bool     // Allow LLM to execute multiple steps
+	Compaction            CompactionConfig // Context window management settings
+	ModelContextOverrides map[string]int   // Per-model context window overrides
+	Keybindings           *KeyBindingsConfig
 }
 
 var Debug = false
@@ -216,10 +228,23 @@ func Load() (*Config, error) {
 		cfg.RequireApproval = userCfg.RequireApproval
 		cfg.MaxIterations = userCfg.MaxIterations
 		cfg.EnableMultiStep = userCfg.EnableMultiStep
+		cfg.Compaction = userCfg.Compaction
+		cfg.ModelContextOverrides = userCfg.ModelContextOverrides
 
 		// Set defaults for multi-step execution (Phase 2)
 		if cfg.MaxIterations == 0 {
 			cfg.MaxIterations = 10
+		}
+
+		// Set defaults for compaction if not specified
+		if cfg.Compaction.AutoCompactThreshold == 0 {
+			cfg.Compaction.AutoCompactThreshold = 0.75
+		}
+		if cfg.Compaction.KeepPercentage == 0 {
+			cfg.Compaction.KeepPercentage = 0.50
+		}
+		if cfg.Compaction.WarnAtPercentage == 0 {
+			cfg.Compaction.WarnAtPercentage = 0.85
 		}
 
 		// MIGRATION: Move Ollama.DefaultModel to top-level if needed
@@ -274,10 +299,23 @@ func Load() (*Config, error) {
 		cfg.RequireApproval = userCfg.RequireApproval
 		cfg.MaxIterations = userCfg.MaxIterations
 		cfg.EnableMultiStep = userCfg.EnableMultiStep
+		cfg.Compaction = userCfg.Compaction
+		cfg.ModelContextOverrides = userCfg.ModelContextOverrides
 
 		// Set defaults for multi-step execution (Phase 2)
 		if cfg.MaxIterations == 0 {
 			cfg.MaxIterations = 10
+		}
+
+		// Set defaults for compaction if not specified
+		if cfg.Compaction.AutoCompactThreshold == 0 {
+			cfg.Compaction.AutoCompactThreshold = 0.75
+		}
+		if cfg.Compaction.KeepPercentage == 0 {
+			cfg.Compaction.KeepPercentage = 0.50
+		}
+		if cfg.Compaction.WarnAtPercentage == 0 {
+			cfg.Compaction.WarnAtPercentage = 0.85
 		}
 
 		// MIGRATION: Move Ollama.DefaultModel to top-level if needed

@@ -123,11 +123,15 @@ func (a *AppView) renderProviderField(field ProviderField, selected bool, width 
 
 	// Edit mode
 	if selected && a.providerSettingsState.editMode {
-		labelPadding := strings.Repeat(" ", 20-len(field.Label))
+		padding := maxLabelWidth - len(field.Label)
+		if padding < 0 {
+			padding = 0
+		}
+		labelPadding := strings.Repeat(" ", padding)
 		inputBox := lipgloss.NewStyle().
 			Foreground(accentColor).
 			Bold(true).
-			Width(width - 24).
+			Width(width - maxLabelWidth - 4).
 			Render(a.providerSettingsState.editInput.View())
 		return fmt.Sprintf("  %s%s%s", field.Label, labelPadding, inputBox)
 	}

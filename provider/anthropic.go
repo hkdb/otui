@@ -221,6 +221,18 @@ func (p *AnthropicProvider) Ping(ctx context.Context) error {
 	return nil
 }
 
+// GetModelMetadata returns metadata for the specified model
+// Anthropic API doesn't expose context window info, so we use fallback metadata
+func (p *AnthropicProvider) GetModelMetadata(ctx context.Context, modelName string) (model.ModelMetadata, error) {
+	meta := GetFallbackMetadata(modelName, AnthropicFallbackMetadata)
+
+	return model.ModelMetadata{
+		ContextWindow: meta.ContextWindow,
+		MaxOutput:     meta.MaxOutput,
+		SupportsTools: meta.SupportsTools,
+	}, nil
+}
+
 // convertToAnthropicMessages converts OTUI messages to Anthropic format.
 // Returns the message array and any system prompt found.
 func convertToAnthropicMessages(messages []model.Message) ([]anthropic.MessageParam, []anthropic.TextBlockParam) {

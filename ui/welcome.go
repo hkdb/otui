@@ -33,6 +33,7 @@ const (
 	stepProviderSelection
 	stepConfigureProvider
 	stepOllamaURL
+	stepOllamaAPIKey
 	stepModelSelection
 	stepDataDirectory
 	stepComplete
@@ -252,7 +253,7 @@ func (m *WelcomeModel) fetchAllProviderModels() tea.Cmd {
 			cmds = append(cmds, provider.FetchSingleProviderModels(
 				"ollama",
 				"",
-				"",
+				m.providerApiKeys["ollama"],
 				m.ollamaHost,
 			))
 		default:
@@ -301,7 +302,7 @@ func validateOllamaURL(url string) tea.Cmd {
 
 func loadModels(url string) tea.Cmd {
 	return func() tea.Msg {
-		client, err := ollama.NewClient(url, "")
+		client, err := ollama.NewClient(url, "", "")
 		if err != nil {
 			return modelsLoadedMsg{models: nil, err: err}
 		}
@@ -371,6 +372,8 @@ func (m WelcomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateConfigureProviderScreen(msg)
 		case stepOllamaURL:
 			return m.updateOllamaURLScreen(msg)
+		case stepOllamaAPIKey:
+			return m.updateOllamaAPIKeyScreen(msg)
 		case stepModelSelection:
 			return m.updateModelSelectionScreen(msg)
 		case stepDataDirectory:
@@ -392,33 +395,11 @@ func (m WelcomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-			// Move to next provider or model selection
-			for i := m.currentProviderIdx + 1; i < len(m.providers); i++ {
-				if !m.providerCheckboxes[i] {
-					continue
-				}
-
-				m.currentProviderIdx = i
-				m.providers[i].Enabled = true
-
-				switch m.providers[i].ID {
-				case "ollama":
-					m.step = stepOllamaURL
-					m.urlInput.SetValue(m.ollamaHost)
-					m.urlInput.Focus()
-					return m, textinput.Blink
-				default:
-					m.step = stepConfigureProvider
-					m.apiKeyInput.SetValue("")
-					m.apiKeyInput.Focus()
-					return m, textinput.Blink
-				}
-			}
-
-			// No more providers - fetch ALL models
-			m.step = stepModelSelection
-			m.loading = true
-			return m, m.fetchAllProviderModels()
+			// Transition to optional Ollama API key step
+			m.step = stepOllamaAPIKey
+			m.apiKeyInput.SetValue("")
+			m.apiKeyInput.Focus()
+			return m, textinput.Blink
 		}
 
 		m.err = fmt.Sprintf("Failed to connect: %v", msg.err)
@@ -665,6 +646,100 @@ func (m WelcomeModel) updateOllamaURLScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 
 	m.urlInput, cmd = m.urlInput.Update(msg)
 	return m, cmd
+}
+
+// advanceToNextProviderOrModels moves to the next enabled provider's config screen,
+// or to model selection if all providers are configured.
+func (m WelcomeModel) advanceToNextProviderOrModels() (tea.Model, tea.Cmd) {
+	for i := m.currentProviderIdx + 1; i < len(m.providers); i++ {
+		if !m.providerCheckboxes[i] {
+			continue
+		}
+
+		m.currentProviderIdx = i
+		m.providers[i].Enabled = true
+
+		switch m.providers[i].ID {
+		case "ollama":
+			m.step = stepOllamaURL
+			m.urlInput.SetValue(m.ollamaHost)
+			m.urlInput.Focus()
+			return m, textinput.Blink
+		default:
+			m.step = stepConfigureProvider
+			m.apiKeyInput.SetValue("")
+			m.apiKeyInput.Focus()
+			return m, textinput.Blink
+		}
+	}
+
+	// No more providers - fetch ALL models
+	m.step = stepModelSelection
+	m.loading = true
+	return m, m.fetchAllProviderModels()
+}
+
+func (m WelcomeModel) updateOllamaAPIKeyScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg.String() {
+	case m.getActionKey("welcome_quit"):
+		return m, tea.Quit
+
+	case "esc":
+		m.step = stepOllamaURL
+		m.err = ""
+		return m, nil
+
+	case "enter":
+		apiKey := m.apiKeyInput.Value()
+
+		if apiKey == "" {
+			// Skip - no auth needed, advance to next provider
+			m.err = ""
+			return m.advanceToNextProviderOrModels()
+		}
+
+		// Store API key and validate with ping
+		m.providerApiKeys["ollama"] = apiKey
+		m.loading = true
+		m.err = ""
+		return m, provider.PingProvider("ollama", m.ollamaHost, apiKey)
+
+	case m.getActionKey("clear_input"):
+		m.apiKeyInput.SetValue("")
+		return m, nil
+	}
+
+	m.apiKeyInput, cmd = m.apiKeyInput.Update(msg)
+	return m, cmd
+}
+
+func (m WelcomeModel) viewOllamaAPIKeyScreen() string {
+	var sb strings.Builder
+
+	sb.WriteString("\n\n")
+	sb.WriteString(centerText(titleStyle.Render("Ollama Authentication (Optional)"), m.width))
+	sb.WriteString("\n\n\n")
+
+	sb.WriteString(centerText(featureStyle.Render("Enter your API key for auth header (Bearer token auto-applied):"), m.width))
+	sb.WriteString("\n\n")
+
+	sb.WriteString(centerText(inputStyle.Render(m.apiKeyInput.View()), m.width))
+	sb.WriteString("\n\n\n")
+
+	if m.loading {
+		sb.WriteString(centerText(featureStyle.Render("Validating connection with auth..."), m.width))
+	} else {
+		sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("Enter Continue (leave empty to skip) • Esc Back • %s+Q Quit", m.primaryDisplay())), m.width))
+	}
+
+	if m.err != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(centerText(errorStyle.Render(m.err), m.width))
+	}
+
+	return sb.String()
 }
 
 func (m WelcomeModel) updateModelSelectionScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -931,6 +1006,8 @@ func (m WelcomeModel) View() string {
 		return m.viewConfigureProviderScreen()
 	case stepOllamaURL:
 		return m.viewOllamaURLScreen()
+	case stepOllamaAPIKey:
+		return m.viewOllamaAPIKeyScreen()
 	case stepModelSelection:
 		return m.viewModelSelectionScreen()
 	case stepDataDirectory:

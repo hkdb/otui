@@ -8,7 +8,7 @@ import (
 // This is the business logic layer for provider settings.
 //
 // Fields:
-//   - Ollama: "host", "enabled"
+//   - Ollama: "host", "apikey", "enabled"
 //   - Cloud providers: "apikey", "enabled"
 func UpdateProviderField(dataDir, providerID, fieldName, value string) error {
 	// Load existing config
@@ -31,6 +31,24 @@ func UpdateProviderField(dataDir, providerID, fieldName, value string) error {
 					break
 				}
 			}
+		case "apikey":
+			// Update API key in credentials (same pattern as cloud providers)
+			fullCfg, err := Load()
+			if err != nil {
+				return fmt.Errorf("failed to load full config for credential update: %w", err)
+			}
+
+			if fullCfg.CredentialStore != nil {
+				if err := fullCfg.CredentialStore.Set("ollama", value); err != nil {
+					return fmt.Errorf("failed to set API key: %w", err)
+				}
+
+				if err := fullCfg.CredentialStore.Save(dataDir); err != nil {
+					return fmt.Errorf("failed to persist credentials: %w", err)
+				}
+			}
+			// Don't save UserConfig for API key changes (already saved credentials)
+			return nil
 		case "enabled":
 			if err := updateProviderEnabled(cfg, providerID, value == "true"); err != nil {
 				return err

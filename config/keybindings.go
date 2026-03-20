@@ -56,10 +56,11 @@ var actionRegistry = map[string]actionDef{
 	"scroll_to_bottom":      {"secondary", "g"},
 
 	// Main view - Actions
-	"quit":                  {"primary", "q"},
-	"yank_last_response":    {"primary", "y"},
-	"yank_conversation":     {"primary", "c"},
-	"external_editor":       {"primary", "i"},
+	"quit":                       {"primary", "q"},
+	"yank_last_response":         {"primary", "y"},
+	"yank_conversation":          {"primary", "c"},
+	"external_editor":            {"primary", "i"},
+	"compact_session":            {"secondary", "c"}, // Manual compact (Alt+Shift+C)
 
 	// Model selector modal - normal mode (no modifier needed)
 	"model_selector_down":       {"none", "j"},

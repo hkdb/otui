@@ -62,8 +62,13 @@ type ProviderField struct {
 func (p *ProviderSettingsState) getProviderFields(providerID string, cfg *config.Config) []ProviderField {
 	switch providerID {
 	case "ollama":
+		apiKey := ""
+		if cfg.CredentialStore != nil {
+			apiKey = cfg.CredentialStore.Get("ollama")
+		}
 		return []ProviderField{
 			{Label: "Ollama Host", Value: cfg.OllamaHost, Type: ProviderFieldTypeHost},
+			{Label: "API Key", Value: p.maskAPIKey(apiKey), Type: ProviderFieldTypeAPIKey},
 			{Label: "Enabled", Value: p.getProviderEnabled(cfg, "ollama"), Type: ProviderFieldTypeEnabled},
 		}
 	case "openrouter", "anthropic", "openai":

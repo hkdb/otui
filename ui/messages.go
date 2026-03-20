@@ -41,6 +41,13 @@ type editorErrorMsg = model.EditorErrorMsg
 type IterationStep = model.IterationStep
 type IterationSummaryMsg = model.IterationSummaryMsg
 
+// Context window management (compaction)
+type compactionRequestMsg = model.CompactionRequestMsg
+type compactionResponseMsg = model.CompactionResponseMsg
+type compactionCompleteMsg = model.CompactionCompleteMsg
+type tokenUsageUpdatedMsg = model.TokenUsageUpdatedMsg
+type compactionWarningMsg = model.CompactionWarningMsg
+
 type SettingFieldType int
 
 const (
@@ -49,6 +56,10 @@ const (
 	SettingTypeModel
 	SettingTypeSystemPrompt
 	SettingTypePluginsEnabled
+	SettingTypeAutoCompact
+	SettingTypeAutoCompactThreshold
+	SettingTypeKeepPercentage
+	SettingTypeWarnAtPercentage
 )
 
 type SettingFieldValidation int

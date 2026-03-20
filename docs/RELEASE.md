@@ -16,7 +16,7 @@ To release a new version, change version at the following files:
 - main.go
 - dist/get.sh
 - dist/index.html
-- version.txt
+- dist/version.txt
 
 The automated way is:
 

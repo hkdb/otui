@@ -84,3 +84,11 @@ func (m *MockProvider) SetModel(model string) {
 func (m *MockProvider) Ping(ctx context.Context) error {
 	return m.PingFunc(ctx)
 }
+
+func (m *MockProvider) GetModelMetadata(ctx context.Context, modelName string) (model.ModelMetadata, error) {
+	return model.ModelMetadata{
+		ContextWindow: 4096,
+		MaxOutput:     4096,
+		SupportsTools: true,
+	}, nil
+}

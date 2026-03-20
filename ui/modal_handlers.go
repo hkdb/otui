@@ -839,6 +839,13 @@ func (a AppView) handleGlobalSearchUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 
 func (a AppView) handleEditSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 	kb := a.dataModel.Config.Keybindings
+
+	// Debug logging for keybinding matching
+	if config.Debug && config.DebugLog != nil {
+		compactKey := kb.GetActionKey("compact_session")
+		config.DebugLog.Printf("[EditSessionModal] Key pressed: %q, compact_session key: %q", msg.String(), compactKey)
+	}
+
 	switch msg.String() {
 	case "esc":
 		a.showEditSessionModal = false
