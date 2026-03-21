@@ -39,6 +39,8 @@ An opinionated, "speed" and "usability" focused agentic TUI with a built-in MCP 
 
 Currently, only Ollama and OpenRouter are being tested more extensively.
 
+Of the popular open source models, what's relatively modest in size that seems to work best with this TUI is currently `qwen3.5:9b`. It's not only fairly accurate in general but also makes sound decision on when to use tools and when to directly respond based on its own knownledge.
+
 ## 🖥️ OS Support
 
 - GNU/Linux
