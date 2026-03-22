@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.08.01] - 2026-03-22
+
+** Maintenance & Bug Fixes: **
+
+- Fixed session switch cleanup
+- Increased test coverage
+
+---
+
 ## [v0.08.00] - 2026-03-20
 
 ** Features: **

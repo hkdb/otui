@@ -214,6 +214,9 @@ type AppView struct {
 	pendingToolContext []Message
 	pendingSummary     *IterationSummaryMsg // Summary to add after typewriter completes
 
+	// Session generation counter — incremented on session switch to invalidate stale async renders
+	sessionGeneration uint64
+
 	// Context window tracking & compaction UI state
 }
 

@@ -26,6 +26,14 @@ func (a AppView) handleUIMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		return a, nil
 
 	case markdownRenderedMsg:
+		// Drop stale renders from a previous session
+		if msg.SessionGeneration != a.sessionGeneration {
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("Dropping stale markdownRenderedMsg (gen %d != %d) for message %d", msg.SessionGeneration, a.sessionGeneration, msg.MessageIndex)
+			}
+			return a, nil
+		}
+
 		if config.DebugLog != nil {
 			config.DebugLog.Printf("markdownRenderedMsg received for message %d", msg.MessageIndex)
 		}

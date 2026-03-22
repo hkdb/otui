@@ -292,6 +292,7 @@ func stripCodeBlockPrefix(line string) string {
 }
 
 func (a AppView) renderMarkdownAsync(messageIndex int, content string) tea.Cmd {
+	generation := a.sessionGeneration
 	return func() tea.Msg {
 		if config.DebugLog != nil {
 			config.DebugLog.Printf("Starting async markdown render for message %d - length: %d chars", messageIndex, len(content))
@@ -321,8 +322,9 @@ func (a AppView) renderMarkdownAsync(messageIndex int, content string) tea.Cmd {
 		}
 
 		return markdownRenderedMsg{
-			MessageIndex: messageIndex,
-			Rendered:     processed,
+			MessageIndex:      messageIndex,
+			Rendered:          processed,
+			SessionGeneration: generation,
 		}
 	}
 }

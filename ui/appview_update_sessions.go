@@ -50,6 +50,15 @@ func (a AppView) handleSessionMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		// Load session into UI and sync with MCP manager
 		a.setCurrentSession(msg.Session)
 
+		// Reset streaming/typewriter state from previous session
+		a.currentResp.Reset()
+		a.chunks = nil
+		a.chunkIndex = 0
+		a.userScrolledUp = false
+		a.highlightedMessageIdx = -1
+		a.highlightFlashCount = 0
+		a.sessionGeneration++
+
 		a.dataModel.SessionDirty = false
 		a.showSessionManager = false
 

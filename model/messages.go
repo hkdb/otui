@@ -72,8 +72,9 @@ type ToolExecutionErrorMsg struct {
 }
 
 type MarkdownRenderedMsg struct {
-	MessageIndex int
-	Rendered     string
+	MessageIndex      int
+	Rendered          string
+	SessionGeneration uint64
 }
 
 type ModelsListMsg struct {
