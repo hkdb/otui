@@ -37,6 +37,15 @@ To customize
 
 If you are using these alternatives, chances are, you already know what you are doing and can adjust your solution based on the above.
 
+
+### Notifictions
+
+If you are using a VTE-based terminal emulator, you have to wrap otui from the host with [osc-proxy](https://github.com/hkdb/otui/blob/main/scripts/osc-proxy) to listen for `\x1b\\` (ST) which proxies to notify-send(dependency) since vte ignores them:
+
+```bash
+./osc-proxy <docker command>
+```
+
 ### Why?
 ---
 

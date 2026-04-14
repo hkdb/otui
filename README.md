@@ -98,6 +98,20 @@ See the configuration section further down for more details about the config str
 
 For more information about running OTUI in a container, see the slightly more comprehensive [guide on running OTUI in containers](docs/CONTAINERIZE.md).
 
+
+## Notifications
+
+You can set otui to send you a desktop notification upon completion of response in the General settings screen. This works out-of-the-box for most modern terminals. However, if you are using a VTE-based terminal, you will need to use [osc-proxy](https://github.com/hkdb/otui/blob/main/scripts/osc-proxy) to listen for `\x1b\\` (ST) which proxies to notify-send(dependency):
+
+```bash
+./osc-proxy otui
+```
+or
+
+```bash
+./osc-proxy <docker command>
+```
+
 ## 🏗️ Basic Concepts
 
 OTUI was designed to be hopefully intuitive enough to any user that is already familiar with keyboard driven environments. At the footer of each screen, there will always be reminders of what the keybindings are. The hope is that, aside from reading this README section, users wouldn't HAVE TO read or touch a user guide at all and still be able to pick it up in no time. If the footer reminders are not enough, there's always a cheat sheet `help` screen.

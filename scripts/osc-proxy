@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""osc-notify-proxy: wraps a command, intercepts OSC 9/777, calls notify-send"""
+
+import os, sys, re, subprocess, pty, signal, struct, fcntl, tty, termios, threading
+
+OSC_RE = re.compile(
+    rb'\x1b\]777;notify;([^\x07]*?);([^\x07]*?)(?:\x07|\x1b\\)'
+    rb'|\x1b\]9;([^\x07]*?)(?:\x07|\x1b\\)'
+)
+
+def sanitize(s):
+    return s[:200].replace('\n', ' ').replace('\r', '')
+
+def notify(title, body):
+    try:
+        subprocess.Popen(['notify-send', sanitize(title), sanitize(body)],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except FileNotFoundError:
+        pass
+
+def set_winsize(fd):
+    """Copy the current terminal size to the child PTY."""
+    s = struct.pack('HHHH', 0, 0, 0, 0)
+    result = fcntl.ioctl(sys.stdout.fileno(), termios.TIOCGWINSZ, s)
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, result)
+
+def copy_stdin_to_fd(fd):
+    """Thread: forward stdin to child PTY."""
+    try:
+        while True:
+            data = os.read(sys.stdin.fileno(), 16384)
+            if not data:
+                break
+            os.write(fd, data)
+    except OSError:
+        pass
+
+def main():
+    cmd = sys.argv[1:]
+    if not cmd:
+        print(f"Usage: {sys.argv[0]} <command> [args...]", file=sys.stderr)
+        sys.exit(1)
+
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execvp(cmd[0], cmd)
+
+    # Set child PTY to raw so it doesn't echo terminal responses
+    child_attrs = termios.tcgetattr(fd)
+    child_attrs[3] &= ~(termios.ECHO | termios.ICANON | termios.ISIG)
+    child_attrs[6][termios.VMIN] = 1
+    child_attrs[6][termios.VTIME] = 0
+    termios.tcsetattr(fd, termios.TCSANOW, child_attrs)
+
+    # Copy terminal size to child
+    set_winsize(fd)
+
+    # Propagate resize
+    def handle_winch(*_):
+        try:
+            set_winsize(fd)
+            os.kill(pid, signal.SIGWINCH)
+        except OSError:
+            pass
+    signal.signal(signal.SIGWINCH, handle_winch)
+
+    # Set parent stdin to raw mode
+    old_attrs = termios.tcgetattr(sys.stdin.fileno())
+    try:
+        tty.setraw(sys.stdin.fileno())
+
+        # Stdin forwarding in a thread to avoid blocking/splitting issues
+        input_thread = threading.Thread(target=copy_stdin_to_fd, args=(fd,), daemon=True)
+        input_thread.start()
+
+        # Main loop: read child output, intercept OSC, pass through
+        while True:
+            try:
+                data = os.read(fd, 16384)
+            except OSError:
+                break
+            if not data:
+                break
+
+            for m in OSC_RE.finditer(data):
+                if m.group(1) is not None:
+                    notify(m.group(1).decode(errors='replace'),
+                           m.group(2).decode(errors='replace'))
+                else:
+                    notify('Terminal', m.group(3).decode(errors='replace'))
+
+            os.write(sys.stdout.fileno(), data)
+
+    except KeyboardInterrupt:
+        pass
+    finally:
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, old_attrs)
+        try:
+            _, status = os.waitpid(pid, 0)
+            sys.exit(os.waitstatus_to_exitcode(status))
+        except ChildProcessError:
+            pass
+
+if __name__ == '__main__':
+    main()
