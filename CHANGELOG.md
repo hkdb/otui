@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.08.02] - 2026-04-13
+
+** Feature: **
+
+- Notification on completion of response
+
+---
+
 ## [v0.08.01] - 2026-03-22
 
 ** Maintenance & Bug Fixes: **
