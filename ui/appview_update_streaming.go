@@ -147,6 +147,9 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 					a.dataModel.CheckAutoCompactionCmd(), // Check if auto-compaction should trigger
 				}
 			}
+			if a.dataModel.Config.NotifyOnComplete {
+				cmds = append(cmds, notifyResponseComplete())
+			}
 			return a, tea.Batch(cmds...)
 		}
 
@@ -218,7 +221,11 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			a.updateViewportContent(true)
 
 			// Trigger async markdown rendering (non-blocking)
-			return a, a.renderMarkdownAsync(messageIndex, msg.FullResponse)
+			cmds := []tea.Cmd{a.renderMarkdownAsync(messageIndex, msg.FullResponse)}
+			if a.dataModel.Config.NotifyOnComplete {
+				cmds = append(cmds, notifyResponseComplete())
+			}
+			return a, tea.Batch(cmds...)
 		}
 		// No response received
 		if config.DebugLog != nil {
@@ -280,6 +287,10 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			Timestamp: time.Now(),
 		})
 		a.updateViewportContent(true)
+		return a, nil
+
+	case notifyCompleteMsg:
+		// No-op — notification already emitted
 		return a, nil
 	}
 

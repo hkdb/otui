@@ -53,6 +53,7 @@ type UserConfig struct {
 	RequireApproval        bool             `toml:"require_approval"`        // Whether to ask for permission before executing tools
 	MaxIterations          int              `toml:"max_iterations"`          // Default: 10
 	EnableMultiStep        bool             `toml:"enable_multi_step"`       // Default: true
+	NotifyOnComplete       bool             `toml:"notify_on_complete"`      // Emit terminal bell when LLM response completes
 	Compaction             CompactionConfig `toml:"compaction,omitempty"`    // Context window management settings
 	ModelContextOverrides  map[string]int   `toml:"model_context_overrides,omitempty"` // Per-model context window overrides
 }
@@ -72,6 +73,7 @@ type Config struct {
 	RequireApproval       bool     // Whether to ask for permission before executing tools
 	MaxIterations         int      // Max iterations per user message
 	EnableMultiStep       bool     // Allow LLM to execute multiple steps
+	NotifyOnComplete      bool     // Emit terminal bell when LLM response completes
 	Compaction            CompactionConfig // Context window management settings
 	ModelContextOverrides map[string]int   // Per-model context window overrides
 	Keybindings           *KeyBindingsConfig
@@ -228,6 +230,7 @@ func Load() (*Config, error) {
 		cfg.RequireApproval = userCfg.RequireApproval
 		cfg.MaxIterations = userCfg.MaxIterations
 		cfg.EnableMultiStep = userCfg.EnableMultiStep
+		cfg.NotifyOnComplete = userCfg.NotifyOnComplete
 		cfg.Compaction = userCfg.Compaction
 		cfg.ModelContextOverrides = userCfg.ModelContextOverrides
 
@@ -299,6 +302,7 @@ func Load() (*Config, error) {
 		cfg.RequireApproval = userCfg.RequireApproval
 		cfg.MaxIterations = userCfg.MaxIterations
 		cfg.EnableMultiStep = userCfg.EnableMultiStep
+		cfg.NotifyOnComplete = userCfg.NotifyOnComplete
 		cfg.Compaction = userCfg.Compaction
 		cfg.ModelContextOverrides = userCfg.ModelContextOverrides
 

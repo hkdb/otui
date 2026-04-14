@@ -563,8 +563,9 @@ func (a AppView) handleSettingsNavigationMode(msg tea.KeyMsg) (tea.Model, tea.Cm
 			return a, a.fetchModelListFromHost(ollamaHost)
 		}
 
-		// Check if this is the plugins enabled field - toggle it
-		if a.settingsFields[a.selectedSettingIdx].Type == SettingTypePluginsEnabled {
+		// Check if this is a boolean toggle field
+		if a.settingsFields[a.selectedSettingIdx].Type == SettingTypePluginsEnabled ||
+			a.settingsFields[a.selectedSettingIdx].Type == SettingTypeNotifyOnComplete {
 			currentValue := a.settingsFields[a.selectedSettingIdx].Value
 			switch currentValue {
 			case "true":
@@ -880,6 +881,9 @@ func (a AppView) saveSettingsCmd() tea.Cmd {
 		if warn, err := strconv.ParseFloat(a.settingsFields[8].Value, 64); err == nil {
 			existingCfg.Compaction.WarnAtPercentage = warn / 100.0
 		}
+
+		// Update notification setting (field 9)
+		existingCfg.NotifyOnComplete = stringToBool(a.settingsFields[9].Value)
 
 		// Save updated config (preserves DefaultProvider, Providers[], Security, etc.)
 		if err := config.SaveUserConfig(existingCfg, dataDir); err != nil {

@@ -441,6 +441,13 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						Type:         SettingTypeWarnAtPercentage,
 						Validation:   FieldValidationNone,
 					},
+					{
+						Label:        "Notification",
+						Value:        boolToString(a.dataModel.Config.NotifyOnComplete),
+						DefaultValue: "false",
+						Type:         SettingTypeNotifyOnComplete,
+						Validation:   FieldValidationNone,
+					},
 				}
 				a.selectedSettingIdx = 0
 				a.settingsEditMode = false
@@ -974,7 +981,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	// Streaming messages → appview_update_streaming.go
-	case streamChunksCollectedMsg, displayChunkTickMsg, streamChunkMsg, streamDoneMsg, streamErrorMsg:
+	case streamChunksCollectedMsg, displayChunkTickMsg, streamChunkMsg, streamDoneMsg, streamErrorMsg, notifyCompleteMsg:
 		return a.handleStreamingMessage(msg)
 
 	// Phase 6: Tool execution handlers

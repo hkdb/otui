@@ -60,6 +60,7 @@ const (
 	SettingTypeAutoCompactThreshold
 	SettingTypeKeepPercentage
 	SettingTypeWarnAtPercentage
+	SettingTypeNotifyOnComplete
 )
 
 type SettingFieldValidation int

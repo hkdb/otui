@@ -24,7 +24,8 @@ func DefaultUserConfig() *UserConfig {
 		AllowedTools:    []string{},
 		RequireApproval: true, // Default to requiring approval for safety
 		MaxIterations:   10,   // Default max iterations per user message
-		EnableMultiStep: true, // Default to allowing multi-step execution
+		EnableMultiStep:  true,  // Default to allowing multi-step execution
+		NotifyOnComplete: false, // No notification by default
 		Compaction: CompactionConfig{
 			AutoCompact:          false, // Manual compaction by default
 			AutoCompactThreshold: 0.75,  // Trigger at 75% context usage
@@ -81,6 +82,12 @@ require_approval = true
 # Multi-step execution (Phase 2)
 enable_multi_step = true  # Allow LLM to execute multiple steps in sequence
 max_iterations = 10       # Maximum steps per user message
+
+# Desktop Notification
+# Emit terminal bell when LLM response completes
+# Works in native, Flatpak, and Docker containers
+# Configure your terminal emulator to show visual notifications on bell
+notify_on_complete = false
 
 # Context Window Management
 [compaction]
