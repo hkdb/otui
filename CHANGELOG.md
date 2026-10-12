@@ -20,6 +20,11 @@
 - Context usage % now updates when the model or its context window changes
 - Fixed crash on startup after entering the correct passphrase for a passphrase protected SSH key (also when switching to such a data directory in Settings)
 - Fixed the startup passphrase prompt repeating forever without explanation: a wrong passphrase now shows "Incorrect passphrase", and other credential errors (e.g. credentials encrypted with a different SSH key) show an error instead of prompting again
+- Fixed a crash when compacting a session after cancelling a response with Esc
+- Fixed compaction hiding the wrong messages in sessions with tool calls (system messages were counted as conversation messages)
+- Compaction no longer re-summarizes already compacted history; a failed summary keeps the previous one instead of replacing it with a generic note
+- Fixed auto-compaction removing the wrong message (e.g. a pending tool permission prompt) when it finished
+- The compaction notice now shows more accurate context usage
 
 ---
 

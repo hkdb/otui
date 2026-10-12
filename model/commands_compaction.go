@@ -5,77 +5,66 @@ import (
 	"otui/config"
 )
 
-// CompactSessionMarkerCmd performs compaction with a specific marker index
+// CompactSessionMarkerCmd compacts the first markerIndex user/assistant
+// messages. The messages are snapshotted now (call from Update); only the LLM
+// summary is generated in the background. The result is applied by
+// ApplyCompaction when CompactionCompleteMsg arrives.
 func (m *Model) CompactSessionMarkerCmd(markerIndex int) tea.Cmd {
+	if config.Debug && config.DebugLog != nil {
+		config.DebugLog.Printf("[compaction] CompactSessionMarkerCmd with marker=%d", markerIndex)
+	}
+
+	job, err := m.prepareCompaction(markerIndex)
+	if err != nil {
+		return func() tea.Msg {
+			return CompactionCompleteMsg{Success: false, Err: err}
+		}
+	}
+
 	return func() tea.Msg {
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[compaction] CompactSessionMarkerCmd started with marker=%d", markerIndex)
-		}
-
-		err := m.CompactSession(markerIndex)
-
-		summary := ""
-		llmSummary := ""
-		if m.CurrentSession != nil {
-			summary = m.CurrentSession.CompactedSummary
-			llmSummary = m.CurrentSession.LLMSummary
-		}
-
-		return CompactionCompleteMsg{
-			Success:    err == nil,
-			Err:        err,
-			Summary:    summary,
-			LLMSummary: llmSummary,
-		}
+		return job.run()
 	}
 }
 
-// CompactSessionCmd performs compaction asynchronously
+// CompactSessionCmd compacts enough messages to keep about keepPercentage of
+// the context window. Returns nil if there's nothing new to compact.
+// Call from Update (see CompactSessionMarkerCmd).
 func (m *Model) CompactSessionCmd(keepPercentage float64) tea.Cmd {
-	return func() tea.Msg {
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[compaction] CompactSessionCmd started with keep=%.1f%%",
-				keepPercentage*100)
-		}
+	if m.CurrentSession == nil {
+		return nil
+	}
 
-		// Calculate marker index
-		markerIndex := m.SuggestCompactionPoint(keepPercentage)
+	if config.Debug && config.DebugLog != nil {
+		config.DebugLog.Printf("[compaction] CompactSessionCmd with keep=%.1f%%", keepPercentage*100)
+	}
 
-		// Fallback: if marker is 0, use half of messages
+	// Calculate marker index
+	markerIndex := m.SuggestCompactionPoint(keepPercentage)
+
+	// Fallback: if marker is 0, use half of messages
+	if markerIndex == 0 {
+		messageCount := len(userAssistantMessages(m.Messages))
+		markerIndex = messageCount / 2
 		if markerIndex == 0 {
-			messageCount := 0
-			for _, msg := range m.Messages {
-				if msg.Role == "user" || msg.Role == "assistant" {
-					messageCount++
-				}
-			}
-			markerIndex = messageCount / 2
-			if markerIndex == 0 {
-				markerIndex = 1
-			}
-
-			if config.Debug && config.DebugLog != nil {
-				config.DebugLog.Printf("[compaction] Using fallback marker: %d (half of %d messages)",
-					markerIndex, messageCount)
-			}
+			markerIndex = 1
 		}
 
-		err := m.CompactSession(markerIndex)
-
-		summary := ""
-		llmSummary := ""
-		if m.CurrentSession != nil {
-			summary = m.CurrentSession.CompactedSummary
-			llmSummary = m.CurrentSession.LLMSummary
-		}
-
-		return CompactionCompleteMsg{
-			Success:    err == nil,
-			Err:        err,
-			Summary:    summary,
-			LLMSummary: llmSummary,
+		if config.Debug && config.DebugLog != nil {
+			config.DebugLog.Printf("[compaction] Using fallback marker: %d (half of %d messages)",
+				markerIndex, messageCount)
 		}
 	}
+
+	// Nothing new to compact (the kept part alone exceeds the threshold)
+	if markerIndex <= m.CurrentSession.CompactionMarker {
+		if config.Debug && config.DebugLog != nil {
+			config.DebugLog.Printf("[compaction] Nothing new to compact (suggested %d, current marker %d)",
+				markerIndex, m.CurrentSession.CompactionMarker)
+		}
+		return nil
+	}
+
+	return m.CompactSessionMarkerCmd(markerIndex)
 }
 
 // UpdateTokenUsageCmd updates token usage for current session

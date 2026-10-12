@@ -148,8 +148,34 @@ func (m *Model) GetContextUsagePercentage() float64 {
 	return percentage
 }
 
-// SuggestCompactionPoint calculates which message index to compact to
-// Returns the index where the compaction marker should be placed
+// The compaction marker (Session.CompactionMarker) is the number of
+// user/assistant messages, in conversation order, that have been compacted.
+// System messages (step messages, summaries, notices) are not counted, so
+// every function here works on userAssistantMessages(m.Messages).
+
+// userAssistantMessages returns the messages the compaction marker counts
+func userAssistantMessages(msgs []Message) []Message {
+	var result []Message
+	for _, msg := range msgs {
+		if msg.Role == "user" || msg.Role == "assistant" {
+			result = append(result, msg)
+		}
+	}
+	return result
+}
+
+// messagesAfterMarker returns the messages to send to the LLM: everything if
+// nothing is compacted, otherwise the user/assistant messages after the marker
+func messagesAfterMarker(msgs []Message, marker int) []Message {
+	if marker <= 0 {
+		return msgs
+	}
+	return userAssistantMessagesAfter(msgs, marker)
+}
+
+// SuggestCompactionPoint calculates how many user/assistant messages to
+// compact so that about keepPercentage of the context window is kept.
+// Returns 0 if everything fits within the keep target.
 func (m *Model) SuggestCompactionPoint(keepPercentage float64) int {
 	if m.CurrentSession == nil {
 		return 0
@@ -162,8 +188,9 @@ func (m *Model) SuggestCompactionPoint(keepPercentage float64) int {
 	currentTokens := 0
 
 	// Count backwards from end until we reach target
-	for i := len(m.CurrentSession.Messages) - 1; i >= 0; i-- {
-		currentTokens += counter.CountTokens(m.CurrentSession.Messages[i].Content)
+	ua := userAssistantMessages(m.Messages)
+	for i := len(ua) - 1; i >= 0; i-- {
+		currentTokens += counter.CountTokens(ua[i].Content)
 		if currentTokens >= targetTokens {
 			if config.Debug && config.DebugLog != nil {
 				config.DebugLog.Printf("[compaction] Suggested marker: %d (keeps %d tokens, target was %d)",
@@ -176,14 +203,21 @@ func (m *Model) SuggestCompactionPoint(keepPercentage float64) int {
 	return 0 // Keep all messages if we never hit the target
 }
 
-// GenerateCompactionSummary uses the LLM to create a summary of compacted messages
-func (m *Model) GenerateCompactionSummary(messagesToCompact []storage.Message) (string, error) {
-	if m.Provider == nil {
+// GenerateCompactionSummary uses the LLM to summarize messagesToCompact.
+// If previousSummary is set (an earlier compaction), it's included so the
+// new summary covers the whole compacted history without resending it.
+func GenerateCompactionSummary(provider Provider, previousSummary string, messagesToCompact []Message) (string, error) {
+	if provider == nil {
 		return "", fmt.Errorf("no provider available")
 	}
 
 	// Build a prompt for the LLM to summarize
 	var conversationText strings.Builder
+	if previousSummary != "" {
+		conversationText.WriteString("Summary of the conversation before these messages:\n")
+		conversationText.WriteString(previousSummary)
+		conversationText.WriteString("\n\nMessages since then:\n\n")
+	}
 	for _, msg := range messagesToCompact {
 		conversationText.WriteString(fmt.Sprintf("%s: %s\n\n", msg.Role, msg.Content))
 	}
@@ -214,7 +248,7 @@ Summary:`, conversationText.String())
 	}
 
 	// Use Chat method to get summary
-	err := m.Provider.Chat(ctx, summaryMessages, callback)
+	err := provider.Chat(ctx, summaryMessages, callback)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate summary: %w", err)
 	}
@@ -231,86 +265,137 @@ Summary:`, conversationText.String())
 	return summaryText, nil
 }
 
-// CompactSession performs compaction on the current session at the specified marker
-func (m *Model) CompactSession(markerIndex int) error {
+// compactionJob is a snapshot of everything needed to compact a session, so
+// the (slow) summary can be generated off the Update loop without touching
+// shared state
+type compactionJob struct {
+	sessionID       string
+	marker          int       // New marker (user/assistant messages compacted)
+	messages        []Message // Newly compacted messages: [old marker : new marker]
+	previousSummary string    // LLMSummary from an earlier compaction, if any
+	provider        Provider
+}
+
+// prepareCompaction validates a new marker and snapshots the messages to
+// compact. Must be called from Update (reads m.Messages); does no I/O.
+func (m *Model) prepareCompaction(marker int) (compactionJob, error) {
 	if m.CurrentSession == nil {
-		return fmt.Errorf("no session loaded")
+		return compactionJob{}, fmt.Errorf("no session loaded")
 	}
 
-	// Validate marker
-	if markerIndex <= 0 {
-		return fmt.Errorf("invalid marker index: %d", markerIndex)
+	if marker <= 0 {
+		return compactionJob{}, fmt.Errorf("invalid marker index: %d", marker)
 	}
 
-	// Get message count for validation
-	messageCount := 0
-	for _, msg := range m.Messages {
-		if msg.Role == "user" || msg.Role == "assistant" {
-			messageCount++
-		}
-	}
-
-	if markerIndex > messageCount {
-		return fmt.Errorf("marker index %d is beyond message count %d", markerIndex, messageCount)
+	ua := userAssistantMessages(m.Messages)
+	if marker > len(ua) {
+		return compactionJob{}, fmt.Errorf("marker index %d is beyond message count %d", marker, len(ua))
 	}
 
 	// Don't compact if already compacted at or beyond this point
-	if m.CurrentSession.CompactionMarker >= markerIndex {
-		return fmt.Errorf("session already compacted at this level (current marker: %d, requested: %d)",
-			m.CurrentSession.CompactionMarker, markerIndex)
+	oldMarker := m.CurrentSession.CompactionMarker
+	if oldMarker >= marker {
+		return compactionJob{}, fmt.Errorf("session already compacted at this level (current marker: %d, requested: %d)",
+			oldMarker, marker)
 	}
 
-	// Set marker
-	m.CurrentSession.CompactionMarker = markerIndex
-	m.CurrentSession.CompactionTimestamp = time.Now()
-	m.CurrentSession.LLMSummary = "" // Clear stale value from prior compaction
+	// A marker beyond the messages (e.g. session edited outside OTUI) means
+	// nothing before the new marker is reliably summarized - start over
+	if oldMarker > len(ua) {
+		oldMarker = 0
+	}
 
-	// Count messages being compacted
-	compactedCount := markerIndex
-	userCount := 0
-	assistantCount := 0
-	for i := 0; i < markerIndex; i++ {
-		switch m.CurrentSession.Messages[i].Role {
+	job := compactionJob{
+		sessionID: m.CurrentSession.ID,
+		marker:    marker,
+		messages:  append([]Message(nil), ua[oldMarker:marker]...),
+	}
+	if oldMarker > 0 {
+		job.previousSummary = m.CurrentSession.LLMSummary
+	}
+	_, job.provider = m.sessionProvider()
+
+	return job, nil
+}
+
+// run generates the summary for the job. Safe to call from a Cmd goroutine:
+// it only uses the snapshot.
+func (job compactionJob) run() CompactionCompleteMsg {
+	userCount, assistantCount := 0, 0
+	for _, msg := range job.messages {
+		switch msg.Role {
 		case "user":
 			userCount++
 		case "assistant":
 			assistantCount++
 		}
 	}
+	compactedCount := userCount + assistantCount
 
-	// Generate LLM-based summary of compacted content
-	messagesToCompact := m.CurrentSession.Messages[:markerIndex]
-	llmSummary, err := m.GenerateCompactionSummary(messagesToCompact)
+	msg := CompactionCompleteMsg{
+		Success:   true,
+		SessionID: job.sessionID,
+		Marker:    job.marker,
+	}
 
-	if err != nil {
+	llmSummary, err := GenerateCompactionSummary(job.provider, job.previousSummary, job.messages)
+	switch {
+	case err == nil:
+		// Stats-only for system marker; LLM summary goes to assistant message
+		msg.Summary = fmt.Sprintf("Compacted %d messages (%d user, %d assistant)",
+			compactedCount, userCount, assistantCount)
+		msg.LLMSummary = llmSummary
+
+	case job.previousSummary != "":
+		// Keep the earlier summary rather than replacing it with a generic one
+		if config.Debug && config.DebugLog != nil {
+			config.DebugLog.Printf("[compaction] LLM summary failed, keeping previous summary: %v", err)
+		}
+		msg.Summary = fmt.Sprintf("Compacted %d more messages (%d user, %d assistant) on %s",
+			compactedCount, userCount, assistantCount, time.Now().Format("Jan 2, 2006"))
+		msg.LLMSummary = fmt.Sprintf("%s\n\n(%d more messages - %d user, %d assistant - were compacted after this summary.)",
+			job.previousSummary, compactedCount, userCount, assistantCount)
+
+	default:
 		// Fallback to simple summary if LLM summary fails
 		if config.Debug && config.DebugLog != nil {
 			config.DebugLog.Printf("[compaction] LLM summary failed, using fallback: %v", err)
 		}
-		m.CurrentSession.CompactedSummary = fmt.Sprintf(
-			"Compacted %d messages (%d user, %d assistant) on %s",
-			compactedCount, userCount, assistantCount,
-			time.Now().Format("Jan 2, 2006"),
-		)
-		m.CurrentSession.LLMSummary = fmt.Sprintf(
+		msg.Summary = fmt.Sprintf("Compacted %d messages (%d user, %d assistant) on %s",
+			compactedCount, userCount, assistantCount, time.Now().Format("Jan 2, 2006"))
+		msg.LLMSummary = fmt.Sprintf(
 			"Earlier messages in this conversation (%d user, %d assistant) were compacted to free up context space.",
 			userCount, assistantCount,
 		)
-	} else {
-		// Stats-only for system marker; LLM summary goes to assistant message
-		m.CurrentSession.CompactedSummary = fmt.Sprintf(
-			"Compacted %d messages (%d user, %d assistant)",
-			compactedCount, userCount, assistantCount,
-		)
-		m.CurrentSession.LLMSummary = llmSummary
 	}
 
-	// Update token usage
+	return msg
+}
+
+// ErrStaleCompaction is returned by ApplyCompaction for results that no
+// longer apply (session switched, or compacted further in the meantime)
+var ErrStaleCompaction = fmt.Errorf("stale compaction result")
+
+// ApplyCompaction stores a finished compaction on the current session.
+// Must be called from Update.
+func (m *Model) ApplyCompaction(msg CompactionCompleteMsg) error {
+	if !msg.Success {
+		return msg.Err
+	}
+	if m.CurrentSession == nil || m.CurrentSession.ID != msg.SessionID ||
+		msg.Marker <= m.CurrentSession.CompactionMarker {
+		return ErrStaleCompaction
+	}
+
+	m.CurrentSession.CompactionMarker = msg.Marker
+	m.CurrentSession.CompactionTimestamp = time.Now()
+	m.CurrentSession.CompactedSummary = msg.Summary
+	m.CurrentSession.LLMSummary = msg.LLMSummary
 	m.CurrentSession.TokenUsage = m.CalculateTokenUsage()
 
 	if config.Debug && config.DebugLog != nil {
 		config.DebugLog.Printf("[compaction] Session compacted: marker=%d summary=%s",
-			markerIndex, m.CurrentSession.CompactedSummary)
+			msg.Marker, msg.Summary)
 	}
 
 	// Mark session as dirty so it gets saved
@@ -319,40 +404,48 @@ func (m *Model) CompactSession(markerIndex int) error {
 	return nil
 }
 
-// GetActiveContext returns messages that should be sent to LLM (after marker)
-func (m *Model) GetActiveContext() []storage.Message {
-	if m.CurrentSession == nil {
-		return []storage.Message{}
+// CompactSession compacts the current session up to marker (user/assistant
+// messages) synchronously. The UI uses CompactSessionMarkerCmd instead.
+func (m *Model) CompactSession(markerIndex int) error {
+	job, err := m.prepareCompaction(markerIndex)
+	if err != nil {
+		return err
 	}
-
-	// No compaction marker or marker is 0 - return all messages
-	if m.CurrentSession.CompactionMarker == 0 {
-		return m.CurrentSession.Messages
-	}
-
-	// Ensure marker is within bounds
-	if m.CurrentSession.CompactionMarker >= len(m.CurrentSession.Messages) {
-		// Marker is beyond message list - return all messages
-		return m.CurrentSession.Messages
-	}
-
-	// Return messages after the marker
-	return m.CurrentSession.Messages[m.CurrentSession.CompactionMarker:]
+	return m.ApplyCompaction(job.run())
 }
 
-// GetCompactedContext returns messages that have been compacted (before marker)
-func (m *Model) GetCompactedContext() []storage.Message {
-	if m.CurrentSession == nil || m.CurrentSession.CompactionMarker == 0 {
-		return []storage.Message{}
+// GetActiveContext returns the user/assistant messages after the marker
+func (m *Model) GetActiveContext() []Message {
+	if m.CurrentSession == nil {
+		return []Message{}
+	}
+	return userAssistantMessagesAfter(m.Messages, m.CurrentSession.CompactionMarker)
+}
+
+// userAssistantMessagesAfter returns the user/assistant messages after marker
+func userAssistantMessagesAfter(msgs []Message, marker int) []Message {
+	ua := userAssistantMessages(msgs)
+	if marker <= 0 {
+		return ua
+	}
+	if marker >= len(ua) {
+		return []Message{}
+	}
+	return ua[marker:]
+}
+
+// GetCompactedContext returns the user/assistant messages before the marker
+func (m *Model) GetCompactedContext() []Message {
+	if m.CurrentSession == nil || m.CurrentSession.CompactionMarker <= 0 {
+		return []Message{}
 	}
 
-	// Ensure marker is within bounds
-	if m.CurrentSession.CompactionMarker >= len(m.CurrentSession.Messages) {
-		// Marker is beyond message list - nothing is compacted
-		return []storage.Message{}
+	ua := userAssistantMessages(m.Messages)
+	marker := m.CurrentSession.CompactionMarker
+	if marker > len(ua) {
+		marker = len(ua)
 	}
-
-	return m.CurrentSession.Messages[:m.CurrentSession.CompactionMarker]
+	return ua[:marker]
 }
 
 // ShouldAutoCompact checks if auto-compaction should trigger

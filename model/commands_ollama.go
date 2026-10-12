@@ -146,24 +146,10 @@ func (m *Model) SendToOllama() tea.Cmd {
 		compactionMarker = m.CurrentSession.CompactionMarker
 	}
 
-	// Apply compaction filtering to m.Messages
-	if compactionMarker == 0 {
-		// No compaction - send all messages
-		uiMessages = m.Messages
-	} else {
-		// Only send messages after the compaction marker
-		// The LLM summary is injected as synthetic user/assistant messages below
-		// Note: m.Messages includes system messages, but we only count user/assistant for marker
-		userAssistantCount := 0
-		for _, msg := range m.Messages {
-			if msg.Role == "user" || msg.Role == "assistant" {
-				if userAssistantCount >= compactionMarker {
-					uiMessages = append(uiMessages, msg)
-				}
-				userAssistantCount++
-			}
-		}
-	}
+	// Apply compaction filtering to m.Messages: only messages after the
+	// marker are sent; the LLM summary is injected as synthetic
+	// user/assistant messages below
+	uiMessages = messagesAfterMarker(m.Messages, compactionMarker)
 
 	// Inject compaction context as user/assistant exchange so LLM reliably reads it
 	// All LLMs treat user messages as conversational context, unlike system messages

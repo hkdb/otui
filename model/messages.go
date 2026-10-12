@@ -202,6 +202,8 @@ type CompactionCompleteMsg struct {
 	Err        error
 	Summary    string // wrapped: "Compacted N messages... - Summary: ..."
 	LLMSummary string // raw LLM output (just the summary text)
+	SessionID  string // Session the compaction was computed for
+	Marker     int    // New compaction marker (user/assistant messages compacted)
 }
 
 // TokenUsageUpdatedMsg is sent when token usage is recalculated

@@ -140,7 +140,7 @@ OTUI was designed to be hopefully intuitive enough to any user that is already f
 
 At any point in time, users can press Alt+H to bring up the `help` screen to see what the keybindings are:
 
-![keybindings](docs/keybindings-v0.07.00.png)
+![keybindings](docs/keybindings-v0.09.00.png)
 
 For those of you who wish to customize your keyboard shortcuts, check out [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md). It's not likely that I will ever implement a UI for customization cause keyboard warriors that want to vear off from the defaults are more than likely well versed in editing text config files.
 

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -30,14 +31,47 @@ func (a AppView) handleCompactionMessage(msg tea.Msg) (AppView, tea.Cmd) {
 	}
 }
 
+// compactingMessage is shown while a compaction runs
+const compactingMessage = "⏳ Compacting session..."
+
+// removeCompactingMessage removes the "Compacting..." notice, if present.
+// Auto-compaction doesn't show one, so nothing else may be removed here
+// (e.g. an iteration summary or a pending permission prompt).
+func (a AppView) removeCompactingMessage() AppView {
+	for i := len(a.dataModel.Messages) - 1; i >= 0; i-- {
+		msg := a.dataModel.Messages[i]
+		if msg.Role == "system" && !msg.Persistent && msg.Content == compactingMessage {
+			a.dataModel.Messages = append(a.dataModel.Messages[:i], a.dataModel.Messages[i+1:]...)
+			break
+		}
+	}
+	return a
+}
+
 // handleCompactionComplete handles compaction completion
 func (a AppView) handleCompactionComplete(msg appmodel.CompactionCompleteMsg) (AppView, tea.Cmd) {
 	if config.Debug && config.DebugLog != nil {
 		config.DebugLog.Printf("[ui] handleCompactionComplete: success=%v", msg.Success)
 	}
 
+	// Store the result on the session (in Update, not in the Cmd goroutine)
+	err := a.dataModel.ApplyCompaction(msg)
+	if errors.Is(err, appmodel.ErrStaleCompaction) {
+		// Session switched or compacted further while the summary was generated
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("[ui] Ignoring stale compaction result (session=%s marker=%d)", msg.SessionID, msg.Marker)
+		}
+		a = a.removeCompactingMessage()
+		a.updateViewportContent(!a.userScrolledUp)
+		return a, nil
+	}
+	if err != nil {
+		msg.Success = false
+		msg.Err = err
+	}
+
 	// Remove "Compacting..." message
-	a = a.removeLastSystemMessage()
+	a = a.removeCompactingMessage()
 
 	if !msg.Success {
 		// Show error message inline
@@ -58,7 +92,8 @@ func (a AppView) handleCompactionComplete(msg appmodel.CompactionCompleteMsg) (A
 	}
 
 	wrappedSummary := wrapText(msg.Summary, maxWidth)
-	markerMsg := fmt.Sprintf("📦 Earlier Context Compacted\n\n%s\n\nContext reset to 0%%", strings.Join(wrappedSummary, "\n"))
+	markerMsg := fmt.Sprintf("📦 Earlier Context Compacted\n\n%s\n\nContext now at %.0f%%",
+		strings.Join(wrappedSummary, "\n"), a.dataModel.GetContextUsagePercentage()*100)
 
 	// Insert marker message - this stays permanently in history
 	a.dataModel.Messages = append(a.dataModel.Messages, appmodel.Message{
@@ -177,8 +212,8 @@ func (a AppView) handleCompactionResponse(msg appmodel.CompactionResponseMsg) (A
 	// Approved - show "Compacting..." message
 	a.dataModel.Messages = append(a.dataModel.Messages, appmodel.Message{
 		Role:      "system",
-		Content:   "⏳ Compacting session...",
-		Rendered:  "⏳ Compacting session...",
+		Content:   compactingMessage,
+		Rendered:  compactingMessage,
 		Timestamp: time.Now(),
 	})
 

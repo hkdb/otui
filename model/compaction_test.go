@@ -223,6 +223,7 @@ func TestSuggestCompactionPoint(t *testing.T) {
 			m := &Model{
 				Config:         cfg,
 				CurrentSession: session,
+				Messages:       toUIMessages(tt.messages),
 			}
 
 			marker := m.SuggestCompactionPoint(tt.keepPercentage)
@@ -267,6 +268,7 @@ func TestGetActiveContext(t *testing.T) {
 
 			m := &Model{
 				CurrentSession: session,
+				Messages:       toUIMessages(messages),
 			}
 
 			active := m.GetActiveContext()
@@ -296,7 +298,8 @@ func TestGetCompactedContext(t *testing.T) {
 	}{
 		{"no compaction", 0, 0},
 		{"compact first 2", 2, 2},
-		{"marker at end", 4, 0}, // Marker at/beyond end means nothing compacted
+		{"marker at end", 4, 4},    // Manual compaction compacts everything
+		{"marker beyond end", 9, 4}, // Clamped to the messages that exist
 	}
 
 	for _, tt := range tests {
@@ -312,6 +315,7 @@ func TestGetCompactedContext(t *testing.T) {
 
 			m := &Model{
 				CurrentSession: session,
+				Messages:       toUIMessages(messages),
 			}
 
 			compacted := m.GetCompactedContext()
@@ -473,3 +477,12 @@ func TestCompactSession(t *testing.T) {
 
 // Note: TestGetModelMetadata cannot be tested here due to import cycle with provider package
 // The metadata retrieval logic is tested through integration tests instead
+
+// toUIMessages converts storage messages to UI messages (m.Messages)
+func toUIMessages(msgs []storage.Message) []Message {
+	result := make([]Message, 0, len(msgs))
+	for _, msg := range msgs {
+		result = append(result, Message{Role: msg.Role, Content: msg.Content})
+	}
+	return result
+}
