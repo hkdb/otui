@@ -64,45 +64,39 @@ func extractSSHKeyPath() string {
 	return "~/.ssh/otui_ed25519"
 }
 
+// showConfigError shows a configuration error in a modal and returns when
+// the user dismisses it
+func showConfigError(msg string) {
+	p := tea.NewProgram(ui.NewErrorModal("Configuration Error", msg), tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	}
+}
+
 func main() {
 	// Initialize early debug logging (writes to cache dir)
 	config.InitEarlyDebugLog()
 
-	// Validate environment variables first
-	if config.HasAnyEnvVar() && !config.HasAllEnvVars() {
-		missingVar := config.GetMissingEnvVar()
-		errorMsg := fmt.Sprintf("Missing environment variable: %s\n\n"+
-			"When using environment variables, all 3 must be set:\n"+
-			"  • OTUI_OLLAMA_HOST\n"+
-			"  • OTUI_OLLAMA_MODEL\n"+
-			"  • OTUI_DATA_DIR\n\n"+
-			"Set the missing variable(s) before launching otui.",
-			missingVar)
-
-		errorModal := ui.NewErrorModal("Configuration Error", errorMsg)
-		p := tea.NewProgram(
-			errorModal,
-			tea.WithAltScreen(),
-		)
-
-		if _, err := p.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		}
-		os.Exit(0)
+	// Validate environment variables first (OTUI_* configure OTUI without
+	// the setup wizard, e.g. in containers)
+	envCfg, envErr := config.ReadEnvConfig()
+	if envErr != nil {
+		showConfigError(fmt.Sprintf("Invalid environment configuration:\n%v\n\n%s", envErr, config.EnvUsage))
+		os.Exit(1)
 	}
 
 	settingsPath := config.GetSettingsFilePath()
 	isFirstRun := !config.FileExists(settingsPath)
 
-	// Skip welcome wizard if all env vars are set
-	if config.HasAllEnvVars() {
+	// Skip welcome wizard if configured through environment variables
+	if envCfg != nil {
 		isFirstRun = false
 	}
 
 	// NEW: Also check if user config exists in data directory
 	// This handles the case where system config exists (data dir was set in Settings)
 	// but user config doesn't exist yet (new data dir needs to be created via wizard)
-	if !isFirstRun {
+	if !isFirstRun && envCfg == nil {
 		systemCfg, err := config.LoadSystemConfig()
 		if err == nil {
 			dataDir := config.ExpandPath(systemCfg.DataDirectory)
@@ -185,11 +179,15 @@ func main() {
 			errorMsg = fmt.Sprintf("Failed to load config:\n\n%v", err)
 		}
 
-		errorModal := ui.NewErrorModal("Configuration Error", errorMsg)
-		p := tea.NewProgram(errorModal, tea.WithAltScreen())
-		if _, err := p.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		}
+		showConfigError(errorMsg)
+		os.Exit(1)
+	}
+
+	// A cloud provider configured through the environment needs an API key,
+	// either OTUI_API_KEY or one stored in the data directory
+	if cfg.Env != nil && cfg.Env.RequiresAPIKey() && cfg.APIKey(cfg.Env.Provider) == "" {
+		showConfigError(fmt.Sprintf("No API key for %s.\n\nSet OTUI_API_KEY, or store a key for %s\nin the data directory (%s).",
+			cfg.Env.Provider, cfg.Env.Provider, cfg.DataDir()))
 		os.Exit(1)
 	}
 

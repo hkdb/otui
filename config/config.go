@@ -77,6 +77,7 @@ type Config struct {
 	Compaction            CompactionConfig // Context window management settings
 	ModelContextOverrides map[string]int   // Per-model context window overrides
 	Keybindings           *KeyBindingsConfig
+	Env                   *EnvConfig // Set when configured through OTUI_* environment variables
 }
 
 var Debug = false
@@ -94,23 +95,114 @@ func (c *Config) DataDir() string {
 	return ExpandPath(c.DataDirectory)
 }
 
-func (c *Config) applyEnvOverrides() {
-	if host := os.Getenv("OTUI_OLLAMA_HOST"); host != "" {
-		c.OllamaHost = host
-		// Also update Providers[].BaseURL for Ollama
-		for i := range c.Providers {
-			if c.Providers[i].ID == "ollama" {
-				c.Providers[i].BaseURL = host
-				break
-			}
+// applyUserConfig copies the profile's config.toml settings and fills in
+// defaults and migrations
+func (c *Config) applyUserConfig(userCfg *UserConfig) {
+	c.OllamaHost = userCfg.Ollama.Host
+	c.DefaultModel = userCfg.DefaultModel // Read from top-level first
+	c.DefaultProvider = userCfg.DefaultProvider
+	c.LastUsedProvider = userCfg.LastUsedProvider
+	c.DefaultSystemPrompt = userCfg.DefaultSystemPrompt
+	c.PluginsEnabled = userCfg.PluginsEnabled
+	c.Security = userCfg.Security
+	c.Providers = userCfg.Providers
+	c.AllowedTools = userCfg.AllowedTools
+	c.RequireApproval = userCfg.RequireApproval
+	c.MaxIterations = userCfg.MaxIterations
+	c.EnableMultiStep = userCfg.EnableMultiStep
+	c.NotifyOnComplete = userCfg.NotifyOnComplete
+	c.Compaction = userCfg.Compaction
+	c.ModelContextOverrides = userCfg.ModelContextOverrides
+
+	// Set defaults for multi-step execution (Phase 2)
+	if c.MaxIterations == 0 {
+		c.MaxIterations = 10
+	}
+
+	// Set defaults for compaction if not specified
+	if c.Compaction.AutoCompactThreshold == 0 {
+		c.Compaction.AutoCompactThreshold = 0.75
+	}
+	if c.Compaction.KeepPercentage == 0 {
+		c.Compaction.KeepPercentage = 0.50
+	}
+	if c.Compaction.WarnAtPercentage == 0 {
+		c.Compaction.WarnAtPercentage = 0.85
+	}
+
+	// MIGRATION: Move Ollama.DefaultModel to top-level if needed
+	if c.DefaultModel == "" && userCfg.Ollama.DefaultModel != "" {
+		c.DefaultModel = userCfg.Ollama.DefaultModel
+		if Debug && DebugLog != nil {
+			DebugLog.Printf("[Config] Migrated default_model from [ollama] to top-level: %s", c.DefaultModel)
 		}
 	}
-	if model := os.Getenv("OTUI_OLLAMA_MODEL"); model != "" {
-		c.DefaultModel = model
+
+	// Set default provider if not specified
+	if c.DefaultProvider == "" {
+		// Infer from enabled providers or default to "ollama"
+		if len(c.Providers) > 0 && c.Providers[0].Enabled {
+			c.DefaultProvider = c.Providers[0].ID
+		}
+		if c.DefaultProvider == "" {
+			c.DefaultProvider = "ollama"
+		}
+		if Debug && DebugLog != nil {
+			DebugLog.Printf("[Config] Set default_provider to: %s", c.DefaultProvider)
+		}
 	}
-	if dataDir := os.Getenv("OTUI_DATA_DIR"); dataDir != "" {
-		c.DataDirectory = dataDir
+
+	// Set last_used_provider if not specified (same as default)
+	if c.LastUsedProvider == "" {
+		c.LastUsedProvider = c.DefaultProvider
 	}
+}
+
+// applyEnvConfig makes the env provider/model/endpoint the defaults.
+// Only changes the in-memory config.
+func (c *Config) applyEnvConfig(env *EnvConfig) {
+	c.DataDirectory = env.DataDir
+	c.DefaultProvider = env.Provider
+	c.LastUsedProvider = env.Provider
+	c.DefaultModel = env.Model
+
+	if env.Provider == "ollama" {
+		c.OllamaHost = env.BaseURL
+	}
+
+	// Copy so the profile's provider list isn't shared with UserConfig
+	providers := append([]ProviderConfig(nil), c.Providers...)
+	found := false
+	for i := range providers {
+		if providers[i].ID == env.Provider {
+			providers[i].Enabled = true
+			providers[i].BaseURL = env.BaseURL
+			found = true
+			break
+		}
+	}
+	if !found {
+		providers = append(providers, ProviderConfig{
+			ID:      env.Provider,
+			Name:    getProviderDisplayName(env.Provider),
+			Enabled: true,
+			BaseURL: env.BaseURL,
+		})
+	}
+	c.Providers = providers
+}
+
+// APIKey returns the API key for a provider: OTUI_API_KEY for the env
+// provider if set, otherwise the stored credential. The env key is never
+// put into the CredentialStore, so it can't end up on disk.
+func (c *Config) APIKey(providerID string) string {
+	if c.Env != nil && c.Env.Provider == providerID && c.Env.APIKey != "" {
+		return c.Env.APIKey
+	}
+	if c.CredentialStore == nil {
+		return ""
+	}
+	return c.CredentialStore.Get(providerID)
 }
 
 func CheckDebug() bool {
@@ -171,31 +263,6 @@ func InitDebugLog(dataDir string) {
 	DebugLog.Printf("Log path: %s", logPath)
 }
 
-func HasAllEnvVars() bool {
-	return os.Getenv("OTUI_OLLAMA_HOST") != "" &&
-		os.Getenv("OTUI_OLLAMA_MODEL") != "" &&
-		os.Getenv("OTUI_DATA_DIR") != ""
-}
-
-func HasAnyEnvVar() bool {
-	return os.Getenv("OTUI_OLLAMA_HOST") != "" ||
-		os.Getenv("OTUI_OLLAMA_MODEL") != "" ||
-		os.Getenv("OTUI_DATA_DIR") != ""
-}
-
-func GetMissingEnvVar() string {
-	if os.Getenv("OTUI_OLLAMA_HOST") == "" {
-		return "OTUI_OLLAMA_HOST"
-	}
-	if os.Getenv("OTUI_OLLAMA_MODEL") == "" {
-		return "OTUI_OLLAMA_MODEL"
-	}
-	if os.Getenv("OTUI_DATA_DIR") == "" {
-		return "OTUI_DATA_DIR"
-	}
-	return ""
-}
-
 func Load() (*Config, error) {
 	cfg := &Config{
 		DataDirectory: "~/.local/share/otui",
@@ -203,150 +270,33 @@ func Load() (*Config, error) {
 		DefaultModel:  "llama3.1:latest",
 	}
 
-	settingsPath := GetSettingsFilePath()
-	settingsExist := FileExists(settingsPath)
+	// Environment variables (e.g. in containers) override the profile
+	env, err := ReadEnvConfig()
+	if err != nil {
+		return nil, err
+	}
+	cfg.Env = env
 
-	if settingsExist {
-		systemCfg, err := LoadSystemConfig()
-		if err != nil {
-			return nil, fmt.Errorf("failed to load system config: %w", err)
-		}
-		cfg.DataDirectory = systemCfg.DataDirectory
-
-		dataDir := cfg.DataDir()
-		userCfg, err := LoadUserConfig(dataDir)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load user config: %w", err)
-		}
-		cfg.OllamaHost = userCfg.Ollama.Host
-		cfg.DefaultModel = userCfg.DefaultModel         // Read from top-level first
-		cfg.DefaultProvider = userCfg.DefaultProvider   // NEW
-		cfg.LastUsedProvider = userCfg.LastUsedProvider // NEW
-		cfg.DefaultSystemPrompt = userCfg.DefaultSystemPrompt
-		cfg.PluginsEnabled = userCfg.PluginsEnabled
-		cfg.Security = userCfg.Security
-		cfg.Providers = userCfg.Providers
-		cfg.AllowedTools = userCfg.AllowedTools
-		cfg.RequireApproval = userCfg.RequireApproval
-		cfg.MaxIterations = userCfg.MaxIterations
-		cfg.EnableMultiStep = userCfg.EnableMultiStep
-		cfg.NotifyOnComplete = userCfg.NotifyOnComplete
-		cfg.Compaction = userCfg.Compaction
-		cfg.ModelContextOverrides = userCfg.ModelContextOverrides
-
-		// Set defaults for multi-step execution (Phase 2)
-		if cfg.MaxIterations == 0 {
-			cfg.MaxIterations = 10
-		}
-
-		// Set defaults for compaction if not specified
-		if cfg.Compaction.AutoCompactThreshold == 0 {
-			cfg.Compaction.AutoCompactThreshold = 0.75
-		}
-		if cfg.Compaction.KeepPercentage == 0 {
-			cfg.Compaction.KeepPercentage = 0.50
-		}
-		if cfg.Compaction.WarnAtPercentage == 0 {
-			cfg.Compaction.WarnAtPercentage = 0.85
-		}
-
-		// MIGRATION: Move Ollama.DefaultModel to top-level if needed
-		if cfg.DefaultModel == "" && userCfg.Ollama.DefaultModel != "" {
-			cfg.DefaultModel = userCfg.Ollama.DefaultModel
-			if Debug && DebugLog != nil {
-				DebugLog.Printf("[Config] Migrated default_model from [ollama] to top-level: %s", cfg.DefaultModel)
-			}
-		}
-
-		// Set default provider if not specified
-		if cfg.DefaultProvider == "" {
-			// Infer from enabled providers or default to "ollama"
-			if len(cfg.Providers) > 0 && cfg.Providers[0].Enabled {
-				cfg.DefaultProvider = cfg.Providers[0].ID
-			}
-			if cfg.DefaultProvider == "" {
-				cfg.DefaultProvider = "ollama"
-			}
-			if Debug && DebugLog != nil {
-				DebugLog.Printf("[Config] Set default_provider to: %s", cfg.DefaultProvider)
-			}
-		}
-
-		// Set last_used_provider if not specified (same as default)
-		if cfg.LastUsedProvider == "" {
-			cfg.LastUsedProvider = cfg.DefaultProvider
-		}
-	} else if HasAllEnvVars() {
-		cfg.applyEnvOverrides()
+	// Data directory: OTUI_DATA_DIR, else settings.toml (created if missing)
+	if env != nil {
+		cfg.DataDirectory = env.DataDir
 	} else {
 		systemCfg, err := LoadSystemConfig()
 		if err != nil {
 			return nil, fmt.Errorf("failed to load system config: %w", err)
 		}
 		cfg.DataDirectory = systemCfg.DataDirectory
+	}
 
-		dataDir := cfg.DataDir()
-		userCfg, err := LoadUserConfig(dataDir)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load user config: %w", err)
-		}
-		cfg.OllamaHost = userCfg.Ollama.Host
-		cfg.DefaultModel = userCfg.DefaultModel         // Read from top-level first
-		cfg.DefaultProvider = userCfg.DefaultProvider   // NEW
-		cfg.LastUsedProvider = userCfg.LastUsedProvider // NEW
-		cfg.DefaultSystemPrompt = userCfg.DefaultSystemPrompt
-		cfg.PluginsEnabled = userCfg.PluginsEnabled
-		cfg.Security = userCfg.Security
-		cfg.Providers = userCfg.Providers
-		cfg.AllowedTools = userCfg.AllowedTools
-		cfg.RequireApproval = userCfg.RequireApproval
-		cfg.MaxIterations = userCfg.MaxIterations
-		cfg.EnableMultiStep = userCfg.EnableMultiStep
-		cfg.NotifyOnComplete = userCfg.NotifyOnComplete
-		cfg.Compaction = userCfg.Compaction
-		cfg.ModelContextOverrides = userCfg.ModelContextOverrides
+	userCfg, err := LoadUserConfig(cfg.DataDir())
+	if err != nil {
+		return nil, fmt.Errorf("failed to load user config: %w", err)
+	}
+	cfg.applyUserConfig(userCfg)
 
-		// Set defaults for multi-step execution (Phase 2)
-		if cfg.MaxIterations == 0 {
-			cfg.MaxIterations = 10
-		}
-
-		// Set defaults for compaction if not specified
-		if cfg.Compaction.AutoCompactThreshold == 0 {
-			cfg.Compaction.AutoCompactThreshold = 0.75
-		}
-		if cfg.Compaction.KeepPercentage == 0 {
-			cfg.Compaction.KeepPercentage = 0.50
-		}
-		if cfg.Compaction.WarnAtPercentage == 0 {
-			cfg.Compaction.WarnAtPercentage = 0.85
-		}
-
-		// MIGRATION: Move Ollama.DefaultModel to top-level if needed
-		if cfg.DefaultModel == "" && userCfg.Ollama.DefaultModel != "" {
-			cfg.DefaultModel = userCfg.Ollama.DefaultModel
-			if Debug && DebugLog != nil {
-				DebugLog.Printf("[Config] Migrated default_model from [ollama] to top-level: %s", cfg.DefaultModel)
-			}
-		}
-
-		// Set default provider if not specified
-		if cfg.DefaultProvider == "" {
-			if len(cfg.Providers) > 0 && cfg.Providers[0].Enabled {
-				cfg.DefaultProvider = cfg.Providers[0].ID
-			}
-			if cfg.DefaultProvider == "" {
-				cfg.DefaultProvider = "ollama"
-			}
-			if Debug && DebugLog != nil {
-				DebugLog.Printf("[Config] Set default_provider to: %s", cfg.DefaultProvider)
-			}
-		}
-
-		// Set last_used_provider if not specified (same as default)
-		if cfg.LastUsedProvider == "" {
-			cfg.LastUsedProvider = cfg.DefaultProvider
-		}
+	// Env values win over the profile (in memory only, never saved)
+	if env != nil {
+		cfg.applyEnvConfig(env)
 	}
 
 	dataDir := cfg.DataDir()

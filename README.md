@@ -191,22 +191,33 @@ Last but not least all API keys are stored encrypted at rest with an ssh keypair
 
 **Environment Variables:**
 
-OTUI falls back on environment variables for configuration (Ollama only) so that one can just set env var without using the TUI to setup:
+OTUI can be configured with environment variables instead of the setup screens, which is handy for running it in an OCI container:
+
+| Variable | |
+|---|---|
+| `OTUI_DATA_DIR` | Data directory (profile) - required |
+| `OTUI_PROVIDER` | `ollama`, `openai-compatible`, `openrouter`, `openai` or `anthropic` - required |
+| `OTUI_MODEL` | Default model - required |
+| `OTUI_BASE_URL` | Server URL - required for `ollama` and `openai-compatible` |
+| `OTUI_API_KEY` | API key - needed for `openrouter`, `openai` and `anthropic` unless already stored in the data directory |
 
 ```bash
-# Set your Ollama server URL (ex: http://localhost:11434)
-export OTUI_OLLAMA_HOST=http://your-ollama-server:11434
+# Ollama
+OTUI_DATA_DIR=~/.local/share/otui OTUI_PROVIDER=ollama \
+  OTUI_BASE_URL=http://localhost:11434 OTUI_MODEL=qwen3.5:9b otui
 
-# Set your preferred model (ex: llama3.2:latest)
-export OTUI_OLLAMA_MODEL=qwen2.5:latest
+# llama.cpp (or any other OpenAI compatible server)
+OTUI_DATA_DIR=~/.local/share/otui OTUI_PROVIDER=openai-compatible \
+  OTUI_BASE_URL=http://localhost:8080/v1 OTUI_MODEL=Qwen3.6-27B-Q4_K_M otui
 
-# Set your preferred data dir location (ex: ~/.local/share/otui)
-export OTUI_DATA_DIR=/path/to/your/data/dir
-
-# Run OTUI
-./otui
+# OpenRouter
+OTUI_DATA_DIR=~/.local/share/otui OTUI_PROVIDER=openrouter \
+  OTUI_MODEL=qwen/qwen3.8-27b OTUI_API_KEY=sk-or-... otui
 ```
-This can be useful if you wanted to run OTUI in an OCI container by just setting the environment variables on launch.
+
+When set, they take precedence over the saved configuration: the setup wizard is skipped, the data directory comes from `OTUI_DATA_DIR`, and the provider, model and endpoint become the defaults. Other settings in that data directory's `config.toml` (system prompt, plugins, other providers, etc.) still apply. Nothing from the environment is saved to disk (including `OTUI_API_KEY`), and the data directory can't be switched from Settings while `OTUI_DATA_DIR` is set.
+
+`OTUI_OLLAMA_HOST` and `OTUI_OLLAMA_MODEL` from earlier versions still work (as `OTUI_PROVIDER=ollama`) but are deprecated.
 
 #### 🤖 MCP Plugins Registry and Plugins System
 

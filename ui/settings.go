@@ -47,6 +47,10 @@ type dataDirectoryNotFoundMsg struct {
 	path string
 }
 
+// dataDirPinnedMessage is shown when trying to change the data directory while
+// it's set through the environment
+const dataDirPinnedMessage = "The data directory is set by the OTUI_DATA_DIR\nenvironment variable and can't be changed here."
+
 func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if config.DebugLog != nil {
 		config.DebugLog.Printf("[Settings] ========== handleSettingsInput CALLED ==========")
@@ -518,6 +522,15 @@ func (a AppView) handleSettingsNavigationMode(msg tea.KeyMsg) (tea.Model, tea.Cm
 		return a, nil
 
 	case "enter":
+		// Data directory is pinned when configured through OTUI_DATA_DIR
+		if a.settingsFields[a.selectedSettingIdx].Type == SettingTypeDataDir && a.dataModel.Config.Env != nil {
+			a.showAcknowledgeModal = true
+			a.acknowledgeModalTitle = "Data Directory"
+			a.acknowledgeModalMsg = dataDirPinnedMessage
+			a.acknowledgeModalType = ModalTypeInfo
+			return a, nil
+		}
+
 		// Check if this is the provider link field - open provider settings sub-screen
 		if a.settingsFields[a.selectedSettingIdx].Type == SettingTypeProviderLink {
 			a.providerSettingsState.visible = true
@@ -585,6 +598,14 @@ func (a AppView) handleSettingsNavigationMode(msg tea.KeyMsg) (tea.Model, tea.Cm
 		return a, textinput.Blink
 
 	case "r":
+		if a.settingsFields[a.selectedSettingIdx].Type == SettingTypeDataDir && a.dataModel.Config.Env != nil {
+			a.showAcknowledgeModal = true
+			a.acknowledgeModalTitle = "Data Directory"
+			a.acknowledgeModalMsg = dataDirPinnedMessage
+			a.acknowledgeModalType = ModalTypeInfo
+			return a, nil
+		}
+
 		// Reset to default
 		a.settingsFields[a.selectedSettingIdx].Value = a.settingsFields[a.selectedSettingIdx].DefaultValue
 		a.settingsFields[a.selectedSettingIdx].Validation = FieldValidationNone

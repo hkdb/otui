@@ -17,11 +17,13 @@ fix_vol_owner "$data"
 fix_vol_owner "$conf"
 fix_vol_owner "$keys"
 
+# OTUI_* settings are passed with --preserve-env rather than on the command
+# line so OTUI_API_KEY doesn't show up in the process list
+export OTUI_EDITOR OTUI_DATA_DIR OTUI_PROVIDER OTUI_MODEL OTUI_BASE_URL OTUI_API_KEY \
+  OTUI_OLLAMA_HOST OTUI_OLLAMA_MODEL
+
 exec sudo -u otui -H \
+  --preserve-env=OTUI_EDITOR,OTUI_DATA_DIR,OTUI_PROVIDER,OTUI_MODEL,OTUI_BASE_URL,OTUI_API_KEY,OTUI_OLLAMA_HOST,OTUI_OLLAMA_MODEL \
   PATH="/home/otui/.nvm/versions/node/v22.21.1/bin:$PATH" \
   NVM_DIR="/home/otui/.nvm" \
-  OTUI_EDITOR="${OTUI_EDITOR}" \
-  OTUI_OLLAMA_HOST="${OTUI_OLLAMA_HOST}" \
-  OTUI_OLLAMA_MODEL="${OTUI_OLLAMA_MODEL}" \
-  OTUI_DATA_DIR="${OTUI_DATA_DIR}" \
   /home/otui/.local/bin/otui

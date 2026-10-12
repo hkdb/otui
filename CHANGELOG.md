@@ -5,6 +5,7 @@
 ** Features: **
 
 - Added "OpenAI Compatible" provider for llama.cpp, vLLM, LM Studio and any other OpenAI API compatible server (configurable base URL, optional API key) - [#2](https://github.com/hkdb/otui/issues/2)
+- Environment variable configuration now works with any provider: `OTUI_DATA_DIR`, `OTUI_PROVIDER`, `OTUI_MODEL`, `OTUI_BASE_URL`, `OTUI_API_KEY` (see README). `OTUI_OLLAMA_HOST`/`OTUI_OLLAMA_MODEL` still work but are deprecated
 
 ** Maintenance & Bug Fixes: **
 
@@ -20,6 +21,8 @@
 - Context usage % now updates when the model or its context window changes
 - Fixed crash on startup after entering the correct passphrase for a passphrase protected SSH key (also when switching to such a data directory in Settings)
 - Fixed the startup passphrase prompt repeating forever without explanation: a wrong passphrase now shows "Incorrect passphrase", and other credential errors (e.g. credentials encrypted with a different SSH key) show an error instead of prompting again
+- Fixed environment variable configuration being ignored: the setup wizard ran anyway and the variables had no effect once a config existed (broken since v0.02.00). The variables now take precedence over the saved configuration and are never written to disk; `OTUI_API_KEY` is not stored in credentials
+- Container entrypoint passes the OTUI_* variables without exposing the API key in the process list
 - Fixed crashes when the terminal is small or resized very small (model selector, session manager, settings, code blocks, chat view); below 40×12 a "Terminal too small" message is shown instead
 - Model and session lists adapt to narrow terminals (names keep at least 10 columns, less important columns are dropped instead of wrapping)
 - Fixed long names with non-ASCII characters or emoji being cut in the middle of a character

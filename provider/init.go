@@ -53,11 +53,8 @@ func InitializeProviders(cfg *config.Config) map[string]model.Provider {
 			continue
 		}
 
-		// Get API key from credential store
-		apiKey := ""
-		if cfg.CredentialStore != nil {
-			apiKey = cfg.CredentialStore.Get(providerCfg.ID)
-		}
+		// Get API key (OTUI_API_KEY for the env provider, else credential store)
+		apiKey := cfg.APIKey(providerCfg.ID)
 
 		// Map provider ID to Type (handles openrouter→openai mapping)
 		providerType := MapProviderIDToType(providerCfg.ID)
@@ -90,10 +87,7 @@ func InitializeProviders(cfg *config.Config) map[string]model.Provider {
 // initializeOllama creates the Ollama provider instance.
 // Returns nil if initialization fails (allows offline mode).
 func initializeOllama(cfg *config.Config) model.Provider {
-	apiKey := ""
-	if cfg.CredentialStore != nil {
-		apiKey = cfg.CredentialStore.Get("ollama")
-	}
+	apiKey := cfg.APIKey("ollama")
 
 	providerCfg := Config{
 		Type:    ProviderTypeOllama,
