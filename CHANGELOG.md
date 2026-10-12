@@ -22,6 +22,7 @@
 - Fixed crash on startup after entering the correct passphrase for a passphrase protected SSH key (also when switching to such a data directory in Settings)
 - Fixed the startup passphrase prompt repeating forever without explanation: a wrong passphrase now shows "Incorrect passphrase", and other credential errors (e.g. credentials encrypted with a different SSH key) show an error instead of prompting again
 - Fixed environment variable configuration being ignored: the setup wizard ran anyway and the variables had no effect once a config existed (broken since v0.02.00). The variables now take precedence over the saved configuration and are never written to disk; `OTUI_API_KEY` is not stored in credentials
+- Fixed hand edits to the generated `config.toml` being ignored: `require_approval`, `max_iterations`, `default_system_prompt`, `plugins_enabled`, `enable_multi_step`, `notify_on_complete` and `allowed_tools` were written under `[ollama]`. New files put them at the top level, and existing files with the old layout are read correctly without being rewritten
 - Container entrypoint passes the OTUI_* variables without exposing the API key in the process list
 - Fixed crashes when the terminal is small or resized very small (model selector, session manager, settings, code blocks, chat view); below 40×12 a "Terminal too small" message is shown instead
 - Model and session lists adapt to narrow terminals (names keep at least 10 columns, less important columns are dropped instead of wrapping)

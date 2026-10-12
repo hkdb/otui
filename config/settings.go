@@ -52,19 +52,21 @@ func LoadUserConfig(dataDir string) (*UserConfig, error) {
 		return nil, fmt.Errorf("failed to read user config: %w", err)
 	}
 
-	_, err = toml.DecodeFile(userConfigPath, cfg)
+	md, err := toml.DecodeFile(userConfigPath, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse user config: %w", err)
 	}
 
+	// Older config templates put some top-level settings after [ollama], so
+	// TOML read them as ollama.* and they were ignored - honor them
+	applyMisplacedOllamaKeys(userConfigPath, md, cfg)
+
 	// MIGRATION: Add enable_multi_step if not present (Phase 2 feature)
 	if !strings.Contains(string(content), "enable_multi_step") {
-		// Append to config file
-		migration := "\n# Multi-step execution (Phase 2)\nenable_multi_step = true\nmax_iterations = 10\n"
-		f, err := os.OpenFile(userConfigPath, os.O_APPEND|os.O_WRONLY, 0600)
-		if err == nil {
-			f.WriteString(migration)
-			f.Close()
+		// Insert as top-level keys (before the first table, so TOML doesn't
+		// put them in whatever table comes last)
+		migration := "# Multi-step execution (Phase 2)\nenable_multi_step = true\nmax_iterations = 10\n\n"
+		if err := os.WriteFile(userConfigPath, []byte(insertBeforeFirstTable(string(content), migration)), 0600); err == nil {
 			if Debug && DebugLog != nil {
 				DebugLog.Printf("[Config] Migrated: added enable_multi_step and max_iterations to config")
 			}
@@ -89,6 +91,86 @@ func LoadUserConfig(dataDir string) (*UserConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+// misplacedOllamaKeys are top-level settings that older config templates
+// wrote after the [ollama] header
+type misplacedOllamaKeys struct {
+	Ollama struct {
+		DefaultSystemPrompt *string  `toml:"default_system_prompt"`
+		PluginsEnabled      *bool    `toml:"plugins_enabled"`
+		RequireApproval     *bool    `toml:"require_approval"`
+		AllowedTools        []string `toml:"allowed_tools"`
+		EnableMultiStep     *bool    `toml:"enable_multi_step"`
+		MaxIterations       *int     `toml:"max_iterations"`
+		NotifyOnComplete    *bool    `toml:"notify_on_complete"`
+	} `toml:"ollama"`
+}
+
+// applyMisplacedOllamaKeys applies settings found under [ollama] that belong
+// at the top level. A correctly placed top-level key always wins. Only the
+// in-memory config changes; the file (and its comments) is left alone.
+func applyMisplacedOllamaKeys(path string, md toml.MetaData, cfg *UserConfig) {
+	if !md.IsDefined("ollama") {
+		return
+	}
+
+	var misplaced misplacedOllamaKeys
+	if _, err := toml.DecodeFile(path, &misplaced); err != nil {
+		return
+	}
+	o := misplaced.Ollama
+
+	var applied []string
+	use := func(key string, isSet bool) bool {
+		if !isSet || md.IsDefined(key) {
+			return false
+		}
+		applied = append(applied, key)
+		return true
+	}
+
+	if use("default_system_prompt", o.DefaultSystemPrompt != nil) {
+		cfg.DefaultSystemPrompt = *o.DefaultSystemPrompt
+	}
+	if use("plugins_enabled", o.PluginsEnabled != nil) {
+		cfg.PluginsEnabled = *o.PluginsEnabled
+	}
+	if use("require_approval", o.RequireApproval != nil) {
+		cfg.RequireApproval = *o.RequireApproval
+	}
+	if use("allowed_tools", o.AllowedTools != nil) {
+		cfg.AllowedTools = o.AllowedTools
+	}
+	if use("enable_multi_step", o.EnableMultiStep != nil) {
+		cfg.EnableMultiStep = *o.EnableMultiStep
+	}
+	if use("max_iterations", o.MaxIterations != nil) {
+		cfg.MaxIterations = *o.MaxIterations
+	}
+	if use("notify_on_complete", o.NotifyOnComplete != nil) {
+		cfg.NotifyOnComplete = *o.NotifyOnComplete
+	}
+
+	if len(applied) > 0 && DebugLog != nil {
+		DebugLog.Printf("[Config] Applied settings found under [ollama] as top-level: %s", strings.Join(applied, ", "))
+	}
+}
+
+// insertBeforeFirstTable inserts text before the first [table] header in a
+// TOML document, so it's parsed as top-level keys. Appends if there's no table.
+func insertBeforeFirstTable(content, text string) string {
+	offset := 0
+	for _, line := range strings.SplitAfter(content, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "[") {
+			return content[:offset] + text + content[offset:]
+		}
+		offset += len(line)
+	}
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	return content + "\n" + text
 }
 
 // needsWizardDefaultsRepair detects the zero values written by the old

@@ -62,10 +62,6 @@ default_model = "llama3.1:latest"
 # Last used provider (automatically updated when switching models)
 last_used_provider = "ollama"
 
-[ollama]
-# Ollama server URL
-host = "http://localhost:11434"
-
 # Default system prompt for new sessions (optional)
 default_system_prompt = ""
 
@@ -88,6 +84,13 @@ max_iterations = 10       # Maximum steps per user message
 # Works in native, Flatpak, and Docker containers
 # Configure your terminal emulator to show visual notifications on bell
 notify_on_complete = false
+
+# Settings above this line must stay before the first [table] header,
+# otherwise TOML puts them in that table and they're ignored
+
+[ollama]
+# Ollama server URL
+host = "http://localhost:11434"
 
 # Context Window Management
 [compaction]
