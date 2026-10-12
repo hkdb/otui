@@ -488,7 +488,7 @@ func (a AppView) handleNewSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) 
 			a.newSessionEnabledPlugins = []string{}
 			a.textarea.Reset()
 			a.updateViewportContent(true)
-			return a, nil
+			return a, a.dataModel.RefreshModelMetadataCmd()
 		}
 
 	case "alt+enter":
@@ -524,7 +524,7 @@ func (a AppView) handleNewSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) 
 		a.newSessionEnabledPlugins = []string{}
 		a.textarea.Reset()
 		a.updateViewportContent(true)
-		return a, nil
+		return a, a.dataModel.RefreshModelMetadataCmd()
 	}
 
 	// Update focused input field with the key (for fields 0 and 1)

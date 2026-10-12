@@ -92,3 +92,12 @@ func (m *MockProvider) GetModelMetadata(ctx context.Context, modelName string) (
 		SupportsTools: true,
 	}, nil
 }
+
+func (m *MockProvider) FallbackModelMetadata(modelName string) model.ModelMetadata {
+	return model.ModelMetadata{
+		ContextWindow: 4096,
+		MaxOutput:     4096,
+		SupportsTools: true,
+		Source:        model.MetadataSourceFallback,
+	}
+}

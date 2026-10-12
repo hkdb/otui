@@ -2,6 +2,8 @@ package config
 
 import (
 	"crypto/rand"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -318,5 +320,141 @@ func TestGetSettingsFilePath(t *testing.T) {
 	}
 	if !strings.Contains(path, "otui") {
 		t.Errorf("expected path to contain 'otui', got %q", path)
+	}
+}
+
+func TestUpdateProviderFieldOpenAICompatible(t *testing.T) {
+	dataDir := t.TempDir()
+	const customURL = "http://gpu-box:8000/v1"
+
+	// Same order the provider settings screen saves fields in
+	if err := UpdateProviderField(dataDir, "openai-compatible", "base_url", customURL); err != nil {
+		t.Fatalf("update base_url: %v", err)
+	}
+	if err := UpdateProviderField(dataDir, "openai-compatible", "enabled", "true"); err != nil {
+		t.Fatalf("update enabled: %v", err)
+	}
+
+	cfg, err := LoadUserConfig(dataDir)
+	if err != nil {
+		t.Fatalf("LoadUserConfig: %v", err)
+	}
+
+	var found *ProviderConfig
+	for i := range cfg.Providers {
+		if cfg.Providers[i].ID == "openai-compatible" {
+			if found != nil {
+				t.Fatal("duplicate openai-compatible provider entries")
+			}
+			found = &cfg.Providers[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("openai-compatible provider not saved")
+	}
+	if !found.Enabled {
+		t.Error("expected provider to be enabled")
+	}
+	if found.BaseURL != customURL {
+		t.Errorf("BaseURL = %q, want %q (enabled must not reset it)", found.BaseURL, customURL)
+	}
+	if got := GetProviderBaseURL(cfg.Providers, "openai-compatible"); got != customURL {
+		t.Errorf("GetProviderBaseURL = %q, want %q", got, customURL)
+	}
+
+	// Empty value falls back to the default endpoint
+	if err := UpdateProviderField(dataDir, "openai-compatible", "base_url", ""); err != nil {
+		t.Fatalf("update empty base_url: %v", err)
+	}
+	cfg, _ = LoadUserConfig(dataDir)
+	if got := GetProviderBaseURL(cfg.Providers, "openai-compatible"); got != DefaultOpenAICompatibleBaseURL {
+		t.Errorf("GetProviderBaseURL = %q, want default %q", got, DefaultOpenAICompatibleBaseURL)
+	}
+
+	// base_url is only valid for the compatible provider
+	if err := UpdateProviderField(dataDir, "openai", "base_url", customURL); err == nil {
+		t.Error("expected error setting base_url on openai provider")
+	}
+}
+
+// buggyWizardConfig is what the old "Custom Settings" wizard wrote
+const buggyWizardConfig = `default_provider = "ollama"
+default_model = "llama3.1:latest"
+last_used_provider = "ollama"
+plugins_enabled = false
+require_approval = false
+max_iterations = 0
+enable_multi_step = false
+notify_on_complete = false
+
+[ollama]
+  host = "http://localhost:11434"
+
+[security]
+  credential_storage = "plaintext"
+
+[compaction]
+  auto_compact = false
+  auto_compact_threshold = 0.0
+  keep_percentage = 0.0
+  warn_at_percentage = 0.0
+`
+
+func TestLoadUserConfigRepairsWizardDefaults(t *testing.T) {
+	dataDir := t.TempDir()
+	configPath := filepath.Join(dataDir, "config.toml")
+	if err := os.WriteFile(configPath, []byte(buggyWizardConfig), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	check := func(t *testing.T, cfg *UserConfig) {
+		t.Helper()
+		if !cfg.RequireApproval {
+			t.Error("RequireApproval = false, want true")
+		}
+		if !cfg.EnableMultiStep {
+			t.Error("EnableMultiStep = false, want true")
+		}
+		if cfg.MaxIterations != 10 {
+			t.Errorf("MaxIterations = %d, want 10", cfg.MaxIterations)
+		}
+		if cfg.Compaction.AutoCompactThreshold != 0.75 || cfg.Compaction.KeepPercentage != 0.50 || cfg.Compaction.WarnAtPercentage != 0.85 {
+			t.Errorf("Compaction = %+v, want default thresholds", cfg.Compaction)
+		}
+		if cfg.DefaultModel != "llama3.1:latest" || cfg.Ollama.Host != "http://localhost:11434" {
+			t.Errorf("unrelated settings changed: model=%q host=%q", cfg.DefaultModel, cfg.Ollama.Host)
+		}
+	}
+
+	cfg, err := LoadUserConfig(dataDir)
+	if err != nil {
+		t.Fatalf("LoadUserConfig: %v", err)
+	}
+	check(t, cfg)
+
+	// The repair must be persisted to disk
+	onDisk, err := LoadUserConfigFromPath(configPath)
+	if err != nil {
+		t.Fatalf("LoadUserConfigFromPath: %v", err)
+	}
+	check(t, onDisk)
+}
+
+func TestLoadUserConfigKeepsDeliberateApprovalOff(t *testing.T) {
+	dataDir := t.TempDir()
+	content := strings.NewReplacer(
+		"max_iterations = 0", "max_iterations = 10",
+		"enable_multi_step = false", "enable_multi_step = true",
+	).Replace(buggyWizardConfig)
+	if err := os.WriteFile(filepath.Join(dataDir, "config.toml"), []byte(content), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadUserConfig(dataDir)
+	if err != nil {
+		t.Fatalf("LoadUserConfig: %v", err)
+	}
+	if cfg.RequireApproval {
+		t.Error("RequireApproval = true, want false (user's explicit choice)")
 	}
 }

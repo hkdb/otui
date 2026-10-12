@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased]
+
+** Features: **
+
+- Added "OpenAI Compatible" provider for llama.cpp, vLLM, LM Studio and any other OpenAI API compatible server (configurable base URL, optional API key) - [#2](https://github.com/hkdb/otui/issues/2)
+
+** Maintenance & Bug Fixes: **
+
+- Scroll position is kept when a response completes if you scrolled up while it was streaming
+- Locked sessions can now be force opened (D) when the lock was left behind by a crash, including the last session on startup
+- Fixed MCP tool names being rejected by OpenAI, Anthropic and OpenAI compatible APIs (namespaced tool names are now encoded the same way for every provider)
+- Fixed parameterless MCP tools sending an invalid schema to OpenAI compatible APIs
+- Sessions are now locked when restored on startup or newly created
+- Fixed the "Custom Settings" setup wizard saving `require_approval = false` (MCP tools ran without asking), `enable_multi_step = false`, `max_iterations = 0` and zeroed compaction thresholds instead of the defaults. Affected profiles are repaired automatically on the next launch
+- Added "Tool Approval" to the Settings screen to turn tool approval prompts on/off
+- Fixed context window ("max:" in the header) falling back to 8192 for most models: it's now queried from the server (Ollama loaded context / num_ctx / trained length, llama.cpp, vLLM, LM Studio, OpenRouter, Anthropic) instead of guessed from the model name
+- Context window lookups no longer block the UI and use the session's own provider
+- Context usage % now updates when the model or its context window changes
+
+---
+
 ## [v0.08.02] - 2026-04-13
 
 ** Feature: **

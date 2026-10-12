@@ -186,7 +186,7 @@ func (m *Model) SwitchModel(modelInfo ollama.ModelInfo) tea.Cmd {
 				modelInfo.Provider, modelInfo.Name)
 		}
 		m.Provider.SetModel(modelInfo.InternalName)
-		return nil
+		return m.RefreshModelMetadataCmd()
 	}
 
 	m.Provider = provider
@@ -197,7 +197,8 @@ func (m *Model) SwitchModel(modelInfo ollama.ModelInfo) tea.Cmd {
 			modelInfo.Name, modelInfo.Provider, modelInfo.InternalName)
 	}
 
-	return nil
+	// Fetch the new model's real context window in the background
+	return m.RefreshModelMetadataCmd()
 }
 
 // SwitchToDefaultProvider switches the active provider to the configured default.

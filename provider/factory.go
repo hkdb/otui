@@ -12,14 +12,15 @@ import (
 // the Config.Type field.
 //
 // Supported provider types:
-//   - ProviderTypeOllama: Local Ollama server (implemented)
-//   - ProviderTypeOpenAI: OpenAI API (not yet implemented)
-//   - ProviderTypeAnthropic: Anthropic API (not yet implemented)
+//   - ProviderTypeOllama: Local Ollama server
+//   - ProviderTypeOpenRouter: OpenRouter API
+//   - ProviderTypeOpenAI: OpenAI API
+//   - ProviderTypeOpenAICompatible: Any OpenAI API compatible server (llama.cpp, vLLM, etc.)
+//   - ProviderTypeAnthropic: Anthropic API
 //
 // Returns an error if:
 //   - The provider type is unknown
-//   - The provider type is not yet implemented
-//   - The provider-specific constructor fails (e.g., invalid URL)
+//   - The provider-specific constructor fails (e.g., missing API key)
 //
 // Example (Ollama):
 //
@@ -33,7 +34,7 @@ import (
 //	    log.Fatal(err)
 //	}
 //
-// Example (OpenAI - not yet implemented):
+// Example (OpenAI):
 //
 //	cfg := provider.Config{
 //	    Type:    provider.ProviderTypeOpenAI,
@@ -42,7 +43,6 @@ import (
 //	    APIKey:  "sk-...",
 //	}
 //	p, err := provider.NewProvider(cfg)
-//	// Returns error: "OpenAI provider not yet implemented"
 func NewProvider(cfg Config) (model.Provider, error) {
 	switch cfg.Type {
 	case ProviderTypeOllama:
@@ -51,6 +51,8 @@ func NewProvider(cfg Config) (model.Provider, error) {
 		return NewOpenRouterProvider(cfg.BaseURL, cfg.APIKey, cfg.Model)
 	case ProviderTypeOpenAI:
 		return NewOpenAIProvider(cfg.BaseURL, cfg.APIKey, cfg.Model)
+	case ProviderTypeOpenAICompatible:
+		return NewOpenAICompatibleProvider(cfg.BaseURL, cfg.APIKey, cfg.Model)
 	case ProviderTypeAnthropic:
 		return NewAnthropicProvider(cfg.BaseURL, cfg.APIKey, cfg.Model)
 	default:
@@ -67,6 +69,7 @@ func NewProvider(cfg Config) (model.Provider, error) {
 //   - "ollama" → ProviderTypeOllama
 //   - "openrouter" → ProviderTypeOpenAI (OpenRouter is OpenAI-compatible)
 //   - "openai" → ProviderTypeOpenAI
+//   - "openai-compatible" → ProviderTypeOpenAICompatible
 //   - "anthropic" → ProviderTypeAnthropic
 //
 // For unknown IDs, returns the ID cast as ProviderType (factory will error).
@@ -78,6 +81,8 @@ func MapProviderIDToType(id string) ProviderType {
 		return ProviderTypeOpenRouter
 	case "openai":
 		return ProviderTypeOpenAI
+	case "openai-compatible":
+		return ProviderTypeOpenAICompatible
 	case "anthropic":
 		return ProviderTypeAnthropic
 	default:

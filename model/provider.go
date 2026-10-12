@@ -40,8 +40,15 @@ type Provider interface {
 	Ping(ctx context.Context) error
 
 	// GetModelMetadata returns metadata for a specific model (context window, etc.)
-	// Fetches from provider API if available, falls back to hardcoded defaults
+	// Queries the provider's API where possible (may do network I/O, so never
+	// call it from View/Update - use Model.RefreshModelMetadataCmd) and falls
+	// back to hardcoded defaults.
 	GetModelMetadata(ctx context.Context, modelName string) (ModelMetadata, error)
+
+	// FallbackModelMetadata returns metadata from hardcoded tables only.
+	// Must not do any I/O - it's used for rendering until the real
+	// metadata has been fetched.
+	FallbackModelMetadata(modelName string) ModelMetadata
 }
 
 // ModelMetadata contains metadata about a model's capabilities
@@ -49,7 +56,11 @@ type ModelMetadata struct {
 	ContextWindow int
 	MaxOutput     int
 	SupportsTools bool
+	Source        string // Where ContextWindow came from (for debug logs), e.g. "ollama:/api/ps", "fallback"
 }
+
+// MetadataSourceFallback marks metadata that came from hardcoded tables
+const MetadataSourceFallback = "fallback"
 
 // StreamCallback is called for each chunk of streamed response.
 type StreamCallback func(chunk string, toolCalls []ToolCall) error

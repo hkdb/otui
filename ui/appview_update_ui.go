@@ -41,7 +41,8 @@ func (a AppView) handleUIMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		if msg.MessageIndex >= 0 && msg.MessageIndex < len(a.dataModel.Messages) {
 			a.dataModel.Messages[msg.MessageIndex].Rendered = msg.Rendered
 
-			gotoBottom := a.highlightedMessageIdx < 0
+			// Keep the user's position if they scrolled up to read
+			gotoBottom := a.highlightedMessageIdx < 0 && !a.userScrolledUp
 			a.updateViewportContent(gotoBottom)
 			if config.DebugLog != nil {
 				config.DebugLog.Printf("Viewport updated with rendered markdown (gotoBottom=%v)", gotoBottom)

@@ -74,7 +74,48 @@ func LoadUserConfig(dataDir string) (*UserConfig, error) {
 		cfg.MaxIterations = 10
 	}
 
+	// REPAIR: Profiles created with the "Custom Settings" wizard before this
+	// fix were saved with zero values instead of defaults (most importantly
+	// require_approval = false, which runs tools without asking)
+	if needsWizardDefaultsRepair(cfg) {
+		repairWizardDefaults(cfg)
+		if err := SaveUserConfig(cfg, dataDir); err != nil {
+			if DebugLog != nil {
+				DebugLog.Printf("[Config] Failed to save repaired wizard defaults: %v", err)
+			}
+		} else if DebugLog != nil {
+			DebugLog.Printf("[Config] Repaired wizard defaults: require_approval, enable_multi_step, max_iterations, compaction")
+		}
+	}
+
 	return cfg, nil
+}
+
+// needsWizardDefaultsRepair detects the zero values written by the old
+// "Custom Settings" wizard. No other code path writes this combination:
+// the Settings screen never changes max_iterations, so a user who turns
+// tool approval off still has max_iterations = 10.
+func needsWizardDefaultsRepair(cfg *UserConfig) bool {
+	return !cfg.RequireApproval && !cfg.EnableMultiStep && cfg.MaxIterations == 0
+}
+
+// repairWizardDefaults restores the defaults the old wizard failed to write
+func repairWizardDefaults(cfg *UserConfig) {
+	defaults := DefaultUserConfig()
+
+	cfg.RequireApproval = defaults.RequireApproval
+	cfg.EnableMultiStep = defaults.EnableMultiStep
+	cfg.MaxIterations = defaults.MaxIterations
+
+	if cfg.Compaction.AutoCompactThreshold == 0 {
+		cfg.Compaction.AutoCompactThreshold = defaults.Compaction.AutoCompactThreshold
+	}
+	if cfg.Compaction.KeepPercentage == 0 {
+		cfg.Compaction.KeepPercentage = defaults.Compaction.KeepPercentage
+	}
+	if cfg.Compaction.WarnAtPercentage == 0 {
+		cfg.Compaction.WarnAtPercentage = defaults.Compaction.WarnAtPercentage
+	}
 }
 
 // LoadUserConfigFromPath loads user config from a specific file path

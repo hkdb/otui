@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -127,6 +128,130 @@ func (c *Client) Ping(ctx context.Context) error {
 
 	_, err := c.client.List(ctx)
 	return err
+}
+
+// ModelContext describes a model's context window as reported by Ollama
+type ModelContext struct {
+	Loaded        int  // Context the model is loaded with right now (/api/ps), 0 if not loaded
+	Modelfile     int  // num_ctx set in the model's Modelfile (/api/show parameters), 0 if unset
+	Trained       int  // Model's trained context length (/api/show model_info), 0 if unknown
+	SupportsTools bool // Model reports the "tools" capability
+	HasShowInfo   bool // /api/show succeeded (Modelfile/Trained/SupportsTools are valid)
+}
+
+// Effective returns the context window Ollama will actually use for the
+// model: the loaded context, else the Modelfile num_ctx, else the trained
+// length. Ollama never runs a model with more than its trained length.
+// Returns 0 if unknown.
+func (mc ModelContext) Effective() (int, string) {
+	ctxLen, source := 0, ""
+	switch {
+	case mc.Loaded > 0:
+		ctxLen, source = mc.Loaded, "ollama:/api/ps"
+	case mc.Modelfile > 0:
+		ctxLen, source = mc.Modelfile, "ollama:modelfile num_ctx"
+	case mc.Trained > 0:
+		ctxLen, source = mc.Trained, "ollama:model_info"
+	}
+	if mc.Trained > 0 && ctxLen > mc.Trained {
+		ctxLen = mc.Trained
+	}
+	return ctxLen, source
+}
+
+// GetModelContext queries Ollama for a model's context window.
+// /api/ps reports the context of loaded models (Ollama 0.10+); /api/show
+// reports the trained length and any Modelfile num_ctx.
+func (c *Client) GetModelContext(ctx context.Context, modelName string) (ModelContext, error) {
+	var mc ModelContext
+
+	// Context of the loaded model (absent on older servers or if not loaded)
+	if running, err := c.client.ListRunning(ctx); err == nil {
+		for _, m := range running.Models {
+			if sameModelName(m.Name, modelName) || sameModelName(m.Model, modelName) {
+				mc.Loaded = m.ContextLength
+				break
+			}
+		}
+	}
+
+	show, err := c.client.Show(ctx, &api.ShowRequest{Model: modelName})
+	if err != nil {
+		if mc.Loaded > 0 {
+			return mc, nil
+		}
+		return mc, fmt.Errorf("failed to show model %s: %w", modelName, err)
+	}
+
+	mc.HasShowInfo = true
+	mc.Trained = trainedContextLength(show.ModelInfo)
+	mc.Modelfile = parseNumCtx(show.Parameters)
+	for _, capability := range show.Capabilities {
+		if string(capability) == "tools" {
+			mc.SupportsTools = true
+		}
+	}
+
+	return mc, nil
+}
+
+// sameModelName compares Ollama model names, treating a missing tag as ":latest"
+func sameModelName(a, b string) bool {
+	normalize := func(name string) string {
+		if name != "" && !strings.Contains(name[strings.LastIndex(name, "/")+1:], ":") {
+			return name + ":latest"
+		}
+		return name
+	}
+	return normalize(a) == normalize(b)
+}
+
+// trainedContextLength reads "<general.architecture>.context_length" from
+// /api/show model_info (e.g. "qwen3.context_length")
+func trainedContextLength(modelInfo map[string]any) int {
+	arch, _ := modelInfo["general.architecture"].(string)
+	if arch != "" {
+		if n := anyToInt(modelInfo[arch+".context_length"]); n > 0 {
+			return n
+		}
+	}
+
+	// Architecture key missing - fall back to any "*.context_length" key
+	for key, value := range modelInfo {
+		if strings.HasSuffix(key, ".context_length") {
+			if n := anyToInt(value); n > 0 {
+				return n
+			}
+		}
+	}
+	return 0
+}
+
+// parseNumCtx extracts num_ctx from /api/show "parameters", which lists
+// Modelfile parameters one per line (e.g. "num_ctx                        32768")
+func parseNumCtx(parameters string) int {
+	for _, line := range strings.Split(parameters, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == "num_ctx" {
+			if n, err := strconv.Atoi(fields[1]); err == nil && n > 0 {
+				return n
+			}
+		}
+	}
+	return 0
+}
+
+// anyToInt converts a JSON number decoded into an interface to int
+func anyToInt(v any) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	}
+	return 0
 }
 
 // ModelCapabilities tracks which model families support tool calling

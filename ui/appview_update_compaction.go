@@ -47,7 +47,7 @@ func (a AppView) handleCompactionComplete(msg appmodel.CompactionCompleteMsg) (A
 			Rendered:  fmt.Sprintf("❌ Compaction failed: %v", msg.Err),
 			Timestamp: time.Now(),
 		})
-		a.updateViewportContent(true)
+		a.updateViewportContent(!a.userScrolledUp)
 		return a, nil
 	}
 
@@ -84,7 +84,7 @@ func (a AppView) handleCompactionComplete(msg appmodel.CompactionCompleteMsg) (A
 			Persistent: true,
 		})
 
-		a.updateViewportContent(true)
+		a.updateViewportContent(!a.userScrolledUp)
 
 		// Trigger async markdown rendering for the summary message and save
 		summaryIdx := len(a.dataModel.Messages) - 1
@@ -94,7 +94,7 @@ func (a AppView) handleCompactionComplete(msg appmodel.CompactionCompleteMsg) (A
 		)
 	}
 
-	a.updateViewportContent(true)
+	a.updateViewportContent(!a.userScrolledUp)
 
 	// Save session after successful compaction
 	return a, a.dataModel.AutoSaveSession()
@@ -182,7 +182,7 @@ func (a AppView) handleCompactionResponse(msg appmodel.CompactionResponseMsg) (A
 		Timestamp: time.Now(),
 	})
 
-	a.updateViewportContent(true)
+	a.updateViewportContent(!a.userScrolledUp)
 
 	// Trigger compaction in background
 	return a, a.dataModel.CompactSessionMarkerCmd(msg.MarkerIndex)

@@ -23,6 +23,7 @@ type markdownRenderedMsg = model.MarkdownRenderedMsg
 type modelsListMsg = model.ModelsListMsg
 type sessionsListMsg = model.SessionsListMsg
 type sessionLoadedMsg = model.SessionLoadedMsg
+type modelMetadataMsg = model.ModelMetadataMsg
 type sessionSavedMsg = model.SessionSavedMsg
 type sessionRenamedMsg = model.SessionRenamedMsg
 type sessionExportedMsg = model.SessionExportedMsg
@@ -61,6 +62,7 @@ const (
 	SettingTypeKeepPercentage
 	SettingTypeWarnAtPercentage
 	SettingTypeNotifyOnComplete
+	SettingTypeRequireApproval
 )
 
 type SettingFieldValidation int

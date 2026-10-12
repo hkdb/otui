@@ -3,6 +3,7 @@ package provider
 import (
 	"encoding/json"
 	"otui/config"
+	"otui/mcp"
 	"otui/model"
 	"regexp"
 	"strings"
@@ -318,4 +319,13 @@ func ConvertFromProviderToolCalls(providerCalls []model.ToolCall) []api.ToolCall
 		}
 	}
 	return result
+}
+
+// decodeToolCallNames converts API safe tool names (see mcp.EncodeToolName)
+// back to the namespaced "plugin.tool" form used by the MCP manager
+func decodeToolCallNames(calls []model.ToolCall) []model.ToolCall {
+	for i := range calls {
+		calls[i].Name = mcp.DecodeToolName(calls[i].Name)
+	}
+	return calls
 }

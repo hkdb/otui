@@ -112,5 +112,13 @@ credential_storage = "plaintext"
 # name = "OpenRouter"
 # enabled = true
 # base_url = "https://openrouter.ai/api/v1"
+
+# Any OpenAI API compatible server (llama.cpp, vLLM, LM Studio, etc.)
+# The API key is optional and set in Settings -> Provider Settings
+# [[providers]]
+# id = "openai-compatible"
+# name = "OpenAI Compatible"
+# enabled = true
+# base_url = "http://localhost:8080/v1"
 `
 }

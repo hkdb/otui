@@ -42,8 +42,10 @@ type AppView struct {
 	chunks     []string // Chunks to display with typewriter effect
 	chunkIndex int      // Current chunk being displayed
 
-	// Scroll-during-streaming state
-	userScrolledUp bool // User scrolled up during streaming; suppress auto-scroll
+	// Scroll position state
+	// User scrolled away from the bottom; suppresses auto-scroll until they
+	// return to the bottom or something forces a scroll (send, new session, etc.)
+	userScrolledUp bool
 
 	// Loading spinner (bubbles/spinner)
 	loadingSpinner spinner.Model
@@ -137,6 +139,14 @@ type AppView struct {
 	acknowledgeModalMsg   string
 	acknowledgeModalType  ModalType
 
+	// Session locked modal (session is locked by another OTUI instance)
+	showSessionLockedModal   bool
+	lockedSessionID          string
+	lockedSessionPID         int
+	lockedSessionName        string
+	startupFallbackSessionID string // New session created on startup because the last session was locked
+	discardSessionOnSwitch   string // Empty session to delete once a force loaded session replaces it
+
 	// SSH passphrase modal for data dir switch (uses shared modal helper)
 	showPassphraseForDataDir bool
 	passphraseForDataDir     textinput.Model
@@ -223,7 +233,9 @@ type AppView struct {
 // PluginSystemState is an alias to appmodel.PluginSystemState for backward compatibility
 type PluginSystemState = appmodel.PluginSystemState
 
-func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, lastSession *storage.Session, version, license string) AppView {
+// If lockedSessionID is set, the last session couldn't be restored because it
+// is locked by another instance, and the session locked modal is shown on start.
+func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, lastSession *storage.Session, lockedSessionID, version, license string) AppView {
 	// Initialize MCP components (allow graceful degradation - Phase 4)
 	registry, err := mcp.NewRegistry(cfg.DataDir())
 	if err != nil {
@@ -363,12 +375,15 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 	if lastSession == nil {
 		newSession, _ := dataModel.CreateAndSaveNewSession("New Session", "", []string{})
 		dataModel.CurrentSession = newSession
+		if newSession != nil && sessionStorage != nil {
+			_ = sessionStorage.LockSession(newSession.ID)
+		}
 		if mcpManager != nil {
 			mcpManager.SetSession(newSession)
 		}
 	}
 
-	return AppView{
+	a := AppView{
 		dataModel:                    dataModel,
 		textarea:                     ta,
 		viewport:                     vp,
@@ -401,6 +416,16 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 			},
 		},
 	}
+
+	// Last session is locked by another instance - offer to force open it
+	if lockedSessionID != "" {
+		a.showSessionLocked(lockedSessionID, sessionStorage.GetSessionLockPID(lockedSessionID))
+		if dataModel.CurrentSession != nil {
+			a.startupFallbackSessionID = dataModel.CurrentSession.ID
+		}
+	}
+
+	return a
 }
 
 func (a AppView) Init() tea.Cmd {
@@ -409,7 +434,8 @@ func (a AppView) Init() tea.Cmd {
 
 	cmds := []tea.Cmd{
 		textarea.Blink,
-		a.dataModel.FetchAllModels(false), // Background fetch on startup, don't show selector
+		a.dataModel.FetchAllModels(false),     // Background fetch on startup, don't show selector
+		a.dataModel.RefreshModelMetadataCmd(), // Real context window of the session's model
 	}
 
 	// Start all enabled plugins asynchronously
@@ -467,6 +493,11 @@ func (a AppView) View() string {
 			Title:   a.infoModalTitle,
 			Message: a.infoModalMsg,
 		}, a.width, a.height)
+	}
+
+	// Show session locked modal if active
+	if a.showSessionLockedModal {
+		return a.renderSessionLockedModal()
 	}
 
 	// Show acknowledge modal if active (warnings/errors requiring only acknowledgement)
@@ -785,6 +816,10 @@ func (a AppView) formatKeyDisplay(modifier, key string) string {
 // This ensures plugin isolation and prevents security holes from stale session references
 func (a *AppView) setCurrentSession(session *storage.Session) {
 	a.dataModel.CurrentSession = session
+	// Lock the session so other OTUI instances can't open it at the same time
+	if session != nil && a.dataModel.SessionStorage != nil {
+		_ = a.dataModel.SessionStorage.LockSession(session.ID)
+	}
 	if a.dataModel.MCPManager != nil {
 		a.dataModel.MCPManager.SetSession(session)
 	}
@@ -803,6 +838,7 @@ func (a *AppView) closeAllModals() {
 	a.showSettings = false
 	a.showAbout = false
 	a.showPluginManager = false
+	a.clearSessionLocked()
 
 	a.sessionRenameMode = false
 	a.sessionExportMode = false

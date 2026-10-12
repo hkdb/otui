@@ -35,9 +35,29 @@ An opinionated, "speed" and "usability" focused agentic TUI with a built-in MCP 
 - [OpenRouter](https://openrouter.com)
 - Anthropic
 - OpenAI
+- OpenAI Compatible (llama.cpp, vLLM, LM Studio, etc.)
 - More coming soon...
 
 Currently, only Ollama and OpenRouter are being tested more extensively.
+
+The `OpenAI Compatible` provider works with any server that implements the OpenAI chat completions API. Set its base URL (ex: `http://localhost:8080/v1` for llama.cpp's `llama-server`) in the welcome wizard or in `Settings` → `Provider Settings`. The API key is optional. For llama.cpp, start `llama-server` with `--jinja` to enable tool calling.
+
+#### 📏 Context Window
+
+The `max:` shown in the header is the context window the server actually runs the model with, which is what compaction is based on:
+
+- Ollama - the context of the loaded model (`/api/ps`), else the Modelfile's `num_ctx`, else the model's trained context length. OTUI doesn't set `num_ctx`, so Ollama uses its own default (`OLLAMA_CONTEXT_LENGTH`, or 4096 / VRAM based depending on version) - raise that on the Ollama side to use more of the model's context. The value updates after the model is loaded by the first response.
+- OpenAI Compatible - llama.cpp (`/props`, `/v1/models`), vLLM (`max_model_len`), LM Studio (loaded context) and Ollama's `/v1` endpoint are detected automatically.
+- OpenRouter - the context length of the default provider for the model.
+- Anthropic - `max_input_tokens` from the Models API.
+- OpenAI - built-in table (the API doesn't report it).
+
+If it's still wrong, set it per model (using the model name shown in the header) in your profile's `config.toml`:
+
+```toml
+[model_context_overrides]
+"qwen3.6-27b" = 131072
+```
 
 Of the popular open source models, what's relatively modest in size that seems to work best with this TUI is currently `qwen3.5:9b`. It's not only fairly accurate in general but also makes sound decision on when to use tools and when to directly respond based on its own knownledge.
 
@@ -132,7 +152,7 @@ For those of you who wish to customize your keyboard shortcuts, check out [docs/
 - `Session Manager`  = Where users can manage sessions (Create, Edit, Search, Import, Export)
 - `Model Selector`   = Where users can select the LLM Model to use in the currently loaded session 
 - `Plugin Manager`  = Where users can manage MCP plugins (See the next section)
-- `Settings`         = Where users can set Data Directory, Default Model, Profile Wide System Prompt, Enable/Disable Plugins System and launch `Provider Settings` to configure providers.
+- `Settings`         = Where users can set Data Directory, Default Model, Profile Wide System Prompt, Enable/Disable Plugins System, Enable/Disable Tool Approval (ask before running MCP tools) and launch `Provider Settings` to configure providers.
 - `Help`             = Where users can see a cheat sheet of all the keybindings
 - `About`            = Where users can see information about OTUI and check the release version
 

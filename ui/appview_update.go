@@ -118,7 +118,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.textarea.SetWidth(a.width)
 
 		a.ready = true
-		a.updateViewportContent(true)
+		a.updateViewportContent(!a.userScrolledUp)
 
 		// Trigger initial rendering if needed (after we have width)
 		if a.dataModel.NeedsInitialRender {
@@ -287,7 +287,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.dataModel.SessionDirty = false
 			a.textarea.Reset()
 			a.updateViewportContent(true)
-			return a, nil
+			return a, a.dataModel.RefreshModelMetadataCmd()
 
 		case kb.GetActionKey("session_manager"):
 			wasOpen := a.showSessionManager
@@ -446,6 +446,13 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						Value:        boolToString(a.dataModel.Config.NotifyOnComplete),
 						DefaultValue: "false",
 						Type:         SettingTypeNotifyOnComplete,
+						Validation:   FieldValidationNone,
+					},
+					{
+						Label:        "Tool Approval",
+						Value:        boolToString(a.dataModel.Config.RequireApproval),
+						DefaultValue: "true",
+						Type:         SettingTypeRequireApproval,
 						Validation:   FieldValidationNone,
 					},
 				}
@@ -619,6 +626,10 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Ignore all other keys while plugin system modal is active
 			return a, nil
+		}
+
+		if a.showSessionLockedModal {
+			return a.handleSessionLockedModalUpdate(msg)
 		}
 
 		if a.showAcknowledgeModal {
@@ -927,51 +938,37 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case kb.GetActionKey("scroll_down"), kb.GetActionKey("scroll_down_arrow"):
 			a.viewport.LineDown(1)
-			if a.dataModel.Streaming && a.viewport.AtBottom() {
-				a.userScrolledUp = false
-			}
+			a.userScrolledUp = !a.viewport.AtBottom()
 			return a, nil
 
 		case kb.GetActionKey("scroll_up"), kb.GetActionKey("scroll_up_arrow"):
 			a.viewport.LineUp(1)
-			if a.dataModel.Streaming {
-				a.userScrolledUp = true
-			}
+			a.userScrolledUp = !a.viewport.AtBottom()
 			return a, nil
 
 		case kb.GetActionKey("half_page_down"), kb.GetActionKey("half_page_down_arrow"):
 			a.viewport.HalfPageDown()
-			if a.dataModel.Streaming && a.viewport.AtBottom() {
-				a.userScrolledUp = false
-			}
+			a.userScrolledUp = !a.viewport.AtBottom()
 			return a, nil
 
 		case kb.GetActionKey("half_page_up"), kb.GetActionKey("half_page_up_arrow"):
 			a.viewport.HalfPageUp()
-			if a.dataModel.Streaming {
-				a.userScrolledUp = true
-			}
+			a.userScrolledUp = !a.viewport.AtBottom()
 			return a, nil
 
 		case kb.GetActionKey("page_down"):
 			a.viewport.PageDown()
-			if a.dataModel.Streaming && a.viewport.AtBottom() {
-				a.userScrolledUp = false
-			}
+			a.userScrolledUp = !a.viewport.AtBottom()
 			return a, nil
 
 		case kb.GetActionKey("page_up"):
 			a.viewport.PageUp()
-			if a.dataModel.Streaming {
-				a.userScrolledUp = true
-			}
+			a.userScrolledUp = !a.viewport.AtBottom()
 			return a, nil
 
 		case kb.GetActionKey("scroll_to_top"):
 			a.viewport.GotoTop()
-			if a.dataModel.Streaming {
-				a.userScrolledUp = true
-			}
+			a.userScrolledUp = !a.viewport.AtBottom()
 			return a, nil
 
 		case kb.GetActionKey("scroll_to_bottom"):
@@ -1272,7 +1269,17 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Session messages → appview_update_sessions.go
 	case sessionLoadedMsg, sessionSavedMsg, sessionRenamedMsg, sessionExportedMsg,
 		sessionImportedMsg, exportCleanupDoneMsg:
-		return a.handleSessionMessage(msg)
+		updated, cmd := a.handleSessionMessage(msg)
+		// Fetch the loaded session model's real context window
+		if loaded, ok := msg.(sessionLoadedMsg); ok && loaded.Err == nil {
+			cmd = tea.Batch(cmd, updated.dataModel.RefreshModelMetadataCmd())
+		}
+		return updated, cmd
+
+	// Context window fetched from the session model's provider
+	case modelMetadataMsg:
+		a.dataModel.SetModelMetadata(msg)
+		return a, nil
 
 	// Data export messages → appview_update_ui.go
 	case dataExportedMsg, dataExportCleanupDoneMsg:

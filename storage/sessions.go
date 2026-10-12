@@ -477,6 +477,11 @@ func (ss *SessionStorage) CheckSessionLock(sessionID string) (bool, error) {
 		return false, nil
 	}
 
+	// Our own lock (e.g. left behind when OTUI restarts itself in place)
+	if pid == os.Getpid() {
+		return false, nil
+	}
+
 	// Check if process with this PID is still running
 	// os.FindProcess() always succeeds on Unix, but we use it as a basic check
 	// For cross-platform compatibility, we trust FindProcess() without signaling
@@ -491,6 +496,21 @@ func (ss *SessionStorage) CheckSessionLock(sessionID string) (bool, error) {
 	// Note: On Unix this doesn't verify the process is truly alive,
 	// but it's cross-platform compatible and good enough for our use case
 	return true, nil
+}
+
+// GetSessionLockPID returns the PID recorded in a session's lock file,
+// or 0 if there is no lock file or it can't be parsed
+func (ss *SessionStorage) GetSessionLockPID(sessionID string) int {
+	data, err := os.ReadFile(filepath.Join(ss.sessionsDir, sessionID+".lock"))
+	if err != nil {
+		return 0
+	}
+
+	var pid int
+	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil {
+		return 0
+	}
+	return pid
 }
 
 // LockOTUIInstance creates a global lock to ensure single-instance operation

@@ -1,6 +1,9 @@
 package storage
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -164,6 +167,53 @@ func TestSessionPlugins(t *testing.T) {
 		}
 		if len(plugins) != 0 {
 			t.Error("expected empty slice")
+		}
+	})
+}
+
+func TestSessionLockPID(t *testing.T) {
+	ss, err := NewSessionStorage(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSessionStorage: %v", err)
+	}
+
+	t.Run("no lock", func(t *testing.T) {
+		if pid := ss.GetSessionLockPID("missing"); pid != 0 {
+			t.Errorf("GetSessionLockPID = %d, want 0", pid)
+		}
+	})
+
+	t.Run("own lock is not reported as locked", func(t *testing.T) {
+		if err := ss.LockSession("mine"); err != nil {
+			t.Fatalf("LockSession: %v", err)
+		}
+		if pid := ss.GetSessionLockPID("mine"); pid != os.Getpid() {
+			t.Errorf("GetSessionLockPID = %d, want %d", pid, os.Getpid())
+		}
+		locked, err := ss.CheckSessionLock("mine")
+		if err != nil || locked {
+			t.Errorf("CheckSessionLock = %v, %v; want false, nil", locked, err)
+		}
+	})
+
+	t.Run("other process lock and force unlock", func(t *testing.T) {
+		lockPath := filepath.Join(ss.sessionsDir, "theirs.lock")
+		if err := os.WriteFile(lockPath, []byte("1"), 0600); err != nil {
+			t.Fatalf("write lock: %v", err)
+		}
+		if pid := ss.GetSessionLockPID("theirs"); pid != 1 {
+			t.Errorf("GetSessionLockPID = %d, want 1", pid)
+		}
+		if runtime.GOOS != "windows" {
+			if locked, _ := ss.CheckSessionLock("theirs"); !locked {
+				t.Error("expected session locked by PID 1")
+			}
+		}
+		if err := ss.UnlockSession("theirs"); err != nil {
+			t.Fatalf("UnlockSession: %v", err)
+		}
+		if locked, _ := ss.CheckSessionLock("theirs"); locked {
+			t.Error("expected session unlocked after force delete")
 		}
 	})
 }

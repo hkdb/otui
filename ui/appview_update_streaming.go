@@ -53,7 +53,6 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			// All chunks displayed - finalize
 			fullResp := a.currentResp.String()
 			a.dataModel.Streaming = false
-			a.userScrolledUp = false
 			a.chunks = nil
 			a.chunkIndex = 0
 			a.currentResp.Reset()
@@ -87,7 +86,7 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 						Rendered:  fullResp,
 						Timestamp: time.Now(),
 					})
-					a.updateViewportContent(true)
+					a.updateViewportContent(!a.userScrolledUp)
 					a.dataModel.SessionDirty = true
 
 					messageIndex := len(a.dataModel.Messages) - 1
@@ -131,7 +130,7 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 				a.pendingSummary = nil
 			}
 
-			a.updateViewportContent(true)
+			a.updateViewportContent(!a.userScrolledUp)
 			a.dataModel.SessionDirty = true
 
 			// No more steps - done
@@ -147,6 +146,9 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 					a.dataModel.CheckAutoCompactionCmd(), // Check if auto-compaction should trigger
 				}
 			}
+			// The model is loaded now, so local servers (e.g. Ollama) can
+			// report the context it actually runs with
+			cmds = append(cmds, a.dataModel.RefreshModelMetadataCmd())
 			if a.dataModel.Config.NotifyOnComplete {
 				cmds = append(cmds, notifyResponseComplete())
 			}
@@ -193,7 +195,6 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		}
 
 		a.dataModel.Streaming = false
-		a.userScrolledUp = false
 
 		// Remove loading message (last system message, but not persistent step messages)
 		if len(a.dataModel.Messages) > 0 &&
@@ -218,10 +219,13 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			}
 
 			// Update viewport immediately with plain text
-			a.updateViewportContent(true)
+			a.updateViewportContent(!a.userScrolledUp)
 
 			// Trigger async markdown rendering (non-blocking)
-			cmds := []tea.Cmd{a.renderMarkdownAsync(messageIndex, msg.FullResponse)}
+			cmds := []tea.Cmd{
+				a.renderMarkdownAsync(messageIndex, msg.FullResponse),
+				a.dataModel.RefreshModelMetadataCmd(),
+			}
 			if a.dataModel.Config.NotifyOnComplete {
 				cmds = append(cmds, notifyResponseComplete())
 			}
@@ -237,7 +241,7 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			Rendered:  "⚠️ No response received from Ollama",
 			Timestamp: time.Now(),
 		})
-		a.updateViewportContent(true)
+		a.updateViewportContent(!a.userScrolledUp)
 		a.currentResp.Reset()
 
 		return a, nil

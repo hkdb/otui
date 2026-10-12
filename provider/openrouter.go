@@ -2,12 +2,14 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"otui/config"
 	"otui/mcp"
 	"otui/model"
 	"otui/ollama"
 	"strings"
+	"sync"
 
 	mcptypes "github.com/mark3labs/mcp-go/mcp"
 	"github.com/openai/openai-go/v3"
@@ -21,6 +23,10 @@ type OpenRouterProvider struct {
 	model   string
 	baseURL string
 	apiKey  string
+
+	// Model metadata from the model list (nil until fetched)
+	metadataMu    sync.Mutex
+	metadataCache map[string]model.ModelMetadata
 }
 
 // NewOpenRouterProvider creates a new OpenRouter provider instance.
@@ -77,25 +83,6 @@ func shouldSkipToolInstructions(modelName string) bool {
 	return false
 }
 
-// convertToolNamesForOpenRouter converts tool names from dotted notation to underscore notation.
-// OpenRouter API requires tool names matching ^[a-zA-Z0-9_-]{1,64}$ (no dots allowed).
-// Example: "server-filesystem.read_file" → "server-filesystem__read_file"
-func convertToolNamesForOpenRouter(tools []mcptypes.Tool) []mcptypes.Tool {
-	converted := make([]mcptypes.Tool, len(tools))
-	for i, tool := range tools {
-		converted[i] = tool
-		converted[i].Name = strings.ReplaceAll(tool.Name, ".", "__")
-	}
-	return converted
-}
-
-// convertToolNameFromOpenRouter converts a tool name from underscore notation back to dotted notation.
-// This reverses the conversion applied by convertToolNamesForOpenRouter.
-// Example: "server-filesystem__read_file" → "server-filesystem.read_file"
-func convertToolNameFromOpenRouter(toolName string) string {
-	return strings.ReplaceAll(toolName, "__", ".")
-}
-
 // Chat implements Provider.Chat by delegating to ChatWithTools with no tools.
 func (p *OpenRouterProvider) Chat(ctx context.Context, messages []model.Message, callback model.StreamCallback) error {
 	return p.ChatWithTools(ctx, messages, nil, callback)
@@ -131,10 +118,9 @@ func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model
 		Model:    openai.ChatModel(p.model),
 	}
 
-	// Add tools if provided (convert dots to underscores for OpenRouter API)
+	// Add tools if provided (tool names are encoded to the API safe format)
 	if len(tools) > 0 {
-		convertedTools := convertToolNamesForOpenRouter(tools)
-		openaiTools := mcp.ConvertMCPToolsToOpenAIFormat(convertedTools)
+		openaiTools := mcp.ConvertMCPToolsToOpenAIFormat(tools)
 		params.Tools = openaiTools
 	}
 
@@ -155,10 +141,10 @@ func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model
 		if tool, ok := acc.JustFinishedToolCall(); ok {
 			apiToolCallsDetected = true
 			if callback != nil {
-				// Convert to provider tool call (convert underscores back to dots)
+				// Convert to provider tool call (decode the API safe tool name)
 				args := ParseToolArguments(tool.Arguments)
 				toolCall := model.ToolCall{
-					Name:      convertToolNameFromOpenRouter(tool.Name),
+					Name:      mcp.DecodeToolName(tool.Name),
 					Arguments: args,
 				}
 				callback("", []model.ToolCall{toolCall})
@@ -186,11 +172,7 @@ func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model
 
 		// Check for JSON leaked tool calls
 		if leakedCalls := ParseLeakedJSONToolCalls(fullContent); len(leakedCalls) > 0 {
-			// Convert tool names from OpenRouter format
-			for i := range leakedCalls {
-				leakedCalls[i].Name = convertToolNameFromOpenRouter(leakedCalls[i].Name)
-			}
-			callback("", leakedCalls)
+			callback("", decodeToolCallNames(leakedCalls))
 
 			// Note: Content was already streamed, but we could clean it in future
 			// by tracking and re-sending cleaned content
@@ -198,11 +180,7 @@ func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model
 
 		// Check for XML leaked tool calls
 		if leakedCalls := ParseLeakedXMLToolCalls(fullContent); len(leakedCalls) > 0 {
-			// Convert tool names from OpenRouter format
-			for i := range leakedCalls {
-				leakedCalls[i].Name = convertToolNameFromOpenRouter(leakedCalls[i].Name)
-			}
-			callback("", leakedCalls)
+			callback("", decodeToolCallNames(leakedCalls))
 		}
 	}
 
@@ -216,6 +194,9 @@ func (p *OpenRouterProvider) ListModels(ctx context.Context) ([]ollama.ModelInfo
 	if err != nil {
 		return nil, fmt.Errorf("failed to list OpenRouter models: %w", err)
 	}
+
+	// The list includes context windows - cache them for GetModelMetadata
+	p.cacheModelMetadata(modelsPage.Data)
 
 	// Convert to ModelInfo with prefix stripping
 	result := make([]ollama.ModelInfo, 0, len(modelsPage.Data))
@@ -259,53 +240,84 @@ func (p *OpenRouterProvider) Ping(ctx context.Context) error {
 	return nil
 }
 
-// GetModelMetadata returns metadata for the specified model
-// TODO: OpenRouter API returns context_length in model data - we should parse it from the API response
-// For now, using fallback metadata based on model name patterns
+// GetModelMetadata returns metadata for the specified model from OpenRouter's
+// model list (context_length, top_provider), falling back to name based
+// defaults. The list is cached after the first fetch (ListModels fills it too).
 func (p *OpenRouterProvider) GetModelMetadata(ctx context.Context, modelName string) (model.ModelMetadata, error) {
-	// Try to fetch from API first
-	modelsPage, err := p.client.Models.List(ctx)
-	if err == nil {
-		// Search for the model in the response
-		for _, m := range modelsPage.Data {
-			if m.ID == modelName {
-				// Check if context window info is available in the model object
-				// The OpenAI SDK model object might have this field - needs investigation
-				// For now, fall through to fallback
-				break
+	p.metadataMu.Lock()
+	meta, ok := p.metadataCache[modelName]
+	loaded := p.metadataCache != nil
+	p.metadataMu.Unlock()
+	if ok {
+		return meta, nil
+	}
+
+	if !loaded {
+		if modelsPage, err := p.client.Models.List(ctx); err == nil {
+			p.cacheModelMetadata(modelsPage.Data)
+			p.metadataMu.Lock()
+			meta, ok = p.metadataCache[modelName]
+			p.metadataMu.Unlock()
+			if ok {
+				return meta, nil
 			}
 		}
 	}
 
-	// Fallback to hardcoded metadata
+	return p.FallbackModelMetadata(modelName), nil
+}
+
+// cacheModelMetadata extracts context window info from OpenRouter's model list.
+//
+// OpenRouter reports the model's max context_length and top_provider.context_length
+// for the provider requests are routed to by default; they can differ (e.g. a
+// 1M model whose default provider serves 262K). top_provider is preferred as
+// it's what requests actually get unless routed elsewhere.
+func (p *OpenRouterProvider) cacheModelMetadata(models []openai.Model) {
+	cache := make(map[string]model.ModelMetadata, len(models))
+	for _, m := range models {
+		var topProvider struct {
+			ContextLength       int `json:"context_length"`
+			MaxCompletionTokens int `json:"max_completion_tokens"`
+		}
+		if raw := m.JSON.ExtraFields["top_provider"].Raw(); raw != "" && raw != "null" {
+			_ = json.Unmarshal([]byte(raw), &topProvider)
+		}
+
+		contextWindow, source := topProvider.ContextLength, "openrouter:top_provider.context_length"
+		if contextWindow <= 0 {
+			contextWindow = rawJSONInt(m.JSON.ExtraFields["context_length"].Raw())
+			source = "openrouter:context_length"
+		}
+		if contextWindow <= 0 {
+			continue
+		}
+
+		meta := p.FallbackModelMetadata(m.ID)
+		meta.ContextWindow = contextWindow
+		meta.SupportsTools = true // Most OpenRouter models support tools
+		meta.Source = source
+		if topProvider.MaxCompletionTokens > 0 {
+			meta.MaxOutput = topProvider.MaxCompletionTokens
+		}
+		cache[m.ID] = meta
+	}
+
+	p.metadataMu.Lock()
+	p.metadataCache = cache
+	p.metadataMu.Unlock()
+}
+
+// FallbackModelMetadata returns defaults based on the model name, trying the
+// Anthropic, OpenAI and Ollama tables since OpenRouter serves models from all
+func (p *OpenRouterProvider) FallbackModelMetadata(modelName string) model.ModelMetadata {
 	// Strip provider prefix for lookup (e.g., "anthropic/claude-sonnet-4" → "claude-sonnet-4")
 	lookupName := stripProviderPrefix(modelName)
 
-	// Try Anthropic models first (common on OpenRouter)
-	if meta := GetFallbackMetadata(lookupName, AnthropicFallbackMetadata); meta.ContextWindow > 8192 {
-		return model.ModelMetadata{
-			ContextWindow: meta.ContextWindow,
-			MaxOutput:     meta.MaxOutput,
-			SupportsTools: meta.SupportsTools,
-		}, nil
-	}
-
-	// Try OpenAI models
-	if meta := GetFallbackMetadata(lookupName, OpenAIFallbackMetadata); meta.ContextWindow > 8192 {
-		return model.ModelMetadata{
-			ContextWindow: meta.ContextWindow,
-			MaxOutput:     meta.MaxOutput,
-			SupportsTools: meta.SupportsTools,
-		}, nil
-	}
-
-	// Try Ollama models (for local models exposed via OpenRouter)
-	if meta := GetFallbackMetadata(lookupName, OllamaFallbackMetadata); meta.ContextWindow > 8192 {
-		return model.ModelMetadata{
-			ContextWindow: meta.ContextWindow,
-			MaxOutput:     meta.MaxOutput,
-			SupportsTools: meta.SupportsTools,
-		}, nil
+	for _, table := range []map[string]ModelMetadata{AnthropicFallbackMetadata, OpenAIFallbackMetadata, OllamaFallbackMetadata} {
+		if meta := GetFallbackMetadata(lookupName, table); meta.ContextWindow > 8192 {
+			return toModelMetadata(meta, model.MetadataSourceFallback)
+		}
 	}
 
 	// Ultimate fallback
@@ -313,7 +325,8 @@ func (p *OpenRouterProvider) GetModelMetadata(ctx context.Context, modelName str
 		ContextWindow: 8192,
 		MaxOutput:     2048,
 		SupportsTools: false,
-	}, nil
+		Source:        model.MetadataSourceFallback,
+	}
 }
 
 // stripProviderPrefix removes vendor prefixes from OpenRouter model names.

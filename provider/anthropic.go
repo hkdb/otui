@@ -8,6 +8,7 @@ import (
 	"otui/model"
 	"otui/ollama"
 	"strings"
+	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -21,6 +22,10 @@ type AnthropicProvider struct {
 	model   anthropic.Model
 	baseURL string
 	apiKey  string
+
+	// Model metadata fetched from the Models API (static per model)
+	metadataMu    sync.Mutex
+	metadataCache map[string]model.ModelMetadata
 }
 
 // NewAnthropicProvider creates a new Anthropic provider instance.
@@ -149,12 +154,12 @@ func (p *AnthropicProvider) ChatWithTools(ctx context.Context, messages []model.
 
 			// Check for JSON leaked tool calls
 			if leakedCalls := ParseLeakedJSONToolCalls(fullContent); len(leakedCalls) > 0 {
-				callback("", leakedCalls)
+				callback("", decodeToolCallNames(leakedCalls))
 			}
 
 			// Check for XML leaked tool calls
 			if leakedCalls := ParseLeakedXMLToolCalls(fullContent); len(leakedCalls) > 0 {
-				callback("", leakedCalls)
+				callback("", decodeToolCallNames(leakedCalls))
 			}
 		}
 	}
@@ -221,16 +226,51 @@ func (p *AnthropicProvider) Ping(ctx context.Context) error {
 	return nil
 }
 
-// GetModelMetadata returns metadata for the specified model
-// Anthropic API doesn't expose context window info, so we use fallback metadata
+// GetModelMetadata returns metadata for the specified model.
+// The Models API reports max_input_tokens and max_tokens (added 2026-03-18;
+// the SDK version in use doesn't have typed fields for them yet, so they're
+// read from the raw response). Falls back to the hardcoded table.
 func (p *AnthropicProvider) GetModelMetadata(ctx context.Context, modelName string) (model.ModelMetadata, error) {
-	meta := GetFallbackMetadata(modelName, AnthropicFallbackMetadata)
+	p.metadataMu.Lock()
+	cached, ok := p.metadataCache[modelName]
+	p.metadataMu.Unlock()
+	if ok {
+		return cached, nil
+	}
 
-	return model.ModelMetadata{
-		ContextWindow: meta.ContextWindow,
-		MaxOutput:     meta.MaxOutput,
-		SupportsTools: meta.SupportsTools,
-	}, nil
+	fallback := p.FallbackModelMetadata(modelName)
+
+	info, err := p.client.Models.Get(ctx, modelName, anthropic.ModelGetParams{})
+	if err != nil {
+		return fallback, nil
+	}
+
+	contextWindow := rawJSONInt(info.JSON.ExtraFields["max_input_tokens"].Raw())
+	if contextWindow <= 0 {
+		return fallback, nil
+	}
+
+	meta := fallback
+	meta.ContextWindow = contextWindow
+	meta.SupportsTools = true // All Claude models support tools
+	meta.Source = "anthropic:/v1/models max_input_tokens"
+	if maxTokens := rawJSONInt(info.JSON.ExtraFields["max_tokens"].Raw()); maxTokens > 0 {
+		meta.MaxOutput = maxTokens
+	}
+
+	p.metadataMu.Lock()
+	if p.metadataCache == nil {
+		p.metadataCache = make(map[string]model.ModelMetadata)
+	}
+	p.metadataCache[modelName] = meta
+	p.metadataMu.Unlock()
+
+	return meta, nil
+}
+
+// FallbackModelMetadata returns metadata from the hardcoded table
+func (p *AnthropicProvider) FallbackModelMetadata(modelName string) model.ModelMetadata {
+	return toModelMetadata(GetFallbackMetadata(modelName, AnthropicFallbackMetadata), model.MetadataSourceFallback)
 }
 
 // convertToAnthropicMessages converts OTUI messages to Anthropic format.
@@ -290,7 +330,7 @@ func extractToolCalls(content []anthropic.ContentBlockUnion) []model.ToolCall {
 			}
 
 			toolCalls = append(toolCalls, model.ToolCall{
-				Name:      toolUse.Name,
+				Name:      mcp.DecodeToolName(toolUse.Name),
 				Arguments: args,
 			})
 		}

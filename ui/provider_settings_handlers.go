@@ -208,6 +208,8 @@ func (a AppView) getProviderFieldActualValue(field ProviderField) string {
 	switch field.Type {
 	case ProviderFieldTypeHost:
 		return a.dataModel.Config.OllamaHost
+	case ProviderFieldTypeBaseURL:
+		return field.Value
 	case ProviderFieldTypeAPIKey:
 		if a.dataModel.Config.CredentialStore != nil {
 			key := a.dataModel.Config.CredentialStore.Get(a.providerSettingsState.selectedProviderID)
@@ -245,6 +247,8 @@ func (a AppView) saveAllProviderFieldsCmd() tea.Cmd {
 				switch field.Type {
 				case ProviderFieldTypeHost:
 					fieldName = "host"
+				case ProviderFieldTypeBaseURL:
+					fieldName = "base_url"
 				case ProviderFieldTypeAPIKey:
 					fieldName = "apikey"
 				case ProviderFieldTypeEnabled:

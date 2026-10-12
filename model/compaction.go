@@ -28,80 +28,6 @@ func (tc *TokenCounter) CountMessages(messages []storage.Message) int {
 	return total
 }
 
-// GetModelMetadata returns metadata for the current session's model
-// Checks user overrides first, then provider metadata, then fallbacks
-func (m *Model) GetModelMetadata() ModelMetadata {
-	if m.CurrentSession == nil {
-		// No session - return conservative default
-		return ModelMetadata{
-			ContextWindow: 8192,
-			MaxOutput:     2048,
-			SupportsTools: false,
-		}
-	}
-
-	modelName := m.CurrentSession.Model
-
-	// Check cache first (avoid provider calls on every render)
-	if modelName == m.cachedModelName && m.cachedModelMetadata.ContextWindow > 0 {
-		return m.cachedModelMetadata
-	}
-
-	// 1. Check user config overrides first (highest priority)
-	if m.Config.ModelContextOverrides != nil {
-		if contextWindow, ok := m.Config.ModelContextOverrides[modelName]; ok {
-			if config.Debug && config.DebugLog != nil {
-				config.DebugLog.Printf("[compaction] Using user override for %s: %d tokens",
-					modelName, contextWindow)
-			}
-
-			metadata := ModelMetadata{
-				ContextWindow: contextWindow,
-				MaxOutput:     8192,  // Reasonable default
-				SupportsTools: true,  // Assume yes if user is overriding
-			}
-
-			// Cache the result
-			m.cachedModelName = modelName
-			m.cachedModelMetadata = metadata
-			return metadata
-		}
-	}
-
-	// 2. Try to get from provider
-	if m.Provider != nil {
-		ctx := context.Background()
-		meta, err := m.Provider.GetModelMetadata(ctx, modelName)
-		if err == nil {
-			// Cache the result
-			m.cachedModelName = modelName
-			m.cachedModelMetadata = meta
-			return meta
-		}
-
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[compaction] Provider metadata lookup failed for %s: %v",
-				modelName, err)
-		}
-	}
-
-	// 3. Ultimate fallback (conservative)
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[compaction] Using fallback metadata for %s: 8192 tokens", modelName)
-	}
-
-	metadata := ModelMetadata{
-		ContextWindow: 8192,
-		MaxOutput:     2048,
-		SupportsTools: false,
-	}
-
-	// Cache the fallback result
-	m.cachedModelName = modelName
-	m.cachedModelMetadata = metadata
-	return metadata
-}
-
 // CalculateTokenUsage calculates current token usage for the current session
 func (m *Model) CalculateTokenUsage() storage.TokenUsage {
 	if m.CurrentSession == nil {
@@ -181,26 +107,38 @@ func (m *Model) GetContextUsagePercentage() float64 {
 		compactionMarker = m.CurrentSession.CompactionMarker
 	}
 
-	// Return cached value if message count AND compaction marker haven't changed
-	if messageCount == m.cachedMessageCount &&
-		compactionMarker == m.cachedCompactionMarker &&
-		m.cachedUsagePercentage >= 0 {
-		return m.cachedUsagePercentage
-	}
-
-	// Recalculate
+	// Context window is part of the cache key so the percentage updates when
+	// the model changes or its real context window is fetched
 	metadata := m.GetModelMetadata()
 	if metadata.ContextWindow == 0 {
 		return 0.0
 	}
 
+	// Return cached value if message count, compaction marker and context
+	// window haven't changed
+	m.usageMu.Lock()
+	if m.usageCacheValid &&
+		messageCount == m.cachedMessageCount &&
+		compactionMarker == m.cachedCompactionMarker &&
+		metadata.ContextWindow == m.cachedContextWindow {
+		percentage := m.cachedUsagePercentage
+		m.usageMu.Unlock()
+		return percentage
+	}
+	m.usageMu.Unlock()
+
+	// Recalculate
 	usage := m.CalculateTokenUsage()
 	percentage := float64(usage.ActiveTokens) / float64(metadata.ContextWindow)
 
 	// Update cache
+	m.usageMu.Lock()
 	m.cachedUsagePercentage = percentage
 	m.cachedMessageCount = messageCount
 	m.cachedCompactionMarker = compactionMarker
+	m.cachedContextWindow = metadata.ContextWindow
+	m.usageCacheValid = true
+	m.usageMu.Unlock()
 
 	if config.Debug && config.DebugLog != nil {
 		config.DebugLog.Printf("[compaction] Context usage recalculated: %.1f%% (%d / %d tokens, %d messages)",

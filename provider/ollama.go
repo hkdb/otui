@@ -215,15 +215,39 @@ func (p *OllamaProvider) Ping(ctx context.Context) error {
 	return p.client.Ping(ctx)
 }
 
-// GetModelMetadata returns metadata for the specified model
-// Ollama API doesn't currently expose context window info, so we use fallback metadata
-// based on model name patterns (e.g., "llama3.1:8b" matches "llama3.1")
+// GetModelMetadata returns metadata for the specified model.
+//
+// The context window is what Ollama will actually use, which is often much
+// smaller than what the model supports since OTUI doesn't send num_ctx:
+// the loaded context from /api/ps, else the Modelfile num_ctx, else the
+// model's trained context length (Ollama caps num_ctx at that).
+// Falls back to name based defaults if Ollama can't be queried.
 func (p *OllamaProvider) GetModelMetadata(ctx context.Context, modelName string) (model.ModelMetadata, error) {
-	meta := GetFallbackMetadata(modelName, OllamaFallbackMetadata)
+	fallback := p.FallbackModelMetadata(modelName)
 
-	return model.ModelMetadata{
-		ContextWindow: meta.ContextWindow,
-		MaxOutput:     meta.MaxOutput,
-		SupportsTools: meta.SupportsTools,
-	}, nil
+	mc, err := p.client.GetModelContext(ctx, modelName)
+	if err != nil {
+		return fallback, nil
+	}
+
+	contextWindow, source := mc.Effective()
+	if contextWindow == 0 {
+		return fallback, nil
+	}
+
+	meta := fallback
+	meta.ContextWindow = contextWindow
+	meta.Source = source
+	if mc.HasShowInfo {
+		meta.SupportsTools = mc.SupportsTools
+	}
+	if meta.MaxOutput > contextWindow {
+		meta.MaxOutput = contextWindow
+	}
+	return meta, nil
+}
+
+// FallbackModelMetadata returns name based defaults (e.g., "llama3.1:8b" matches "llama3.1")
+func (p *OllamaProvider) FallbackModelMetadata(modelName string) model.ModelMetadata {
+	return toModelMetadata(GetFallbackMetadata(modelName, OllamaFallbackMetadata), model.MetadataSourceFallback)
 }

@@ -565,7 +565,8 @@ func (a AppView) handleSettingsNavigationMode(msg tea.KeyMsg) (tea.Model, tea.Cm
 
 		// Check if this is a boolean toggle field
 		if a.settingsFields[a.selectedSettingIdx].Type == SettingTypePluginsEnabled ||
-			a.settingsFields[a.selectedSettingIdx].Type == SettingTypeNotifyOnComplete {
+			a.settingsFields[a.selectedSettingIdx].Type == SettingTypeNotifyOnComplete ||
+			a.settingsFields[a.selectedSettingIdx].Type == SettingTypeRequireApproval {
 			currentValue := a.settingsFields[a.selectedSettingIdx].Value
 			switch currentValue {
 			case "true":
@@ -884,6 +885,9 @@ func (a AppView) saveSettingsCmd() tea.Cmd {
 
 		// Update notification setting (field 9)
 		existingCfg.NotifyOnComplete = stringToBool(a.settingsFields[9].Value)
+
+		// Update tool approval setting (field 10)
+		existingCfg.RequireApproval = stringToBool(a.settingsFields[10].Value)
 
 		// Save updated config (preserves DefaultProvider, Providers[], Security, etc.)
 		if err := config.SaveUserConfig(existingCfg, dataDir); err != nil {

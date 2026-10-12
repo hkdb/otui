@@ -1,6 +1,7 @@
 package model
 
 import (
+	"sync"
 	"time"
 
 	"otui/config"
@@ -40,11 +41,19 @@ type Model struct {
 	IterationHistory []IterationStep // ALL steps (including non-tool steps)
 
 	// Context window tracking cache (to avoid recalculating every render frame)
+	// Guarded by usageMu since compaction Cmds read it off the Update loop
+	usageMu                sync.Mutex
+	usageCacheValid        bool
 	cachedUsagePercentage  float64
 	cachedMessageCount     int
 	cachedCompactionMarker int
-	cachedModelName        string
-	cachedModelMetadata    ModelMetadata
+	cachedContextWindow    int
+
+	// Model metadata (context window) fetched from providers, keyed by
+	// provider ID + model name. Written only from Update via
+	// SetModelMetadata; read from View and compaction Cmds.
+	metadataMu    sync.RWMutex
+	metadataCache map[string]ModelMetadata
 
 	// Application metadata
 	Version string

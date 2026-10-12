@@ -260,19 +260,25 @@ func main() {
 
 	// Load last session with lock check
 	var lastSession *storage.Session
+	var lockedSessionID string
 	if lastSessionID, err := sessionStorage.LoadCurrentSessionID(); err == nil {
 		// Check if session is locked by another instance
 		isLocked, lockErr := sessionStorage.CheckSessionLock(lastSessionID)
 		if lockErr == nil && !isLocked {
 			lastSession, _ = sessionStorage.Load(lastSessionID)
-			// Note: Lock will be acquired when setCurrentSession is called in UI
+			if lastSession != nil {
+				_ = sessionStorage.LockSession(lastSession.ID)
+			}
+		} else if lockErr == nil && isLocked {
+			// lastSession remains nil → NewAppView creates a new session and
+			// offers to force delete the stale lock
+			lockedSessionID = lastSessionID
 		}
-		// If locked: lastSession remains nil → NewModel will create new session
 	}
 
 	// Create AppView before defer so we can unlock the CURRENT data directory on exit
 	// (which may differ from initial data directory if user switched during session)
-	appView := ui.NewAppView(cfg, sessionStorage, lastSession, Version, License)
+	appView := ui.NewAppView(cfg, sessionStorage, lastSession, lockedSessionID, Version, License)
 
 	// Ensure cleanup on exit - uses appView method to unlock CURRENT data directory
 	defer func() {

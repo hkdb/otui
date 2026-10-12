@@ -32,14 +32,15 @@ type ProviderSettingsState struct {
 }
 
 // Provider tab order (for navigation)
-var providerTabs = []string{"ollama", "openrouter", "openai", "anthropic"}
+var providerTabs = []string{"ollama", "openrouter", "openai", "openai-compatible", "anthropic"}
 
 // Provider display names
 var providerNames = map[string]string{
-	"ollama":     "Ollama",
-	"openrouter": "OpenRouter",
-	"openai":     "OpenAI",
-	"anthropic":  "Anthropic",
+	"ollama":            "Ollama",
+	"openrouter":        "OpenRouter",
+	"openai":            "OpenAI",
+	"openai-compatible": "OpenAI Compat", // Short to fit the tab bar
+	"anthropic":         "Anthropic",
 }
 
 // ProviderFieldType identifies the type of provider field
@@ -49,6 +50,7 @@ const (
 	ProviderFieldTypeHost ProviderFieldType = iota
 	ProviderFieldTypeAPIKey
 	ProviderFieldTypeEnabled
+	ProviderFieldTypeBaseURL
 )
 
 // ProviderField represents a single field in the provider settings
@@ -70,6 +72,16 @@ func (p *ProviderSettingsState) getProviderFields(providerID string, cfg *config
 			{Label: "Ollama Host", Value: cfg.OllamaHost, Type: ProviderFieldTypeHost},
 			{Label: "API Key", Value: p.maskAPIKey(apiKey), Type: ProviderFieldTypeAPIKey},
 			{Label: "Enabled", Value: p.getProviderEnabled(cfg, "ollama"), Type: ProviderFieldTypeEnabled},
+		}
+	case "openai-compatible":
+		apiKey := ""
+		if cfg.CredentialStore != nil {
+			apiKey = cfg.CredentialStore.Get(providerID)
+		}
+		return []ProviderField{
+			{Label: "Base URL", Value: config.GetProviderBaseURL(cfg.Providers, providerID), Type: ProviderFieldTypeBaseURL},
+			{Label: "Key (optional)", Value: p.maskAPIKey(apiKey), Type: ProviderFieldTypeAPIKey},
+			{Label: "Enabled", Value: p.getProviderEnabled(cfg, providerID), Type: ProviderFieldTypeEnabled},
 		}
 	case "openrouter", "anthropic", "openai":
 		apiKey := ""

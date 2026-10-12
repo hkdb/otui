@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"otui/config"
+	appmodel "otui/model"
 )
 
 // handleSessionMessage handles session-related messages
@@ -22,17 +23,10 @@ func (a AppView) handleSessionMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		}
 
 		if msg.Err != nil {
-			// Check if error is due to session being locked
-			if msg.Err.Error() == "session_locked" {
-				a.showAcknowledgeModal = true
-				a.acknowledgeModalTitle = "Session In Use"
-				a.acknowledgeModalMsg = "This session is currently being used in another OTUI instance.\n\n" +
-					"Only one instance can use a session at a time.\n\n" +
-					"Options:\n" +
-					"• Close the other OTUI instance\n" +
-					"• Use a different session\n" +
-					"• Run OTUI in a container for isolated instances"
-				a.acknowledgeModalType = ModalTypeWarning
+			// Session is locked by another instance - offer to force delete the lock
+			a.discardSessionOnSwitch = ""
+			if lockedErr, ok := appmodel.AsSessionLockedError(msg.Err); ok {
+				a.showSessionLocked(lockedErr.SessionID, lockedErr.PID)
 				return a, nil
 			}
 
@@ -44,8 +38,15 @@ func (a AppView) handleSessionMessage(msg tea.Msg) (AppView, tea.Cmd) {
 
 		// Unlock old session before switching
 		if a.dataModel.CurrentSession != nil && a.dataModel.SessionStorage != nil {
-			_ = a.dataModel.SessionStorage.UnlockSession(a.dataModel.CurrentSession.ID)
+			oldID := a.dataModel.CurrentSession.ID
+			_ = a.dataModel.SessionStorage.UnlockSession(oldID)
+
+			// Delete the empty placeholder session replaced by a force loaded one
+			if a.discardSessionOnSwitch == oldID && oldID != msg.Session.ID {
+				_ = a.dataModel.SessionStorage.Delete(oldID)
+			}
 		}
+		a.discardSessionOnSwitch = ""
 
 		// Load session into UI and sync with MCP manager
 		a.setCurrentSession(msg.Session)

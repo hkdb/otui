@@ -60,6 +60,11 @@ func ModelSupportsTools(model ollama.ModelInfo) bool {
 		// ALL Anthropic/Claude models support tools natively
 		return true
 
+	case "openai-compatible":
+		// Arbitrary models served by llama.cpp, vLLM, etc. - assume tool
+		// support and let the server reject tools if the model can't use them
+		return true
+
 	case "openai":
 		// Most OpenAI models support tools
 		modelLower := strings.ToLower(model.InternalName)

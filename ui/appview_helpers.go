@@ -366,7 +366,7 @@ func (a *AppView) createStepMessage(purpose string, stepNum int) {
 		Rendered:  systemMsg,
 		Timestamp: time.Now(),
 	})
-	a.updateViewportContent(true)
+	a.updateViewportContent(!a.userScrolledUp)
 }
 
 // completeStepMessage adds checkmark to last step message and makes it persistent
@@ -407,7 +407,7 @@ func (a *AppView) showAnalyzingResults() {
 		Rendered:  "Analyzing results...",
 		Timestamp: time.Now(),
 	})
-	a.updateViewportContent(true)
+	a.updateViewportContent(!a.userScrolledUp)
 }
 
 // startTypewriter initializes typewriter state and returns tick command
@@ -484,5 +484,12 @@ func (a *AppView) refreshProvidersAndModels() tea.Cmd {
 		config.DebugLog.Printf("[UI] Clearing model cache and fetching from all enabled providers")
 	}
 	a.dataModel.ClearModelCache("")
-	return a.dataModel.FetchAllModels(false) // Background refresh, don't show selector
+
+	// Provider settings (e.g. base URL) affect context windows - refetch
+	a.dataModel.ClearModelMetadata()
+
+	return tea.Batch(
+		a.dataModel.FetchAllModels(false), // Background refresh, don't show selector
+		a.dataModel.RefreshModelMetadataCmd(),
+	)
 }

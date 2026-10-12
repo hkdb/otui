@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,24 +51,67 @@ func (m *Model) LoadSession(sessionID string) tea.Cmd {
 		}
 	}
 
-	storage := m.SessionStorage
+	return loadSessionCmd(m.SessionStorage, sessionID, false)
+}
+
+// ForceLoadSession deletes a session's lock file and loads it.
+// Used when the user confirms the lock is stale (e.g. left behind by a crash).
+func (m *Model) ForceLoadSession(sessionID string) tea.Cmd {
+	if m.SessionStorage == nil {
+		return nil
+	}
+	return loadSessionCmd(m.SessionStorage, sessionID, true)
+}
+
+// SessionLockedError is returned in SessionLoadedMsg when the session is
+// locked by another OTUI instance
+type SessionLockedError struct {
+	SessionID string
+	PID       int // PID recorded in the lock file (0 if unknown)
+}
+
+func (e *SessionLockedError) Error() string {
+	return "session_locked"
+}
+
+// AsSessionLockedError reports whether err is a SessionLockedError
+func AsSessionLockedError(err error) (*SessionLockedError, bool) {
+	var lockedErr *SessionLockedError
+	if errors.As(err, &lockedErr) {
+		return lockedErr, true
+	}
+	return nil, false
+}
+
+// loadSessionCmd loads a session and locks it. If force is true, an existing
+// lock file is deleted first instead of refusing to load.
+func loadSessionCmd(ss *storage.SessionStorage, sessionID string, force bool) tea.Cmd {
 	return func() tea.Msg {
+		if force {
+			if err := ss.UnlockSession(sessionID); err != nil {
+				return SessionLoadedMsg{Session: nil, Err: err}
+			}
+		}
+
 		// Check if session is locked by another OTUI instance
-		isLocked, err := storage.CheckSessionLock(sessionID)
+		isLocked, err := ss.CheckSessionLock(sessionID)
 		if err != nil {
 			return SessionLoadedMsg{Session: nil, Err: err}
 		}
 		if isLocked {
-			return SessionLoadedMsg{Session: nil, Err: fmt.Errorf("session_locked")}
+			return SessionLoadedMsg{Session: nil, Err: &SessionLockedError{
+				SessionID: sessionID,
+				PID:       ss.GetSessionLockPID(sessionID),
+			}}
 		}
 
-		session, err := storage.Load(sessionID)
+		session, err := ss.Load(sessionID)
 		if err != nil {
 			return SessionLoadedMsg{Session: nil, Err: err}
 		}
 
 		// Create lock file for this session
-		_ = storage.LockSession(sessionID)
+		_ = ss.LockSession(sessionID)
 
 		return SessionLoadedMsg{
 			Session: session,

@@ -119,3 +119,36 @@ func TestFactoryReturnsOllamaProvider(t *testing.T) {
 // Invalid URL handling is primarily tested at the ollama.Client level.
 // The factory's responsibility is to correctly dispatch to the right provider constructor,
 // which is tested in TestNewProvider.
+
+// TestOpenAICompatibleProvider verifies the compatible provider accepts an empty
+// API key, requires a base URL, and tags its models with its own provider ID
+func TestOpenAICompatibleProvider(t *testing.T) {
+	t.Run("empty api key allowed", func(t *testing.T) {
+		p, err := NewProvider(Config{
+			Type:    MapProviderIDToType("openai-compatible"),
+			BaseURL: "http://localhost:8080/v1",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		oai, ok := p.(*OpenAIProvider)
+		if !ok {
+			t.Fatalf("expected *OpenAIProvider, got %T", p)
+		}
+		if oai.providerID != "openai-compatible" {
+			t.Errorf("providerID = %q, want %q", oai.providerID, "openai-compatible")
+		}
+	})
+
+	t.Run("base url required", func(t *testing.T) {
+		if _, err := NewProvider(Config{Type: ProviderTypeOpenAICompatible}); err == nil {
+			t.Error("expected error for missing base URL, got nil")
+		}
+	})
+
+	t.Run("openai still requires api key", func(t *testing.T) {
+		if _, err := NewProvider(Config{Type: ProviderTypeOpenAI}); err == nil {
+			t.Error("expected error for missing OpenAI API key, got nil")
+		}
+	})
+}

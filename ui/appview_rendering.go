@@ -92,6 +92,10 @@ func (a *AppView) updateViewportContent(gotoBottom bool) {
 	a.viewport.SetContent(content.String())
 	if gotoBottom {
 		a.viewport.GotoBottom()
+		a.userScrolledUp = false
+	} else {
+		// Re-clamp the offset in case the content got shorter
+		a.viewport.SetYOffset(a.viewport.YOffset)
 	}
 }
 
