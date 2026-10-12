@@ -368,6 +368,14 @@ func Load() (*Config, error) {
 	credMethod := SecurityMethod(cfg.Security.CredentialStorage)
 	cfg.CredentialStore = NewCredentialStore(credMethod, cfg.Security.SSHKeyPath)
 
+	// Load keybindings before credentials so the partial config returned when
+	// a passphrase is required is complete apart from credentials
+	keybindingsCfg, err := LoadKeybindings(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load keybindings: %w", err)
+	}
+	cfg.Keybindings = keybindingsCfg
+
 	// Load credentials
 	if err := cfg.CredentialStore.Load(dataDir); err != nil {
 		// If error is due to missing passphrase, return partial config so caller can retry with passphrase
@@ -377,13 +385,6 @@ func Load() (*Config, error) {
 		// For other errors, return nil
 		return nil, fmt.Errorf("failed to load credentials: %w", err)
 	}
-
-	// Load keybindings
-	keybindingsCfg, err := LoadKeybindings(dataDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load keybindings: %w", err)
-	}
-	cfg.Keybindings = keybindingsCfg
 
 	return cfg, nil
 }

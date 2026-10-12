@@ -26,6 +26,14 @@ func NewPassphraseModal(keyPath string) PassphraseModal {
 	}
 }
 
+// NewPassphraseModalWithError creates a passphrase modal that shows errMsg,
+// e.g. when re-prompting after an incorrect passphrase
+func NewPassphraseModalWithError(keyPath, errMsg string) PassphraseModal {
+	m := NewPassphraseModal(keyPath)
+	m.err = errMsg
+	return m
+}
+
 func (m PassphraseModal) Init() tea.Cmd {
 	return textinput.Blink
 }

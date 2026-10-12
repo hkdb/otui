@@ -236,6 +236,11 @@ type PluginSystemState = appmodel.PluginSystemState
 // If lockedSessionID is set, the last session couldn't be restored because it
 // is locked by another instance, and the session locked modal is shown on start.
 func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, lastSession *storage.Session, lockedSessionID, version, license string) AppView {
+	// Never run without keybindings (the UI dereferences them everywhere)
+	if cfg.Keybindings == nil {
+		cfg.Keybindings = config.DefaultKeybindings()
+	}
+
 	// Initialize MCP components (allow graceful degradation - Phase 4)
 	registry, err := mcp.NewRegistry(cfg.DataDir())
 	if err != nil {

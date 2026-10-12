@@ -18,6 +18,8 @@
 - Fixed context window ("max:" in the header) falling back to 8192 for most models: it's now queried from the server (Ollama loaded context / num_ctx / trained length, llama.cpp, vLLM, LM Studio, OpenRouter, Anthropic) instead of guessed from the model name
 - Context window lookups no longer block the UI and use the session's own provider
 - Context usage % now updates when the model or its context window changes
+- Fixed crash on startup after entering the correct passphrase for a passphrase protected SSH key (also when switching to such a data directory in Settings)
+- Fixed the startup passphrase prompt repeating forever without explanation: a wrong passphrase now shows "Incorrect passphrase", and other credential errors (e.g. credentials encrypted with a different SSH key) show an error instead of prompting again
 
 ---
 

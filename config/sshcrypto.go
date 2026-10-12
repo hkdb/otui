@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/x509"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -51,6 +53,12 @@ func IsSSHKeyEncrypted(keyPath string) (bool, error) {
 
 	// Other error (invalid key format, etc.)
 	return false, fmt.Errorf("invalid SSH key: %w", err)
+}
+
+// IsIncorrectPassphrase reports whether err was caused by a wrong SSH key
+// passphrase (as opposed to e.g. credentials encrypted with a different key)
+func IsIncorrectPassphrase(err error) bool {
+	return errors.Is(err, x509.IncorrectPasswordError)
 }
 
 // LoadSSHPrivateKeyWithPassphrase loads an encrypted SSH private key using the provided passphrase

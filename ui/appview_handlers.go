@@ -74,8 +74,12 @@ func (a AppView) handlePassphraseForDataDir(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Retry ApplyDataDirSwitch with passphrase
 			if err := a.dataModel.ApplyDataDirSwitch(a.passphraseRetryDataDir, passphrase); err != nil {
-				// Still failed - wrong passphrase or other error
-				a.passphraseError = GetIncorrectPassphraseError()
+				// Still failed - only call it a wrong passphrase if it was one
+				if config.IsIncorrectPassphrase(err) {
+					a.passphraseError = GetIncorrectPassphraseError()
+				} else {
+					a.passphraseError = err.Error()
+				}
 				a.passphraseForDataDir.SetValue("")
 				return a, textinput.Blink
 			}

@@ -137,44 +137,46 @@ func main() {
 	// Try to load config
 	cfg, err := config.Load()
 
-	// Track whether or not the user input the right passphrase
-	pass := false
-
-	// If SSH key passphrase is required, prompt for it in a loop
-	for err != nil && strings.Contains(err.Error(), "passphrase required") {
+	// If SSH key passphrase is required, prompt for it until it's correct
+	promptErr := ""
+	needPassphrase := err != nil && strings.Contains(err.Error(), "passphrase required")
+	for needPassphrase {
 		keyPath := extractSSHKeyPath()
 
-		// Show passphrase modal
-		modal := ui.NewPassphraseModal(keyPath)
-		p := tea.NewProgram(modal, tea.WithAltScreen())
+		// Show passphrase modal (with the previous attempt's error, if any)
+		p := tea.NewProgram(ui.NewPassphraseModalWithError(keyPath, promptErr), tea.WithAltScreen())
 
-		finalModel, err := p.Run()
-		if err != nil {
-			fmt.Printf("Error running passphrase prompt: %v\n", err)
+		finalModel, runErr := p.Run()
+		if runErr != nil {
+			fmt.Printf("Error running passphrase prompt: %v\n", runErr)
 			os.Exit(1)
 		}
 
-		modal = finalModel.(ui.PassphraseModal)
-
-		if modal.IsCancelled() {
+		modal, ok := finalModel.(ui.PassphraseModal)
+		if !ok || modal.IsCancelled() {
 			fmt.Println("Passphrase prompt cancelled. Exiting.")
 			os.Exit(0)
 		}
 
-		passphrase := modal.GetPassphrase()
-
-		// Try to load config with passphrase using helper
-		perr := ui.LoadCredentialsWithPassphrase(cfg, passphrase)
-
-		// If no error (success) or different error, break out of loop
-		if perr == nil {
-			pass = true
-			break
+		// Try to load credentials with the passphrase
+		perr := ui.LoadCredentialsWithPassphrase(cfg, modal.GetPassphrase())
+		switch {
+		case perr == nil:
+			err = nil
+			needPassphrase = false
+		case config.IsIncorrectPassphrase(perr):
+			// Ask again
+			promptErr = ui.GetIncorrectPassphraseError()
+		default:
+			// Not a passphrase problem (e.g. credentials encrypted with a
+			// different key) - show it instead of prompting forever
+			err = fmt.Errorf("failed to load credentials: %w", perr)
+			needPassphrase = false
 		}
 	}
 
 	// Handle other config loading errors
-	if err != nil && pass == false {
+	if err != nil {
 		var errorMsg string
 
 		if strings.Contains(err.Error(), "failed to load credentials") {
