@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"time"
+	"unicode/utf8"
+)
 
 // Message represents a chat message in the conversation
 type Message struct {
@@ -17,4 +20,14 @@ type Message struct {
 type ToolCall struct {
 	Name      string
 	Arguments map[string]any
+}
+
+// truncateRunes shortens s to at most n characters, appending "..." if it was
+// cut. Unlike byte slicing it never splits a multi-byte character.
+func truncateRunes(s string, n int) string {
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:n]) + "..."
 }

@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
@@ -49,7 +48,7 @@ func RenderPassphraseModal(
 	}
 
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	// Message text
 	msg1 := "The SSH key is encrypted with a passphrase."
@@ -59,11 +58,11 @@ func RenderPassphraseModal(
 	messageLines = append(messageLines, centerTextLine(msg1, modalWidth))
 	messageLines = append(messageLines, centerTextLine(msg2, modalWidth))
 	messageLines = append(messageLines, centerTextLine(msg3, modalWidth))
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	// Input field
 	messageLines = append(messageLines, centerTextLine(passphraseInput.View(), modalWidth))
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	// Error message if present
 	if errorMsg != "" {
@@ -73,7 +72,7 @@ func RenderPassphraseModal(
 			Bold(true).
 			Render(errLine)
 		messageLines = append(messageLines, centerTextLine(styledErr, modalWidth))
-		messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+		messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 	}
 
 	footer := "Enter Continue  |  Esc Cancel"
@@ -99,7 +98,7 @@ func centerTextLine(text string, width int) string {
 
 	leftPad := (width - textWidth) / 2
 	rightPad := width - textWidth - leftPad
-	return strings.Repeat(" ", leftPad) + text + strings.Repeat(" ", rightPad)
+	return safeRepeat(" ", leftPad) + text + safeRepeat(" ", rightPad)
 }
 
 // ===== VALIDATION =====

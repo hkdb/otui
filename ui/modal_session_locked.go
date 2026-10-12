@@ -72,7 +72,7 @@ func (a AppView) renderSessionLockedModal() string {
 	var messageLines []string
 	for i, p := range paragraphs {
 		if i > 0 {
-			messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+			messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 		}
 		for _, line := range wrapWords(p, modalWidth-4) {
 			messageLines = append(messageLines, centerTextLine(line, modalWidth))

@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 	"otui/ollama"
 )
 
@@ -138,13 +139,17 @@ func renderModelSelector(a AppView, models []ollama.ModelInfo, selectedIdx int, 
 				providerSuffix = fmt.Sprintf(" (%s)", model.Provider)
 			}
 
+			// Fit name + provider suffix in the space left after the size column.
+			// The name keeps at least minNameWidth; in narrow terminals the
+			// provider suffix is shortened instead.
+			const minNameWidth = 10
 			maxNameWidth := modalWidth - 20 // Reserve space for size
-			if len(nameWithTag)+len(providerSuffix) > maxNameWidth {
-				nameWithTag = nameWithTag[:maxNameWidth-len(providerSuffix)-3] + "..."
-			}
+			nameBudget := max(maxNameWidth-runewidth.StringWidth(providerSuffix), min(minNameWidth, maxNameWidth))
+			nameWithTag = truncateWidth(nameWithTag, nameBudget)
+			providerSuffix = truncateWidth(providerSuffix, maxNameWidth-runewidth.StringWidth(nameWithTag))
 
 			// Calculate spacing based on actual tool indicator width (0 if not present, 8 if present)
-			spacing := modalWidth - len(indicator) - len(nameWithTag) - len(providerSuffix) - toolIndicatorWidth - len(currentMarker) - len(size) - 4
+			spacing := modalWidth - runewidth.StringWidth(indicator) - runewidth.StringWidth(nameWithTag) - runewidth.StringWidth(providerSuffix) - toolIndicatorWidth - len(currentMarker) - len(size) - 4
 			if spacing < 1 {
 				spacing = 1
 			}
@@ -155,7 +160,7 @@ func renderModelSelector(a AppView, models []ollama.ModelInfo, selectedIdx int, 
 				providerSuffix,
 				toolIndicator,
 				currentMarker,
-				strings.Repeat(" ", spacing),
+				safeRepeat(" ", spacing),
 				size,
 			)
 
@@ -176,7 +181,7 @@ func renderModelSelector(a AppView, models []ollama.ModelInfo, selectedIdx int, 
 	}
 
 	// Add empty line before and after list
-	emptyLine := strings.Repeat(" ", modalWidth)
+	emptyLine := safeRepeat(" ", modalWidth)
 	modelLines = append([]string{emptyLine}, modelLines...)
 	modelLines = append(modelLines, emptyLine)
 

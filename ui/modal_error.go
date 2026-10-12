@@ -66,7 +66,7 @@ func (m ErrorModal) View() string {
 
 	// Message section (with top border)
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Empty line
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Empty line
 
 	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
@@ -77,7 +77,7 @@ func (m ErrorModal) View() string {
 		messageLines = append(messageLines, styledLine)
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Empty line
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Empty line
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).

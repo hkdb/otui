@@ -201,3 +201,12 @@ func TestCompactSessionCmdNothingNewToCompact(t *testing.T) {
 		t.Error("CompactSessionCmd should be nil when there is nothing new to compact")
 	}
 }
+
+func TestTruncateRunes(t *testing.T) {
+	if got := truncateRunes("héllo wörld", 5); got != "héllo..." {
+		t.Errorf("truncateRunes = %q, want %q", got, "héllo...")
+	}
+	if got := truncateRunes("日本語", 5); got != "日本語" {
+		t.Errorf("short string changed: %q", got)
+	}
+}

@@ -37,7 +37,7 @@ func RenderConfirmationModal(state ConfirmationState, width, height int) string 
 
 	// Message section (with top border)
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
@@ -48,7 +48,7 @@ func RenderConfirmationModal(state ConfirmationState, width, height int) string 
 		messageLines = append(messageLines, messageStyle.Render(line))
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -100,7 +100,7 @@ func RenderToolWarningModal(modelName string, enabledPlugins []string, width, he
 
 	// Message section (with top border)
 	var contentLines []string
-	contentLines = append(contentLines, strings.Repeat(" ", modalWidth)) // Top padding
+	contentLines = append(contentLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
@@ -121,7 +121,7 @@ func RenderToolWarningModal(modelName string, enabledPlugins []string, width, he
 	}
 
 	contentLines = append(contentLines, messageStyle.Render(lipgloss.NewStyle().Foreground(accentColor).Render("Recommended:")+" qwen3-coder, llama3.1, mistral"))
-	contentLines = append(contentLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	contentLines = append(contentLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).

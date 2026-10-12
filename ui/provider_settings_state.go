@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"strings"
-
 	"github.com/charmbracelet/bubbles/textinput"
 	"otui/config"
 )
@@ -124,5 +122,5 @@ func (p *ProviderSettingsState) maskAPIKey(key string) string {
 	if len(key) < 8 {
 		return "***"
 	}
-	return key[:3] + strings.Repeat("*", len(key)-7) + key[len(key)-4:]
+	return key[:3] + safeRepeat("*", len(key)-7) + key[len(key)-4:]
 }

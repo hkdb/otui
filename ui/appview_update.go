@@ -112,10 +112,12 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.height = msg.Height
 
 		// Reserve space for title (1 line), separator (1 line), textarea (3 lines), and status bar (1 line)
-		viewportHeight := a.height - 6
-		a.viewport.Width = a.width
+		// Keep sizes positive: the viewport panics with a negative height
+		// in tiny terminals (View shows a "too small" message then)
+		viewportHeight := max(a.height-6, 1)
+		a.viewport.Width = max(a.width, 1)
 		a.viewport.Height = viewportHeight
-		a.textarea.SetWidth(a.width)
+		a.textarea.SetWidth(max(a.width, 1))
 
 		a.ready = true
 		a.updateViewportContent(!a.userScrolledUp)

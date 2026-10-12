@@ -913,10 +913,10 @@ func renderDataExportModal(a AppView, exportInput textinput.Model, exporting boo
 		Foreground(dimColor).
 		Width(modalWidth)
 
-	topBorder := borderStyle.Render("┌" + strings.Repeat("─", modalWidth-2) + "┐")
-	middleBorder := borderStyle.Render("├" + strings.Repeat("─", modalWidth-2) + "┤")
-	bottomBorder := borderStyle.Render("└" + strings.Repeat("─", modalWidth-2) + "┘")
-	emptyLine := "│" + strings.Repeat(" ", modalWidth-2) + "│"
+	topBorder := borderStyle.Render("┌" + safeRepeat("─", modalWidth-2) + "┐")
+	middleBorder := borderStyle.Render("├" + safeRepeat("─", modalWidth-2) + "┤")
+	bottomBorder := borderStyle.Render("└" + safeRepeat("─", modalWidth-2) + "┘")
+	emptyLine := "│" + safeRepeat(" ", modalWidth-2) + "│"
 
 	var content strings.Builder
 	content.WriteString(topBorder + "\n")
@@ -1049,7 +1049,7 @@ func renderSettings(a AppView, fields []SettingField, selectedIdx int, editMode 
 	// Separator (simple horizontal line - following modal_helpers.go pattern)
 	separator := lipgloss.NewStyle().
 		Foreground(dimColor).
-		Render(strings.Repeat("─", modalWidth))
+		Render(safeRepeat("─", modalWidth))
 
 	// Settings list
 	var settingsLines []string
@@ -1059,7 +1059,7 @@ func renderSettings(a AppView, fields []SettingField, selectedIdx int, editMode 
 		if editMode && i == selectedIdx {
 			// Show edit input
 			label := field.Label
-			labelPadding := strings.Repeat(" ", 20-len(label))
+			labelPadding := safeRepeat(" ", 20-len(label))
 			inputBox := lipgloss.NewStyle().
 				Foreground(accentColor).
 				Bold(true).
@@ -1089,14 +1089,12 @@ func renderSettings(a AppView, fields []SettingField, selectedIdx int, editMode 
 			label := fmt.Sprintf("%s%s", indicator, field.Label)
 			maxLabelWidth := 20
 			if len(label) < maxLabelWidth {
-				label = label + strings.Repeat(" ", maxLabelWidth-len(label))
+				label = label + safeRepeat(" ", maxLabelWidth-len(label))
 			}
 
 			valueWithIndicator := value + validationIndicator
 			maxValueWidth := modalWidth - maxLabelWidth - 4
-			if len(valueWithIndicator) > maxValueWidth {
-				valueWithIndicator = valueWithIndicator[:maxValueWidth-3] + "..."
-			}
+			valueWithIndicator = truncateWidth(valueWithIndicator, maxValueWidth)
 
 			line = label + valueWithIndicator
 
@@ -1143,11 +1141,11 @@ func renderSettings(a AppView, fields []SettingField, selectedIdx int, editMode 
 	var content strings.Builder
 	content.WriteString(title + "\n")
 	content.WriteString(separator + "\n")
-	content.WriteString(strings.Repeat(" ", modalWidth) + "\n") // Top padding
+	content.WriteString(safeRepeat(" ", modalWidth) + "\n") // Top padding
 	for _, line := range settingsLines {
 		content.WriteString(line + "\n")
 	}
-	content.WriteString(strings.Repeat(" ", modalWidth) + "\n") // Bottom padding
+	content.WriteString(safeRepeat(" ", modalWidth) + "\n") // Bottom padding
 	if infoLine != "" {
 		content.WriteString(infoLine)
 	}
@@ -1182,18 +1180,18 @@ func renderDataDirNotFoundModal(path string, width, height int) string {
 
 	// Build message lines
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Empty line
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Empty line
 
 	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
 		Align(lipgloss.Center)
 
 	messageLines = append(messageLines, messageStyle.Render("The directory does not exist:"))
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 	messageLines = append(messageLines, messageStyle.Render(path))
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 	messageLines = append(messageLines, messageStyle.Render("Would you like to create a new data directory here?"))
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 	messageLines = append(messageLines, messageStyle.Render("(OTUI will restart and launch the setup wizard)"))
 
 	// Use RenderThreeSectionModal for consistent pattern

@@ -1059,6 +1059,11 @@ func (m WelcomeModel) updateDataDirectoryScreen(msg tea.KeyMsg) (tea.Model, tea.
 }
 
 func (m WelcomeModel) View() string {
+	// Width/height are 0 until the first WindowSizeMsg
+	if m.width > 0 && terminalTooSmall(m.width, m.height) {
+		return renderTerminalTooSmall(m.width, m.height)
+	}
+
 	// Show existing profile picker if active (highest priority)
 	if m.existingProfilePicker.Active {
 		return RenderFilePickerModal(m.existingProfilePicker, m.width, m.height)
@@ -1336,7 +1341,7 @@ func centerText(text string, width int) string {
 	}
 
 	padding := (width - textWidth) / 2
-	return strings.Repeat(" ", padding) + text
+	return safeRepeat(" ", padding) + text
 }
 
 // ===== Security Method Screen =====

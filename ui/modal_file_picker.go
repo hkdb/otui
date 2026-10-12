@@ -125,7 +125,7 @@ func renderFilePickerInput(picker filepicker.Model, title string, width, height 
 
 	// Build message lines with file picker content
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	pickerView := picker.View()
 	pickerLines := strings.Split(pickerView, "\n")
@@ -140,7 +140,7 @@ func renderFilePickerInput(picker filepicker.Model, title string, width, height 
 		messageLines = append(messageLines, styledLine)
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	// Format footer
 	footer := "j/k Navigate  h/l Back/Forward  Esc Cancel"
@@ -175,7 +175,7 @@ func renderFilePickerProcessing(sp spinner.Model, config FilePickerConfig, width
 
 	// Build message lines with spinner
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	processingLine := fmt.Sprintf("%s Processing...", sp.View())
 	styledProcessing := lipgloss.NewStyle().
@@ -186,7 +186,7 @@ func renderFilePickerProcessing(sp spinner.Model, config FilePickerConfig, width
 		Render(processingLine)
 
 	messageLines = append(messageLines, styledProcessing)
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	// Format footer
 	footer := "Press Esc to cancel"
@@ -218,7 +218,7 @@ func renderFilePickerCleanup(sp spinner.Model, width, height int) string {
 
 	// Build content with spacing
 	var contentLines []string
-	contentLines = append(contentLines, strings.Repeat(" ", modalWidth)) // Top padding
+	contentLines = append(contentLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	cleanupLine := fmt.Sprintf("%s Cleaning up...", sp.View())
 	styledCleanup := lipgloss.NewStyle().
@@ -229,7 +229,7 @@ func renderFilePickerCleanup(sp spinner.Model, width, height int) string {
 		Render(cleanupLine)
 
 	contentLines = append(contentLines, styledCleanup)
-	contentLines = append(contentLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	contentLines = append(contentLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	// Apply BorderTop and BorderBottom
 	content := lipgloss.NewStyle().
@@ -262,7 +262,7 @@ func renderFilePickerSuccess(path string, title string, width, height int) strin
 
 	// Build message lines with file path
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	wrappedMsg := wordWrap(path, modalWidth-4)
 	messageStyle := lipgloss.NewStyle().
@@ -275,7 +275,7 @@ func renderFilePickerSuccess(path string, title string, width, height int) strin
 		messageLines = append(messageLines, styledLine)
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	// Format footer
 	footer := "Press Enter to acknowledge"
@@ -297,7 +297,7 @@ func renderFilePickerSuccess(path string, title string, width, height int) strin
 		leftPad = 0
 	}
 	rightPad := modalWidth - titleVisualWidth - leftPad
-	centeredTitle := strings.Repeat(" ", leftPad) + successTitle + strings.Repeat(" ", rightPad)
+	centeredTitle := safeRepeat(" ", leftPad) + successTitle + safeRepeat(" ", rightPad)
 
 	titleSection := lipgloss.NewStyle().
 		Bold(true).

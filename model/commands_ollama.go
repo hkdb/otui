@@ -212,10 +212,7 @@ func (m *Model) SendToOllama() tea.Cmd {
 			config.DebugLog.Printf("[Model] buildAPIMessages: uiMessages=%d, systemPrompt length=%d, tools=%d",
 				len(uiMessages), len(systemPrompt), len(mcpTools))
 			for i, msg := range uiMessages {
-				preview := msg.Content
-				if len(preview) > 80 {
-					preview = preview[:80] + "..."
-				}
+				preview := truncateRunes(msg.Content, 80)
 				config.DebugLog.Printf("[Model]   uiMessage[%d]: role=%s content=%q", i, msg.Role, preview)
 			}
 		}
@@ -378,10 +375,7 @@ func (m *Model) ExtractPurpose(contextMessages []Message, toolCall *ToolCall) st
 				if idx := strings.Index(content, "."); idx > 0 && idx < 100 {
 					return content[:idx]
 				}
-				if len(content) > 100 {
-					return content[:100] + "..."
-				}
-				return content
+				return truncateRunes(content, 100)
 			}
 		}
 		return "Processing response"
@@ -625,7 +619,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 			if len(finalResponse) > 0 && len(finalResponse) <= 200 {
 				config.DebugLog.Printf("Post-tool response content: %s", finalResponse)
 			} else if len(finalResponse) > 200 {
-				config.DebugLog.Printf("Post-tool response content (first 200): %s...", finalResponse[:200])
+				config.DebugLog.Printf("Post-tool response content (first 200): %s", truncateRunes(finalResponse, 200))
 			}
 		}
 

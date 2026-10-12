@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 	"otui/mcp"
 	"otui/storage"
 )
@@ -124,37 +125,10 @@ func renderSessionManager(a AppView,sessions []storage.SessionMetadata, selected
 				indicator = "▶ "
 			}
 
-			// Session name (truncate if needed)
-			name := session.Name
-			maxNameWidth := modalWidth - 40 // Reserve space for metadata + padding (no side borders)
-
-			// Show textinput if in rename mode for this session
-			var nameDisplay string
-			var hasBullet bool
-			if renameMode && i == selectedIdx {
-				// Show textinput inline with accent color
-				styledInput := lipgloss.NewStyle().
-					Foreground(accentColor).
-					Bold(true).
-					Render(renameInput.View())
-				nameDisplay = styledInput
-			} else {
-				if len(name) > maxNameWidth {
-					name = name[:maxNameWidth-3] + "..."
-				}
-				nameDisplay = name
-
-				// Check if session has system prompt (will add bullet after spacing calculation)
-				if session.SystemPrompt != "" {
-					hasBullet = true
-				}
-			}
-
-			// Check if this is the current session (will add marker after spacing calculation)
-			hasCurrentMarker := false
-			if session.ID == currentSessionID && !renameMode {
-				hasCurrentMarker = true
-			}
+			// Check if this is the current session / has a system prompt
+			// (markers are added after spacing calculation)
+			hasCurrentMarker := session.ID == currentSessionID && !renameMode
+			hasBullet := !(renameMode && i == selectedIdx) && session.SystemPrompt != ""
 
 			// Message count
 			msgCount := fmt.Sprintf("%d msgs", session.MessageCount)
@@ -168,12 +142,47 @@ func renderSessionManager(a AppView,sessions []storage.SessionMetadata, selected
 				parts := strings.Split(model, ":")
 				model = parts[0] // Just the base name
 			}
-			if len(model) > 10 {
-				model = model[:10]
-			}
+			model = runewidth.Truncate(model, 10, "")
 
 			// Time ago
 			timeAgo := formatTimeAgo(session.UpdatedAt)
+
+			// Right side: msgCount, model, timeAgo (right-aligned). In narrow
+			// terminals drop columns so the name keeps at least minNameWidth.
+			const minNameWidth = 10
+			markersWidth := 0
+			if hasCurrentMarker {
+				markersWidth += 10 // " (current)"
+			}
+			if hasBullet {
+				markersWidth += 2 // " •"
+			}
+			available := modalWidth - 4 - runewidth.StringWidth(indicator) - markersWidth - 2
+			rightSide := ""
+			for _, candidate := range []string{
+				fmt.Sprintf("%s  %10s  %8s", msgCount, model, timeAgo),
+				fmt.Sprintf("%s  %8s", msgCount, timeAgo),
+				msgCount,
+			} {
+				if available-runewidth.StringWidth(candidate) >= minNameWidth {
+					rightSide = candidate
+					break
+				}
+			}
+			maxNameWidth := available - runewidth.StringWidth(rightSide)
+
+			// Show textinput if in rename mode for this session
+			var nameDisplay string
+			if renameMode && i == selectedIdx {
+				// Show textinput inline with accent color
+				styledInput := lipgloss.NewStyle().
+					Foreground(accentColor).
+					Bold(true).
+					Render(renameInput.View())
+				nameDisplay = styledInput
+			} else {
+				nameDisplay = truncateWidth(session.Name, maxNameWidth)
+			}
 
 			// Style the name display individually BEFORE building leftSide
 			nameStyled := nameDisplay
@@ -186,12 +195,9 @@ func renderSessionManager(a AppView,sessions []storage.SessionMetadata, selected
 			// Left side: indicator + styled name (no marker yet - added after spacing)
 			leftSide := fmt.Sprintf("%s%s", indicator, nameStyled)
 
-			// Right side: msgCount, model, timeAgo (right-aligned)
-			rightSide := fmt.Sprintf("%s  %10s  %8s", msgCount, model, timeAgo)
-
 			// Calculate spacing using VISUAL width (not including ANSI codes)
-			leftVisualWidth := len(indicator) + len(nameDisplay)
-			spacing := modalWidth - 4 - leftVisualWidth - len(rightSide) // No side borders, just padding
+			leftVisualWidth := runewidth.StringWidth(indicator) + lipgloss.Width(nameDisplay)
+			spacing := modalWidth - 4 - leftVisualWidth - runewidth.StringWidth(rightSide) // No side borders, just padding
 
 			// Account for VISUAL width of styled markers we'll add (prevents line wrapping from ANSI codes)
 			if hasCurrentMarker {
@@ -229,7 +235,7 @@ func renderSessionManager(a AppView,sessions []storage.SessionMetadata, selected
 			}
 
 			// Build the final line with all styled components
-			styledLine := fmt.Sprintf("  %s%s%s  ", leftSide, strings.Repeat(" ", spacing), rightSideStyled)
+			styledLine := fmt.Sprintf("  %s%s%s  ", leftSide, safeRepeat(" ", spacing), rightSideStyled)
 
 			paddedLine := lipgloss.NewStyle().
 				Width(modalWidth).
@@ -240,7 +246,7 @@ func renderSessionManager(a AppView,sessions []storage.SessionMetadata, selected
 	}
 
 	// Add empty line before and after list
-	emptyLine := strings.Repeat(" ", modalWidth)
+	emptyLine := safeRepeat(" ", modalWidth)
 	sessionLines = append([]string{emptyLine}, sessionLines...)
 	sessionLines = append(sessionLines, emptyLine)
 
@@ -320,7 +326,7 @@ func renderExportModal(a AppView, exportInput textinput.Model, exporting bool, c
 	// State 3: Cleaning up (BorderTop/BorderBottom pattern like import cleanup)
 	if cleaningUp {
 		var contentLines []string
-		contentLines = append(contentLines, strings.Repeat(" ", modalWidth)) // Top padding
+		contentLines = append(contentLines, safeRepeat(" ", modalWidth)) // Top padding
 
 		cleanupLine := fmt.Sprintf("%s Cleaning up...", exportSpinner.View())
 		styledCleanup := lipgloss.NewStyle().
@@ -331,7 +337,7 @@ func renderExportModal(a AppView, exportInput textinput.Model, exporting bool, c
 			Render(cleanupLine)
 
 		contentLines = append(contentLines, styledCleanup)
-		contentLines = append(contentLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+		contentLines = append(contentLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 		content := lipgloss.NewStyle().
 			BorderTop(true).
@@ -349,7 +355,7 @@ func renderExportModal(a AppView, exportInput textinput.Model, exporting bool, c
 		title := "Processing Export"
 
 		var messageLines []string
-		messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+		messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 		exportLine := fmt.Sprintf("%s Exporting session...", exportSpinner.View())
 		styledExport := lipgloss.NewStyle().
@@ -360,7 +366,7 @@ func renderExportModal(a AppView, exportInput textinput.Model, exporting bool, c
 			Render(exportLine)
 
 		messageLines = append(messageLines, styledExport)
-		messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+		messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 		footer := "Press Esc to cancel"
 
@@ -379,7 +385,7 @@ func renderExportModal(a AppView, exportInput textinput.Model, exporting bool, c
 	title := "Export Session to JSON"
 
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	promptStyle := lipgloss.NewStyle().
 		Width(modalWidth).
@@ -395,7 +401,7 @@ func renderExportModal(a AppView, exportInput textinput.Model, exporting bool, c
 		Render("  " + exportInput.View())
 
 	messageLines = append(messageLines, inputLine)
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	footer := fmt.Sprintf("Esc Cancel  Enter Export  %s Clear", a.formatKeyDisplay("primary", "U"))
 
@@ -421,7 +427,7 @@ func renderExportSuccess(exportPath string, operationType string, width, height 
 
 	// Build message lines with file path
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	pathMsg := fmt.Sprintf("Exported to:\n%s", exportPath)
 	wrappedMsg := wordWrap(pathMsg, modalWidth-4)
@@ -435,7 +441,7 @@ func renderExportSuccess(exportPath string, operationType string, width, height 
 		messageLines = append(messageLines, styledLine)
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	// Format footer
 	footer := "Press Enter to acknowledge"
@@ -450,7 +456,7 @@ func renderExportSuccess(exportPath string, operationType string, width, height 
 		leftPad = 0
 	}
 	rightPad := modalWidth - titleVisualWidth - leftPad
-	centeredTitle := strings.Repeat(" ", leftPad) + successTitle + strings.Repeat(" ", rightPad)
+	centeredTitle := safeRepeat(" ", leftPad) + successTitle + safeRepeat(" ", rightPad)
 
 	titleSection := lipgloss.NewStyle().
 		Bold(true).
@@ -517,10 +523,10 @@ func renderImportSuccess(session *storage.Session, width, height int) string {
 		Foreground(dimColor).
 		Width(modalWidth)
 
-	topBorder := borderStyle.Render("┌" + strings.Repeat("─", modalWidth-2) + "┐")
-	middleBorder := borderStyle.Render("├" + strings.Repeat("─", modalWidth-2) + "┤")
-	bottomBorder := borderStyle.Render("└" + strings.Repeat("─", modalWidth-2) + "┘")
-	emptyLine := "│" + strings.Repeat(" ", modalWidth-2) + "│"
+	topBorder := borderStyle.Render("┌" + safeRepeat("─", modalWidth-2) + "┐")
+	middleBorder := borderStyle.Render("├" + safeRepeat("─", modalWidth-2) + "┤")
+	bottomBorder := borderStyle.Render("└" + safeRepeat("─", modalWidth-2) + "┘")
+	emptyLine := "│" + safeRepeat(" ", modalWidth-2) + "│"
 
 	var content strings.Builder
 	content.WriteString(topBorder + "\n")
@@ -566,7 +572,7 @@ func renderSessionModal(a AppView, title string, nameInput textinput.Model, prom
 
 	// 2. Message section - build content lines
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	// Session Name field
 	nameLabel := "Session Name:"
@@ -581,7 +587,7 @@ func renderSessionModal(a AppView, title string, nameInput textinput.Model, prom
 		nameStyle = nameStyle.Foreground(accentColor).Bold(true)
 	}
 	messageLines = append(messageLines, nameStyle.Render("  "+nameInput.View()))
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Spacing
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Spacing
 
 	// System Prompt field
 	promptLabel := "System Prompt:"
@@ -602,7 +608,7 @@ func renderSessionModal(a AppView, title string, nameInput textinput.Model, prom
 
 	// Add plugin section only for edit mode (when we have plugins to show)
 	if availablePlugins != nil || len(unavailablePluginIDs) > 0 {
-		messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Spacing
+		messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Spacing
 
 		// Plugin section header
 		pluginHeaderLabel := "Session Plugins:"
@@ -611,7 +617,7 @@ func renderSessionModal(a AppView, title string, nameInput textinput.Model, prom
 			pluginHeaderStyle = pluginHeaderStyle.Foreground(successColor).Bold(true)
 		}
 		messageLines = append(messageLines, pluginHeaderStyle.Render("  "+pluginHeaderLabel))
-		messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Spacing
+		messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Spacing
 
 		// Available plugins subsection
 		if len(availablePlugins) > 0 {
@@ -676,7 +682,7 @@ func renderSessionModal(a AppView, title string, nameInput textinput.Model, prom
 		// Unavailable plugins subsection (manager disabled)
 		if len(unavailablePluginIDs) > 0 {
 			if len(availablePlugins) > 0 {
-				messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Spacing
+				messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Spacing
 			}
 
 			unavailableHeader := lipgloss.NewStyle().
@@ -713,7 +719,7 @@ func renderSessionModal(a AppView, title string, nameInput textinput.Model, prom
 		}
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).

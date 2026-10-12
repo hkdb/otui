@@ -456,6 +456,10 @@ func (a AppView) View() string {
 		return "Loading OTUI..."
 	}
 
+	if terminalTooSmall(a.width, a.height) {
+		return renderTerminalTooSmall(a.width, a.height)
+	}
+
 	// Modal rendering order (top to bottom layers):
 	// 0. Plugin system operation modal (absolute highest priority - startup/shutdown)
 	// 1. Help (always on top - can peek while in other modals)
@@ -746,7 +750,7 @@ func (a AppView) View() string {
 	if spacing < 1 {
 		spacing = 1
 	}
-	headerLine := title + strings.Repeat(" ", spacing) + contextIndicator
+	headerLine := title + safeRepeat(" ", spacing) + contextIndicator
 	title = headerLine
 
 	// Separator with bottom margin for header (empty line forces spacing)

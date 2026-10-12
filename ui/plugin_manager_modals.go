@@ -32,7 +32,7 @@ func (a *AppView) renderInstallModal() string {
 
 	// Build message section based on state
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
@@ -87,7 +87,7 @@ func (a *AppView) renderInstallModal() string {
 		}
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -156,7 +156,7 @@ func renderConfigModal(
 
 	// Message section
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
@@ -339,7 +339,7 @@ func renderConfigModal(
 			// Mask sensitive values
 			displayValue := envVar.Value
 			if isSensitiveKey(envVar.Key) && !isEditing {
-				displayValue = strings.Repeat("*", len(envVar.Value))
+				displayValue = safeRepeat("*", len(envVar.Value))
 				if displayValue == "" {
 					displayValue = "<not set>"
 				}
@@ -394,7 +394,7 @@ func renderConfigModal(
 	}
 
 	messageLines = append(messageLines, addStyle.Render(addLine))
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -462,7 +462,7 @@ func (a *AppView) renderAddCustomModal() string {
 		Render(title)
 
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	// Get current install type to conditionally show Command field
 	installType := a.pluginManagerState.addCustomModal.fields["install_type"].Value()
@@ -606,7 +606,7 @@ func (a *AppView) renderAddCustomModal() string {
 	}
 	messageLines = append(messageLines, argsStyle.Render(argsLine))
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -652,7 +652,7 @@ func (a *AppView) renderEnvEditModal() string {
 		Render("Configure Environment Variables")
 
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	// Render existing env vars
 	numEnvVars := len(a.pluginManagerState.addCustomModal.envVars)
@@ -713,7 +713,7 @@ func (a *AppView) renderEnvEditModal() string {
 	}
 
 	messageLines = append(messageLines, addStyle.Render(addLine))
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -761,7 +761,7 @@ func (a *AppView) renderArgsEditModal() string {
 		Render("Configure Arguments")
 
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	// Render existing args
 	numArgs := len(a.pluginManagerState.addCustomModal.args)
@@ -822,7 +822,7 @@ func (a *AppView) renderArgsEditModal() string {
 	}
 
 	messageLines = append(messageLines, addStyle.Render(addLine))
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -868,7 +868,7 @@ func (a *AppView) renderArgEditForm() string {
 		Render("Add Argument")
 
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
@@ -950,7 +950,7 @@ func (a *AppView) renderArgEditForm() string {
 		messageLines = append(messageLines, labelStyle.Render(labelLine))
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -1229,7 +1229,7 @@ func (a *AppView) renderUninstallModal() string {
 
 	// Build message section based on state
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
@@ -1276,7 +1276,7 @@ func (a *AppView) renderUninstallModal() string {
 		}
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).

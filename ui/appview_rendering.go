@@ -239,7 +239,7 @@ func frameCodeBlocks(s string, width int) string {
 				lineLen := width - 4
 				leftLen := (lineLen - labelLen) / 2
 				rightLen := lineLen - labelLen - leftLen
-				border := darkGray + strings.Repeat("━", leftLen) + reset + label + darkGray + strings.Repeat("━", rightLen) + reset
+				border := darkGray + safeRepeat("━", leftLen) + reset + label + darkGray + safeRepeat("━", rightLen) + reset
 
 				result = append(result, border)
 				result = append(result, "") // Add blank line for top padding (inside border)
@@ -254,7 +254,7 @@ func frameCodeBlocks(s string, width int) string {
 				// End of code block - add padding, bottom border, and margin
 				result = append(result, codeBlockLines...)
 				result = append(result, "") // Add blank line for bottom padding (inside border)
-				border := darkGray + strings.Repeat("━", width-4) + reset
+				border := darkGray + safeRepeat("━", width-4) + reset
 				result = append(result, border)
 				result = append(result, "") // Add blank line for bottom margin (outside border)
 
@@ -269,7 +269,7 @@ func frameCodeBlocks(s string, width int) string {
 	if inCodeBlock && len(codeBlockLines) > 0 {
 		result = append(result, codeBlockLines...)
 		result = append(result, "") // Add blank line for bottom padding (inside border)
-		border := darkGray + strings.Repeat("━", width-4) + reset
+		border := darkGray + safeRepeat("━", width-4) + reset
 		result = append(result, border)
 		result = append(result, "") // Add blank line for bottom margin (outside border)
 	}
@@ -350,7 +350,7 @@ func wordWrapWithIndent(text string, prefix string, maxWidth int) string {
 
 	var result strings.Builder
 	var currentLine strings.Builder
-	indent := strings.Repeat(" ", prefixLen)
+	indent := safeRepeat(" ", prefixLen)
 	isFirstLine := true
 
 	for _, word := range words {
