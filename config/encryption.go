@@ -87,6 +87,11 @@ func (e *EncryptionManager) Initialize() error {
 		if err != nil {
 			return fmt.Errorf("failed to load SSH key: %w", err)
 		}
+
+		// Only key types with deterministic signatures derive a stable key
+		if keyType := signer.PublicKey().Type(); !IsSupportedEncryptionKeyType(keyType) {
+			return fmt.Errorf("%w: %s (use an ed25519 key)", ErrUnsupportedKeyType, keyType)
+		}
 		e.signer = signer
 
 		// Derive AES key from SSH signature

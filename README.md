@@ -187,7 +187,7 @@ To setup a additional new profiles after having setup the first profile already,
 
 A likely future feature is to be able to encrypt session data for better security and privacy which is especially applicable when using major cloud providers to sync.
 
-Last but not least all API keys are stored encrypted at rest with an ssh keypair **if the user chooses to enable it during setup**.
+Last but not least all API keys are stored encrypted at rest with an ssh keypair **if the user chooses to enable it during setup**. This requires an ed25519 key (OTUI can create one for you); RSA keys from existing setups also work, ECDSA/DSA keys are not supported.
 
 **Environment Variables:**
 

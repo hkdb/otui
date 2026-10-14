@@ -1446,7 +1446,7 @@ func (m WelcomeModel) updateSSHKeySourceScreen(msg tea.KeyMsg) (tea.Model, tea.C
 				return m, nil
 			}
 			if len(keys) == 0 {
-				m.err = "No SSH keys found. Please create one first."
+				m.err = "No ed25519 or RSA SSH keys found in ~/.ssh. Create an OTUI key instead."
 				return m, nil
 			}
 			m.availableKeys = keys

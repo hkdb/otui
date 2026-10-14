@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,11 +25,21 @@ func buildCredentialErrorMessage(err error) string {
 
 	msg.WriteString("Failed to load credentials.\n\n")
 
-	if strings.Contains(err.Error(), "failed to decrypt") {
+	dataDir := credentialsDataDir()
+
+	if errors.Is(err, config.ErrUnsupportedKeyType) {
+		msg.WriteString("This SSH key type can't be used to encrypt credentials.\n")
+		msg.WriteString("OTUI needs an ed25519 key (RSA keys also work).\n\n")
+		msg.WriteString("To fix:\n")
+		msg.WriteString("1. Create a key: ssh-keygen -t ed25519 -f ~/.ssh/otui_ed25519\n")
+		msg.WriteString(fmt.Sprintf("2. Set ssh_key_path in %s\n", filepath.Join(dataDir, "config.toml")))
+		msg.WriteString(fmt.Sprintf("3. Delete %s\n", filepath.Join(dataDir, "credentials.enc")))
+		msg.WriteString("4. Restart OTUI and re-enter your API keys")
+	} else if strings.Contains(err.Error(), "failed to decrypt") {
 		msg.WriteString("The credentials file may be corrupted or encrypted\n")
 		msg.WriteString("with a different SSH key.\n\n")
 		msg.WriteString("To fix:\n")
-		msg.WriteString("1. Delete: ~/.local/share/otui/credentials.enc\n")
+		msg.WriteString(fmt.Sprintf("1. Delete: %s\n", filepath.Join(dataDir, "credentials.enc")))
 		msg.WriteString("2. Restart OTUI and re-enter your API keys")
 	} else {
 		msg.WriteString(fmt.Sprintf("Error: %v\n\n", err))
@@ -36,6 +47,20 @@ func buildCredentialErrorMessage(err error) string {
 	}
 
 	return msg.String()
+}
+
+// credentialsDataDir returns the data directory for error messages: the
+// OTUI_DATA_DIR/settings.toml one, or the default
+func credentialsDataDir() string {
+	if env, err := config.ReadEnvConfig(); err == nil && env != nil {
+		return config.ExpandPath(env.DataDir)
+	}
+	if config.SystemConfigExists() {
+		if systemCfg, err := config.LoadSystemConfig(); err == nil {
+			return config.ExpandPath(systemCfg.DataDirectory)
+		}
+	}
+	return config.GetDefaultDataDir()
 }
 
 // extractSSHKeyPath attempts to extract SSH key path from config

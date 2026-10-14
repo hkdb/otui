@@ -45,14 +45,66 @@ func IsSSHKeyEncrypted(keyPath string) (bool, error) {
 		return false, nil // Key is not encrypted
 	}
 
-	// Check if error is due to encryption
-	if strings.Contains(err.Error(), "encrypted") ||
-		strings.Contains(err.Error(), "passphrase") {
+	var missing *ssh.PassphraseMissingError
+	if errors.As(err, &missing) {
 		return true, nil // Key is encrypted
 	}
 
 	// Other error (invalid key format, etc.)
 	return false, fmt.Errorf("invalid SSH key: %w", err)
+}
+
+// ErrUnsupportedKeyType is returned when an SSH key can't be used to encrypt
+// credentials
+var ErrUnsupportedKeyType = errors.New("unsupported SSH key type")
+
+// IsSupportedEncryptionKeyType reports whether keys of this type can be used
+// to encrypt credentials. The encryption key is derived from a signature, so
+// signatures must be deterministic: ed25519 (used for new keys) and RSA (kept
+// for existing setups) are. ECDSA and DSA signatures are randomized, which
+// would derive a different key every launch.
+func IsSupportedEncryptionKeyType(keyType string) bool {
+	return keyType == ssh.KeyAlgoED25519 || keyType == ssh.KeyAlgoRSA
+}
+
+// SSHKeyType returns the type of a private key file (e.g. "ssh-ed25519")
+// without needing its passphrase
+func SSHKeyType(keyPath string) (string, error) {
+	keyData, err := os.ReadFile(keyPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read SSH key: %w", err)
+	}
+
+	signer, err := ssh.ParsePrivateKey(keyData)
+	if err == nil {
+		return signer.PublicKey().Type(), nil
+	}
+
+	// Encrypted OpenSSH keys include the public key
+	var missing *ssh.PassphraseMissingError
+	if errors.As(err, &missing) && missing.PublicKey != nil {
+		return missing.PublicKey.Type(), nil
+	}
+
+	// Fall back to the matching .pub file
+	if pubData, pubErr := os.ReadFile(keyPath + ".pub"); pubErr == nil {
+		if pub, _, _, _, pubErr := ssh.ParseAuthorizedKey(pubData); pubErr == nil {
+			return pub.Type(), nil
+		}
+	}
+
+	// Legacy PEM keys name their type in the header
+	content := string(keyData)
+	switch {
+	case strings.Contains(content, "BEGIN RSA PRIVATE KEY"):
+		return ssh.KeyAlgoRSA, nil
+	case strings.Contains(content, "BEGIN EC PRIVATE KEY"):
+		return "ecdsa", nil
+	case strings.Contains(content, "BEGIN DSA PRIVATE KEY"):
+		return ssh.KeyAlgoDSA, nil
+	}
+
+	return "", fmt.Errorf("unable to determine SSH key type: %w", err)
 }
 
 // IsIncorrectPassphrase reports whether err was caused by a wrong SSH key
@@ -91,24 +143,25 @@ func FindSSHKeys() ([]string, error) {
 		return []string{}, nil
 	}
 
-	// Common SSH key names (prioritize OTUI key)
+	// Common SSH key names (prioritize OTUI key). Only key types that can
+	// encrypt credentials (see IsSupportedEncryptionKeyType).
 	keyNames := []string{
 		"otui_ed25519", // OTUI-specific key (highest priority)
 		"id_ed25519",   // Modern ED25519
-		"id_rsa",       // RSA
-		"id_ecdsa",     // ECDSA
-		"id_dsa",       // DSA (legacy)
+		"id_rsa",       // RSA (existing setups)
 	}
 
 	var foundKeys []string
 	for _, name := range keyNames {
 		keyPath := filepath.Join(sshDir, name)
-		if _, err := os.Stat(keyPath); err == nil {
-			// Verify it's actually a private key
-			if isPrivateKey(keyPath) {
-				foundKeys = append(foundKeys, keyPath)
-			}
+		if _, err := os.Stat(keyPath); err != nil || !isPrivateKey(keyPath) {
+			continue
 		}
+		// The file name doesn't guarantee the type
+		if keyType, err := SSHKeyType(keyPath); err != nil || !IsSupportedEncryptionKeyType(keyType) {
+			continue
+		}
+		foundKeys = append(foundKeys, keyPath)
 	}
 
 	return foundKeys, nil
