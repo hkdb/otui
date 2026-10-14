@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -149,10 +150,23 @@ func NormalizeDataDirectory(input string) (string, error) {
 	return otuiPath, nil
 }
 
-// GetTempDir returns the path to the secure temp directory
-// Always uses cache directory, never data directory (to avoid cloud sync)
+// tempDir is this process's own temp directory (set by InitTempDir)
+var tempDir string
+
+// tempBaseDir holds one temp directory per running OTUI instance, so
+// instances (e.g. on different profiles) never touch each other's files.
+// Always in the cache directory, never the data directory (to avoid cloud
+// sync). Not "tmp": older versions delete that whole directory on start/exit.
+func tempBaseDir() string {
+	return filepath.Join(GetCacheDir(), "run")
+}
+
+// GetTempDir returns this process's secure temp directory
 func GetTempDir() string {
-	return filepath.Join(GetCacheDir(), "tmp")
+	if tempDir != "" {
+		return tempDir
+	}
+	return tempBaseDir()
 }
 
 // GetEditorTempFile returns the path to the reusable editor temp file
@@ -178,19 +192,56 @@ func EnsureDataDirPermissions(dataDir string) error {
 	return nil
 }
 
-// CleanupTempDir removes the temp directory if it exists
-func CleanupTempDir() error {
-	tmpDir := GetTempDir()
-	if _, err := os.Stat(tmpDir); err == nil {
-		return os.RemoveAll(tmpDir)
+// InitTempDir creates this process's temp directory (<cache>/run/<pid>-*)
+// after removing directories left behind by instances that are no longer
+// running (crash recovery)
+func InitTempDir() error {
+	base := tempBaseDir()
+	if err := os.MkdirAll(base, 0700); err != nil {
+		return err
 	}
+	cleanupStaleTempDirs(base)
+
+	dir, err := os.MkdirTemp(base, fmt.Sprintf("%d-", os.Getpid()))
+	if err != nil {
+		return err
+	}
+	tempDir = dir
 	return nil
 }
 
-// CreateTempDir creates the secure temp directory with 0700 permissions
-func CreateTempDir() error {
-	tmpDir := GetTempDir()
-	return os.MkdirAll(tmpDir, 0700)
+// cleanupStaleTempDirs removes temp directories of instances that aren't
+// running. A directory with our own PID is stale too: it was left by an
+// earlier run of this process before it restarted itself in place.
+func cleanupStaleTempDirs(base string) {
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		pidStr, _, found := strings.Cut(entry.Name(), "-")
+		pid, err := strconv.Atoi(pidStr)
+		if !found || err != nil || !entry.IsDir() {
+			continue // Not ours
+		}
+		path := filepath.Join(base, entry.Name())
+		if path == tempDir {
+			continue
+		}
+		if pid == os.Getpid() || !processAlive(pid) {
+			_ = os.RemoveAll(path)
+		}
+	}
+}
+
+// CleanupTempDir removes this process's temp directory
+func CleanupTempDir() error {
+	if tempDir == "" {
+		return nil
+	}
+	dir := tempDir
+	tempDir = ""
+	return os.RemoveAll(dir)
 }
 
 // ClearEditorTempFile clears the contents of the editor temp file

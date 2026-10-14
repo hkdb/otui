@@ -219,13 +219,9 @@ func main() {
 	// Initialize debug logging after config is loaded
 	config.InitDebugLog(cfg.DataDir())
 
-	// Clean up old tmp dir in cache directory (crash recovery)
-	if err := config.CleanupTempDir(); err != nil && config.DebugLog != nil {
-		config.DebugLog.Printf("Warning: failed to cleanup old temp directory: %v", err)
-	}
-
-	// Create secure temp directory in cache (never synced to cloud)
-	if err := config.CreateTempDir(); err != nil {
+	// Create this instance's secure temp directory in cache (never synced to
+	// cloud) and remove ones left behind by crashed instances
+	if err := config.InitTempDir(); err != nil {
 		fmt.Printf("Failed to create secure temp directory: %v\n", err)
 		os.Exit(1)
 	}
