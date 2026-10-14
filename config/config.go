@@ -263,7 +263,47 @@ func InitDebugLog(dataDir string) {
 	DebugLog.Printf("Log path: %s", logPath)
 }
 
+// Load loads the configuration including credentials. Used at startup and
+// when switching to another data directory. For credentials protected by a
+// passphrase it returns the config together with a "passphrase required"
+// error so the caller can retry with the passphrase.
 func Load() (*Config, error) {
+	cfg, err := loadConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	// Initialize CredentialStore
+	credMethod := SecurityMethod(cfg.Security.CredentialStorage)
+	cfg.CredentialStore = NewCredentialStore(credMethod, cfg.Security.SSHKeyPath)
+
+	// Load credentials
+	if err := cfg.CredentialStore.Load(cfg.DataDir()); err != nil {
+		// If error is due to missing passphrase, return partial config so caller can retry with passphrase
+		if strings.Contains(err.Error(), "passphrase required") {
+			return cfg, fmt.Errorf("failed to load credentials: %w", err)
+		}
+		// For other errors, return nil
+		return nil, fmt.Errorf("failed to load credentials: %w", err)
+	}
+
+	return cfg, nil
+}
+
+// Reload re-reads the configuration files while the app is running, keeping
+// the already unlocked credential store (so no passphrase is needed and the
+// store stays shared with providers and plugins).
+func Reload(store *CredentialStore) (*Config, error) {
+	cfg, err := loadConfig()
+	if err != nil {
+		return nil, err
+	}
+	cfg.CredentialStore = store
+	return cfg, nil
+}
+
+// loadConfig loads everything except credentials
+func loadConfig() (*Config, error) {
 	cfg := &Config{
 		DataDirectory: "~/.local/share/otui",
 		OllamaHost:    "http://localhost:11434",
@@ -309,14 +349,10 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to set data directory permissions: %w", err)
 	}
 
-	// Initialize CredentialStore
 	// Default to plaintext if not specified
 	if cfg.Security.CredentialStorage == "" {
 		cfg.Security.CredentialStorage = string(SecurityPlainText)
 	}
-
-	credMethod := SecurityMethod(cfg.Security.CredentialStorage)
-	cfg.CredentialStore = NewCredentialStore(credMethod, cfg.Security.SSHKeyPath)
 
 	// Load keybindings before credentials so the partial config returned when
 	// a passphrase is required is complete apart from credentials
@@ -325,16 +361,6 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to load keybindings: %w", err)
 	}
 	cfg.Keybindings = keybindingsCfg
-
-	// Load credentials
-	if err := cfg.CredentialStore.Load(dataDir); err != nil {
-		// If error is due to missing passphrase, return partial config so caller can retry with passphrase
-		if strings.Contains(err.Error(), "passphrase required") {
-			return cfg, fmt.Errorf("failed to load credentials: %w", err)
-		}
-		// For other errors, return nil
-		return nil, fmt.Errorf("failed to load credentials: %w", err)
-	}
 
 	return cfg, nil
 }

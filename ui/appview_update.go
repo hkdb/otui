@@ -1023,7 +1023,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if config.DebugLog != nil {
 				config.DebugLog.Printf("[UI] Plugin startup SUCCESS - reloading config")
 			}
-			cfg, err := config.Load()
+			cfg, err := config.Reload(a.dataModel.Config.CredentialStore)
 			if err != nil {
 				if config.DebugLog != nil {
 					config.DebugLog.Printf("[UI] ERROR reloading config after plugin enable: %v", err)
@@ -1109,7 +1109,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if config.DebugLog != nil {
 				config.DebugLog.Printf("[UI] Plugin shutdown SUCCESS - reloading config")
 			}
-			cfg, err := config.Load()
+			cfg, err := config.Reload(a.dataModel.Config.CredentialStore)
 			if err != nil {
 				if config.DebugLog != nil {
 					config.DebugLog.Printf("[UI] ERROR reloading config: %v", err)

@@ -105,8 +105,8 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Re-initialize providers and fetch models (shared helper with debug logging)
 			return a, a.refreshProvidersAndModels()
 		case !msg.success:
-			// Show error
-			a.providerSettingsState.saveError = msg.err.Error()
+			// Shown on the Settings screen (Provider Settings is already closed)
+			a.settingsSaveError = fmt.Sprintf("Failed to save provider settings: %v", msg.err)
 		}
 		return a, nil
 	}
@@ -205,7 +205,9 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reload config immediately after successful save to pick up fresh values
 		// This was removed during data dir refactor but is needed for ALL settings saves
 		// (not just data dir changes). Fixes regression from commit 094e265.
-		cfg, err := config.Load()
+		// Keeps the unlocked credential store (no passphrase needed). A data
+		// dir change is loaded properly by switchDataDirectory below.
+		cfg, err := config.Reload(a.dataModel.Config.CredentialStore)
 		if err != nil {
 			if config.DebugLog != nil {
 				config.DebugLog.Printf("[Settings Save] ERROR reloading config: %v", err)

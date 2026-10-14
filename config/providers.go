@@ -23,9 +23,11 @@ func GetProviderBaseURL(providers []ProviderConfig, providerID string) string {
 // This is the business logic layer for provider settings.
 //
 // Fields:
-//   - Ollama: "host", "apikey", "enabled"
-//   - OpenAI Compatible: "base_url", "apikey", "enabled"
-//   - Cloud providers: "apikey", "enabled"
+//   - Ollama: "host", "enabled"
+//   - OpenAI Compatible: "base_url", "enabled"
+//   - Cloud providers: "enabled"
+//
+// API keys are credentials - use SaveProviderAPIKeys with the live store.
 func UpdateProviderField(dataDir, providerID, fieldName, value string) error {
 	// Load existing config
 	cfg, err := LoadUserConfig(dataDir)
@@ -47,24 +49,6 @@ func UpdateProviderField(dataDir, providerID, fieldName, value string) error {
 					break
 				}
 			}
-		case "apikey":
-			// Update API key in credentials (same pattern as cloud providers)
-			fullCfg, err := Load()
-			if err != nil {
-				return fmt.Errorf("failed to load full config for credential update: %w", err)
-			}
-
-			if fullCfg.CredentialStore != nil {
-				if err := fullCfg.CredentialStore.Set("ollama", value); err != nil {
-					return fmt.Errorf("failed to set API key: %w", err)
-				}
-
-				if err := fullCfg.CredentialStore.Save(dataDir); err != nil {
-					return fmt.Errorf("failed to persist credentials: %w", err)
-				}
-			}
-			// Don't save UserConfig for API key changes (already saved credentials)
-			return nil
 		case "enabled":
 			if err := updateProviderEnabled(cfg, providerID, value == "true"); err != nil {
 				return err
@@ -85,27 +69,6 @@ func UpdateProviderField(dataDir, providerID, fieldName, value string) error {
 			}
 			findOrAddProvider(cfg, providerID).BaseURL = value
 			// Fall through to SaveUserConfig() below
-		case "apikey":
-			// Update API key in credentials
-			// Note: We need to load the full Config to access CredentialStore
-			fullCfg, err := Load()
-			if err != nil {
-				return fmt.Errorf("failed to load full config for credential update: %w", err)
-			}
-
-			if fullCfg.CredentialStore != nil {
-				if err := fullCfg.CredentialStore.Set(providerID, value); err != nil {
-					return fmt.Errorf("failed to set API key: %w", err)
-				}
-
-				// Save credentials to disk
-				if err := fullCfg.CredentialStore.Save(dataDir); err != nil {
-					return fmt.Errorf("failed to persist credentials: %w", err)
-				}
-			}
-			// Don't save UserConfig for API key changes (already saved credentials)
-			return nil
-
 		case "enabled":
 			if err := updateProviderEnabled(cfg, providerID, value == "true"); err != nil {
 				return err
@@ -124,6 +87,35 @@ func UpdateProviderField(dataDir, providerID, fieldName, value string) error {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 
+	return nil
+}
+
+// SaveProviderAPIKeys stores changed API keys (provider ID -> key) in the
+// running app's credential store and saves it to dataDir. Using the live
+// store matters for passphrase protected credentials, which a freshly loaded
+// store couldn't decrypt. Writes nothing if no key changed.
+func SaveProviderAPIKeys(store *CredentialStore, dataDir string, keys map[string]string) error {
+	if store == nil {
+		return fmt.Errorf("no credential store")
+	}
+
+	changed := false
+	for providerID, key := range keys {
+		if store.Get(providerID) == key {
+			continue
+		}
+		if err := store.Set(providerID, key); err != nil {
+			return fmt.Errorf("failed to set API key for %s: %w", providerID, err)
+		}
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+
+	if err := store.Save(dataDir); err != nil {
+		return fmt.Errorf("failed to save credentials: %w", err)
+	}
 	return nil
 }
 
