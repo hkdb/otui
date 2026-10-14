@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,7 +67,7 @@ func LoadUserConfig(dataDir string) (*UserConfig, error) {
 		// Insert as top-level keys (before the first table, so TOML doesn't
 		// put them in whatever table comes last)
 		migration := "# Multi-step execution (Phase 2)\nenable_multi_step = true\nmax_iterations = 10\n\n"
-		if err := os.WriteFile(userConfigPath, []byte(insertBeforeFirstTable(string(content), migration)), 0600); err == nil {
+		if err := WriteFileAtomic(userConfigPath, []byte(insertBeforeFirstTable(string(content), migration)), 0600); err == nil {
 			if Debug && DebugLog != nil {
 				DebugLog.Printf("[Config] Migrated: added enable_multi_step and max_iterations to config")
 			}
@@ -222,17 +223,14 @@ func SaveSystemConfig(cfg *SystemConfig) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	settingsPath := GetSettingsFilePath()
-	// Create with secure permissions (0600 - contains Ollama host/model settings)
-	f, err := os.OpenFile(settingsPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return fmt.Errorf("failed to create system config file: %w", err)
-	}
-	defer f.Close()
-
-	encoder := toml.NewEncoder(f)
-	if err := encoder.Encode(cfg); err != nil {
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
 		return fmt.Errorf("failed to encode system config: %w", err)
+	}
+
+	// Secure permissions (0600 - contains data directory location)
+	if err := WriteFileAtomic(GetSettingsFilePath(), buf.Bytes(), 0600); err != nil {
+		return fmt.Errorf("failed to write system config file: %w", err)
 	}
 
 	return nil
@@ -244,17 +242,14 @@ func SaveUserConfig(cfg *UserConfig, dataDir string) error {
 		return fmt.Errorf("failed to create data directory: %w", err)
 	}
 
-	userConfigPath := filepath.Join(dataDir, "config.toml")
-	// Create with secure permissions (0600 - user configuration data)
-	f, err := os.OpenFile(userConfigPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return fmt.Errorf("failed to create user config file: %w", err)
-	}
-	defer f.Close()
-
-	encoder := toml.NewEncoder(f)
-	if err := encoder.Encode(cfg); err != nil {
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
 		return fmt.Errorf("failed to encode user config: %w", err)
+	}
+
+	// Secure permissions (0600 - user configuration data)
+	if err := WriteFileAtomic(filepath.Join(dataDir, "config.toml"), buf.Bytes(), 0600); err != nil {
+		return fmt.Errorf("failed to write user config file: %w", err)
 	}
 
 	return nil

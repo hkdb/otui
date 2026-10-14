@@ -108,7 +108,7 @@ func (r *Registry) Refresh() error {
 		return fmt.Errorf("failed to marshal plugins: %w", err)
 	}
 
-	if err := os.WriteFile(cachedPath, data, 0600); err != nil {
+	if err := config.WriteFileAtomic(cachedPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write cache: %w", err)
 	}
 
@@ -305,7 +305,7 @@ func (r *Registry) saveCustomPlugins() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(customPath, data, 0600)
+	return config.WriteFileAtomic(customPath, data, 0600)
 }
 
 func fetchRegistry() ([]Plugin, error) {

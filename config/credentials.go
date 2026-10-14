@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -88,6 +89,9 @@ func (c *CredentialStore) Get(providerID string) string {
 
 // Set stores a credential for a provider
 func (c *CredentialStore) Set(providerID string, apiKey string) error {
+	if c.credentials == nil {
+		c.credentials = make(map[string]string)
+	}
 	c.credentials[providerID] = apiKey
 	return nil
 }
@@ -108,6 +112,9 @@ func (c *CredentialStore) GetPlugin(pluginID, key string) string {
 // SetPlugin stores a plugin credential
 func (c *CredentialStore) SetPlugin(pluginID, key, value string) error {
 	credKey := fmt.Sprintf("plugin_%s_%s", pluginID, key)
+	if c.credentials == nil {
+		c.credentials = make(map[string]string)
+	}
 	c.credentials[credKey] = value
 	return nil
 }
@@ -171,6 +178,10 @@ func loadPlainText(dataDir string) (map[string]string, error) {
 		return nil, fmt.Errorf("failed to parse credentials file: %w", err)
 	}
 
+	// An empty file (or one without a [credentials] table) has no map
+	if cf.Credentials == nil {
+		return make(map[string]string), nil
+	}
 	return cf.Credentials, nil
 }
 
@@ -187,17 +198,15 @@ func savePlainText(dataDir string, creds map[string]string) error {
 		Credentials: creds,
 	}
 
-	// Create file with 0600 permissions (owner read/write only)
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return fmt.Errorf("failed to create credentials file: %w", err)
-	}
-	defer f.Close()
-
 	// Encode to TOML
-	encoder := toml.NewEncoder(f)
-	if err := encoder.Encode(cf); err != nil {
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(cf); err != nil {
 		return fmt.Errorf("failed to encode credentials: %w", err)
+	}
+
+	// Write atomically with 0600 permissions (owner read/write only)
+	if err := WriteFileAtomic(path, buf.Bytes(), 0600); err != nil {
+		return fmt.Errorf("failed to write credentials file: %w", err)
 	}
 
 	return nil
@@ -250,6 +259,9 @@ func (c *CredentialStore) loadSSHEncrypted(dataDir string) (map[string]string, e
 	if err := json.Unmarshal(decryptedData, &creds); err != nil {
 		return nil, fmt.Errorf("failed to parse decrypted credentials: %w", err)
 	}
+	if creds == nil { // "null"
+		creds = make(map[string]string)
+	}
 
 	return creds, nil
 }
@@ -279,8 +291,8 @@ func (c *CredentialStore) saveSSHEncrypted(dataDir string) error {
 		return fmt.Errorf("failed to encrypt credentials: %w", err)
 	}
 
-	// Write to file with 0600 permissions
-	if err := os.WriteFile(path, encryptedData, 0600); err != nil {
+	// Write atomically with 0600 permissions
+	if err := WriteFileAtomic(path, encryptedData, 0600); err != nil {
 		return fmt.Errorf("failed to write encrypted credentials: %w", err)
 	}
 

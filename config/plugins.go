@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -49,16 +50,14 @@ func SavePluginsConfig(dataDir string, config *PluginsConfig) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Create file with secure permissions (0600 - will contain API keys in future)
-	f, err := os.OpenFile(pluginsConfigPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return fmt.Errorf("failed to create plugins config file: %w", err)
-	}
-	defer f.Close()
-
-	encoder := toml.NewEncoder(f)
-	if err := encoder.Encode(config); err != nil {
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(config); err != nil {
 		return fmt.Errorf("failed to encode plugins config: %w", err)
+	}
+
+	// Secure permissions (0600 - will contain API keys in future)
+	if err := WriteFileAtomic(pluginsConfigPath, buf.Bytes(), 0600); err != nil {
+		return fmt.Errorf("failed to write plugins config file: %w", err)
 	}
 
 	return nil

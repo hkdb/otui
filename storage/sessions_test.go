@@ -217,3 +217,35 @@ func TestSessionLockPID(t *testing.T) {
 		}
 	})
 }
+
+func TestSessionSaveIsAtomic(t *testing.T) {
+	dataDir := t.TempDir()
+	ss, err := NewSessionStorage(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	session := &Session{ID: "s1", Name: "first", Messages: []Message{{Role: "user", Content: "hi"}}}
+	if err := ss.Save(session); err != nil {
+		t.Fatal(err)
+	}
+	session.Name = "renamed"
+	if err := ss.Save(session); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := ss.Load("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Name != "renamed" || len(loaded.Messages) != 1 {
+		t.Errorf("loaded %+v", loaded)
+	}
+
+	entries, _ := os.ReadDir(ss.sessionsDir)
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp-") {
+			t.Errorf("leftover temp file %s", e.Name())
+		}
+	}
+}

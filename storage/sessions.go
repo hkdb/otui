@@ -103,8 +103,9 @@ func (s *SessionStorage) Save(session *Session) error {
 		return fmt.Errorf("failed to marshal session: %w", err)
 	}
 
-	// Use 0600 permissions - session files contain sensitive conversation history
-	if err := os.WriteFile(filepath, data, 0600); err != nil {
+	// Use 0600 permissions - session files contain sensitive conversation history.
+	// Written atomically so a crash mid-save can't truncate the session.
+	if err := config.WriteFileAtomic(filepath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write session file: %w", err)
 	}
 
@@ -202,7 +203,7 @@ func (s *SessionStorage) Delete(id string) error {
 // SaveCurrentSessionID saves the ID of the current session
 func (s *SessionStorage) SaveCurrentSessionID(id string) error {
 	filepath := filepath.Join(filepath.Dir(s.sessionsDir), "current_session.id")
-	return os.WriteFile(filepath, []byte(id), 0600)
+	return config.WriteFileAtomic(filepath, []byte(id), 0600)
 }
 
 // LoadCurrentSessionID loads the ID of the last active session
