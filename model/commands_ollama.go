@@ -227,9 +227,9 @@ func (m *Model) SendToOllama() tea.Cmd {
 		err := client.ChatWithTools(ctx, messages, mcpTools, func(chunk string, toolCalls []ToolCall) error {
 			responseBuilder.WriteString(chunk)
 			chunks = append(chunks, chunk)
-			if len(toolCalls) > 0 && len(detectedToolCalls) == 0 {
-				detectedToolCalls = toolCalls
-			}
+			// Providers report tool calls per callback (OpenAI-style APIs
+			// send one per call), so keep every call, not just the first batch
+			detectedToolCalls = appendToolCalls(detectedToolCalls, toolCalls)
 			return nil
 		})
 
@@ -381,24 +381,8 @@ func (m *Model) ExtractPurpose(contextMessages []Message, toolCall *ToolCall) st
 		return "Processing response"
 	}
 
-	// Try to extract fresh reasoning from LAST assistant message only
-	// If message is short (< 150 chars), it's likely current reasoning
-	// If message is long (>= 150 chars), it's likely a previous answer - skip it
-
-	if len(contextMessages) > 0 {
-		lastMsg := contextMessages[len(contextMessages)-1]
-		if lastMsg.Role == "assistant" && lastMsg.Content != "" {
-			content := strings.TrimSpace(lastMsg.Content)
-
-			// Short content = likely fresh reasoning, use it
-			if len(content) < 150 {
-				// Extract first sentence if present
-				if idx := strings.Index(content, "."); idx > 0 && idx < 100 {
-					return content[:idx]
-				}
-				return content
-			}
-		}
+	if reasoning := extractReasoning(contextMessages); reasoning != "" {
+		return reasoning
 	}
 
 	// Fallback: Build purpose from tool arguments
@@ -413,6 +397,53 @@ func (m *Model) ExtractPurpose(contextMessages []Message, toolCall *ToolCall) st
 	}
 
 	return fmt.Sprintf("Execute %s", toolBase)
+}
+
+// extractReasoning returns the LLM's fresh reasoning from the LAST assistant
+// message: short messages (< 150 chars) are likely current reasoning, long
+// ones are likely a previous answer and are skipped
+func extractReasoning(contextMessages []Message) string {
+	if len(contextMessages) == 0 {
+		return ""
+	}
+	lastMsg := contextMessages[len(contextMessages)-1]
+	if lastMsg.Role != "assistant" || lastMsg.Content == "" {
+		return ""
+	}
+	content := strings.TrimSpace(lastMsg.Content)
+	if len(content) >= 150 {
+		return ""
+	}
+	// Extract first sentence if present
+	if idx := strings.Index(content, "."); idx > 0 && idx < 100 {
+		return content[:idx]
+	}
+	return content
+}
+
+// StepPurpose describes a step that runs toolCalls: the LLM's reasoning if
+// there is any, otherwise the purpose of a single call, or the names of all
+// tools when there are several
+func (m *Model) StepPurpose(contextMessages []Message, toolCalls []ToolCall) string {
+	switch {
+	case len(toolCalls) == 0:
+		return m.ExtractPurpose(contextMessages, nil)
+	case len(toolCalls) == 1:
+		return m.ExtractPurpose(contextMessages, &toolCalls[0])
+	}
+
+	if reasoning := extractReasoning(contextMessages); reasoning != "" {
+		return reasoning
+	}
+	var names []string
+	for _, tc := range toolCalls {
+		name := tc.Name
+		if idx := strings.Index(name, "."); idx != -1 {
+			name = name[idx+1:]
+		}
+		names = append(names, name)
+	}
+	return "Execute " + strings.Join(names, ", ")
 }
 
 // ExecuteToolsAndContinue executes detected tool calls and sends results back to LLM
@@ -446,10 +477,14 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 						config.DebugLog.Printf("Permission required for tool: %s (purpose: %s)", toolName, purpose)
 					}
 
+					// Carry the whole batch so approving this tool re-runs
+					// all calls (asking about any other unapproved ones next)
 					return ToolPermissionRequestMsg{
 						ToolName:        toolName,
 						Purpose:         purpose,
 						ToolCall:        toolCall,
+						ToolCalls:       msg.ToolCalls,
+						InitialResponse: msg.InitialResponse,
 						ContextMessages: msg.ContextMessages,
 					}
 				}
@@ -530,7 +565,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 				firstToolCall = &msg.ToolCalls[0]
 			}
 
-			purpose := m.ExtractPurpose(msg.ContextMessages, firstToolCall)
+			purpose := m.StepPurpose(msg.ContextMessages, msg.ToolCalls)
 
 			step := IterationStep{
 				StepNumber: m.CurrentIteration,
@@ -541,15 +576,18 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 			}
 			step.Duration = step.EndTime.Sub(step.StartTime)
 
-			// Store tool info (internal use only, not displayed)
+			// Store tool info (all tools of this step when there are several)
 			if firstToolCall != nil {
 				step.ToolName = firstToolCall.Name
-				if idx := strings.LastIndex(step.ToolName, "."); idx != -1 {
-					step.ShortName = step.ToolName[idx+1:]
+				var shortNames []string
+				for _, tc := range msg.ToolCalls {
+					shortName := tc.Name
+					if idx := strings.LastIndex(shortName, "."); idx != -1 {
+						shortName = shortName[idx+1:]
+					}
+					shortNames = append(shortNames, shortName)
 				}
-				if step.ShortName == "" {
-					step.ShortName = step.ToolName
-				}
+				step.ShortName = strings.Join(shortNames, ", ")
 			}
 
 			m.IterationHistory = append(m.IterationHistory, step)
@@ -589,9 +627,9 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 		err := client.ChatWithTools(ctx, fullMessages, nextTools, func(chunk string, toolCalls []ToolCall) error {
 			responseBuilder.WriteString(chunk)
 			chunks = append(chunks, chunk)
-			if len(toolCalls) > 0 && len(detectedToolCalls) == 0 {
-				detectedToolCalls = toolCalls
-			}
+			// Providers report tool calls per callback (OpenAI-style APIs
+			// send one per call), so keep every call, not just the first batch
+			detectedToolCalls = appendToolCalls(detectedToolCalls, toolCalls)
 			return nil
 		})
 
@@ -844,4 +882,33 @@ func cleanLeakedToolCalls(content string) string {
 	content = strings.TrimSpace(content)
 
 	return content
+}
+
+// appendToolCalls adds newly reported tool calls to those already collected
+// for a response. Exact duplicates (same name and arguments) are skipped:
+// text-based tool call parsing can report the same call twice.
+func appendToolCalls(existing, calls []ToolCall) []ToolCall {
+	for _, call := range calls {
+		duplicate := false
+		for _, have := range existing {
+			if sameToolCall(have, call) {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			existing = append(existing, call)
+		}
+	}
+	return existing
+}
+
+// sameToolCall reports whether two tool calls have the same name and arguments
+func sameToolCall(a, b ToolCall) bool {
+	if a.Name != b.Name {
+		return false
+	}
+	argsA, errA := json.Marshal(a.Arguments)
+	argsB, errB := json.Marshal(b.Arguments)
+	return errA == nil && errB == nil && string(argsA) == string(argsB)
 }

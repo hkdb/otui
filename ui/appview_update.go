@@ -200,6 +200,8 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					AlwaysAllow:     false,
 					ToolName:        a.pendingPermission.ToolName,
 					ToolCall:        a.pendingPermission.ToolCall,
+					ToolCalls:       a.pendingPermission.ToolCalls,
+					InitialResponse: a.pendingPermission.InitialResponse,
 					ContextMessages: a.pendingPermission.ContextMessages,
 				}
 				return a.Update(response)
@@ -211,6 +213,8 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					AlwaysAllow:     true,
 					ToolName:        a.pendingPermission.ToolName,
 					ToolCall:        a.pendingPermission.ToolCall,
+					ToolCalls:       a.pendingPermission.ToolCalls,
+					InitialResponse: a.pendingPermission.InitialResponse,
 					ContextMessages: a.pendingPermission.ContextMessages,
 				}
 				return a.Update(response)
@@ -222,6 +226,8 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					AlwaysAllow:     false,
 					ToolName:        a.pendingPermission.ToolName,
 					ToolCall:        a.pendingPermission.ToolCall,
+					ToolCalls:       a.pendingPermission.ToolCalls,
+					InitialResponse: a.pendingPermission.InitialResponse,
 					ContextMessages: a.pendingPermission.ContextMessages,
 				}
 				return a.Update(response)

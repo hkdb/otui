@@ -167,7 +167,9 @@ type SingleProviderModelsMsg struct {
 type ToolPermissionRequestMsg struct {
 	ToolName        string
 	Purpose         string
-	ToolCall        ToolCall
+	ToolCall        ToolCall   // The call that needs approval (shown to the user)
+	ToolCalls       []ToolCall // All calls of this step, re-run after approval
+	InitialResponse string     // Assistant text that came with the calls
 	ContextMessages []Message
 }
 
@@ -177,6 +179,8 @@ type ToolPermissionResponseMsg struct {
 	AlwaysAllow     bool   // User chose "Always Allow" for this tool
 	ToolName        string // Tool that was approved/denied
 	ToolCall        ToolCall
+	ToolCalls       []ToolCall // All calls of this step (see ToolPermissionRequestMsg)
+	InitialResponse string
 	ContextMessages []Message
 }
 

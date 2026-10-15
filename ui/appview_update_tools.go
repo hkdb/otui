@@ -29,12 +29,8 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		// Remove "Waiting for response..." message
 		a.removeLastNonPersistentSystemMessage()
 
-		// Extract purpose and create step message
-		var firstToolCall *ToolCall
-		if len(msg.ToolCalls) > 0 {
-			firstToolCall = &msg.ToolCalls[0]
-		}
-		purpose := a.dataModel.ExtractPurpose(msg.ContextMessages, firstToolCall)
+		// Extract purpose (covering every tool of this step) and create step message
+		purpose := a.dataModel.StepPurpose(msg.ContextMessages, msg.ToolCalls)
 		a.createStepMessage(purpose, a.iterationCount+1)
 
 		// Start tool execution
@@ -168,6 +164,9 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		if !msg.Approved {
 			a.dataModel.Streaming = false
 
+			// Tools approved "once" earlier in this batch didn't run - drop them
+			a = a.cleanupTemporaryTools()
+
 			// Remove "Waiting for response..." loading message (but not persistent step messages)
 			if len(a.dataModel.Messages) > 0 &&
 				a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" &&
@@ -215,10 +214,15 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			}
 		}
 
-		// Re-trigger tool execution with approved tool now in allowed list
+		// Re-trigger execution of the whole batch with the approved tool now
+		// in the allowed list (any other unapproved tool is asked about next)
+		toolCalls := msg.ToolCalls
+		if len(toolCalls) == 0 {
+			toolCalls = []ToolCall{msg.ToolCall}
+		}
 		toolMsg := toolCallsDetectedMsg{
-			ToolCalls:       []ToolCall{msg.ToolCall},
-			InitialResponse: "",
+			ToolCalls:       toolCalls,
+			InitialResponse: msg.InitialResponse,
 			ContextMessages: msg.ContextMessages,
 		}
 
