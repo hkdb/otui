@@ -637,8 +637,7 @@ func (m *MCPManager) StartPlugin(ctx context.Context, pluginID string) error {
 	}
 
 	// If plugin previously failed, clear its state to allow retry
-	// Note: This leaves zombie processes until OTUI exits, but zombies are harmless
-	// (they only consume a PID table entry and are reaped when parent exits)
+	// (a failed start already stopped its process)
 	if m.failedPlugins[pluginID] != nil {
 		if config.DebugLog != nil {
 			config.DebugLog.Printf("[MCP] StartPlugin: Plugin '%s' previously failed (%v), clearing state for retry", pluginID, m.failedPlugins[pluginID])

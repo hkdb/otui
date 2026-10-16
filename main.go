@@ -4,12 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"otui/config"
+	"otui/mcp"
 	"otui/storage"
 	"otui/ui"
 )
@@ -306,6 +308,16 @@ func main() {
 		if err := appView.UnlockCurrentDataDir(); err != nil && config.DebugLog != nil {
 			config.DebugLog.Printf("Warning: failed to unlock OTUI instance: %v", err)
 		}
+	}()
+
+	// Plugins run in their own process groups, so the terminal's SIGHUP
+	// doesn't reach them - stop them before exiting
+	hangup := make(chan os.Signal, 1)
+	signal.Notify(hangup, syscall.SIGHUP)
+	go func() {
+		<-hangup
+		mcp.TerminatePluginProcesses()
+		os.Exit(129)
 	}()
 
 	p := tea.NewProgram(

@@ -1,8 +1,10 @@
 package mcp
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -16,15 +18,37 @@ import (
 )
 
 type ProcessManager struct {
-	processes map[string]*PluginProcess
-	dataDir   string               // For FileTokenStore
-	config    *globalconfig.Config // For security settings
-	mu        sync.RWMutex
+	processes  map[string]*PluginProcess
+	starting   map[string]bool      // Plugins whose StartPlugin is in progress
+	generation int                  // Incremented by Shutdown - starts in progress are discarded
+	dataDir    string               // For FileTokenStore
+	config     *globalconfig.Config // For security settings
+	mu         sync.RWMutex
+}
+
+// pluginCmds tracks running local plugin processes (across all
+// ProcessManagers) so they can be stopped if OTUI is killed by SIGHUP
+var pluginCmds sync.Map // *exec.Cmd -> struct{}
+
+// TerminatePluginProcesses stops every local plugin process group without
+// closing clients. For signal handlers - use Shutdown otherwise.
+func TerminatePluginProcesses() {
+	var wg sync.WaitGroup
+	pluginCmds.Range(func(key, _ any) bool {
+		wg.Add(1)
+		go func(cmd *exec.Cmd) {
+			defer wg.Done()
+			_ = terminateProcessGroup(cmd)
+		}(key.(*exec.Cmd))
+		return true
+	})
+	wg.Wait()
 }
 
 func NewProcessManager(dataDir string, cfg *globalconfig.Config) *ProcessManager {
 	return &ProcessManager{
 		processes: make(map[string]*PluginProcess),
+		starting:  make(map[string]bool),
 		dataDir:   dataDir,
 		config:    cfg,
 	}
@@ -33,14 +57,25 @@ func NewProcessManager(dataDir string, cfg *globalconfig.Config) *ProcessManager
 func (pm *ProcessManager) StartPlugin(ctx context.Context, config PluginConfig) error {
 	isRemote := config.ServerURL != ""
 
-	// Check if already running
+	// Check if already running or starting
 	pm.mu.Lock()
 	switch {
 	case pm.processes[config.ID] != nil && pm.processes[config.ID].Running:
 		pm.mu.Unlock()
 		return fmt.Errorf("plugin %s already running", config.ID)
+	case pm.starting[config.ID]:
+		pm.mu.Unlock()
+		return fmt.Errorf("plugin %s already starting", config.ID)
 	}
+	pm.starting[config.ID] = true
+	generation := pm.generation
 	pm.mu.Unlock()
+
+	defer func() {
+		pm.mu.Lock()
+		delete(pm.starting, config.ID)
+		pm.mu.Unlock()
+	}()
 
 	var mcpClient *client.Client
 	var err error
@@ -66,6 +101,15 @@ func (pm *ProcessManager) StartPlugin(ctx context.Context, config PluginConfig) 
 		if err != nil {
 			return fmt.Errorf("failed to start local plugin %s: %w", config.ID, err)
 		}
+
+		if capturedCmd != nil {
+			pluginCmds.Store(capturedCmd, struct{}{})
+		}
+
+		// mcp-go always pipes stderr - it must be read or chatty plugins block
+		if stderr, ok := client.GetStderr(mcpClient); ok {
+			go drainStderr(config.ID, stderr)
+		}
 	}
 
 	// Initialize plugin (same for remote and local)
@@ -82,16 +126,23 @@ func (pm *ProcessManager) StartPlugin(ctx context.Context, config PluginConfig) 
 
 	_, err = mcpClient.Initialize(ctx, initReq)
 	if err != nil {
+		closePlugin(config.ID, mcpClient, capturedCmd)
 		return fmt.Errorf("failed to initialize plugin %s: %w", config.ID, err)
 	}
 
 	toolsResult, err := mcpClient.ListTools(ctx, mcptypes.ListToolsRequest{})
 	if err != nil {
+		closePlugin(config.ID, mcpClient, capturedCmd)
 		return fmt.Errorf("failed to list tools for %s: %w", config.ID, err)
 	}
 
 	// Store process
 	pm.mu.Lock()
+	if pm.generation != generation {
+		pm.mu.Unlock()
+		closePlugin(config.ID, mcpClient, capturedCmd)
+		return fmt.Errorf("plugin %s started during shutdown", config.ID)
+	}
 	pm.processes[config.ID] = &PluginProcess{
 		ID:        config.ID,
 		Name:      config.ID,
@@ -122,45 +173,11 @@ func (pm *ProcessManager) StopPlugin(ctx context.Context, pluginID string) error
 	delete(pm.processes, pluginID)
 	pm.mu.Unlock()
 
-	// Close client
-	switch {
-	case proc.Client != nil:
-		closeCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
-		defer cancel()
-
-		switch {
-		case globalconfig.DebugLog != nil:
-			globalconfig.DebugLog.Printf("[MCP] StopPlugin: Attempting to close client for '%s' (1s timeout)", pluginID)
-		}
-
-		closeDone := make(chan error, 1)
-		go func() {
-			closeDone <- proc.Client.Close()
-		}()
-
-		select {
-		case <-closeDone:
-			// Closed
-		case <-closeCtx.Done():
-			// Timeout
-		}
+	var cmd *exec.Cmd
+	if !proc.IsRemote {
+		cmd = proc.Process
 	}
-
-	// Kill local process ONLY (skip for remote)
-	switch {
-	case !proc.IsRemote && proc.Process != nil && proc.Process.Process != nil:
-		switch {
-		case globalconfig.DebugLog != nil:
-			globalconfig.DebugLog.Printf("[MCP] StopPlugin: Forcefully killing process for '%s' (PID: %d)", pluginID, proc.Process.Process.Pid)
-		}
-
-		if err := proc.Process.Process.Kill(); err != nil {
-			switch {
-			case globalconfig.DebugLog != nil:
-				globalconfig.DebugLog.Printf("[MCP] StopPlugin: Error killing process for '%s': %v", pluginID, err)
-			}
-		}
-	}
+	closePlugin(pluginID, proc.Client, cmd)
 
 	switch {
 	case globalconfig.DebugLog != nil:
@@ -215,6 +232,7 @@ func (pm *ProcessManager) RefreshTools(ctx context.Context, pluginID string) err
 func (pm *ProcessManager) Shutdown(ctx context.Context) error {
 	// Get list of plugin IDs while holding lock
 	pm.mu.Lock()
+	pm.generation++
 	pluginIDs := make([]string, 0, len(pm.processes))
 	for id := range pm.processes {
 		pluginIDs = append(pluginIDs, id)
@@ -266,74 +284,65 @@ func (pm *ProcessManager) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (pm *ProcessManager) stopPluginUnsafe(ctx context.Context, pluginID string) error {
-	proc, exists := pm.processes[pluginID]
-	if !exists {
-		return fmt.Errorf("plugin %s not found", pluginID)
-	}
-
-	// Remove from map immediately
-	proc.Running = false
-	delete(pm.processes, pluginID)
-
-	// Try to close client with timeout (respects parent context deadline)
-	clientClosed := false
-	if proc.Client != nil {
-		closeCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
-		defer cancel()
-
-		if globalconfig.DebugLog != nil {
-			globalconfig.DebugLog.Printf("[MCP] stopPluginUnsafe: Attempting to close client for '%s' (1s timeout)", pluginID)
+// closePlugin closes a plugin's client (1s timeout) and, for local plugins,
+// terminates its process group so children started by npx/uvx/docker go too
+func closePlugin(pluginID string, c *client.Client, cmd *exec.Cmd) {
+	if c != nil {
+		switch {
+		case globalconfig.DebugLog != nil:
+			globalconfig.DebugLog.Printf("[MCP] closePlugin: Attempting to close client for '%s' (1s timeout)", pluginID)
 		}
 
 		closeDone := make(chan error, 1)
 		go func() {
-			closeDone <- proc.Client.Close()
+			closeDone <- c.Close()
 		}()
 
 		select {
-		case err := <-closeDone:
-			// Closed successfully (or with error)
-			if err != nil {
-				if globalconfig.DebugLog != nil {
-					globalconfig.DebugLog.Printf("[MCP] stopPluginUnsafe: Error closing client for '%s': %v", pluginID, err)
-				}
-			} else {
-				if globalconfig.DebugLog != nil {
-					globalconfig.DebugLog.Printf("[MCP] stopPluginUnsafe: Client closed successfully for '%s'", pluginID)
-				}
-				clientClosed = true
-			}
-		case <-closeCtx.Done():
-			// Timeout - close is hanging
-			if globalconfig.DebugLog != nil {
-				globalconfig.DebugLog.Printf("[MCP] stopPluginUnsafe: Close timeout for '%s' - will forcefully kill process", pluginID)
-			}
+		case <-closeDone:
+			// Closed
+		case <-time.After(1 * time.Second):
+			// Timeout
 		}
 	}
 
-	// If client close failed or timed out, forcefully kill the process
-	if !clientClosed && proc.Process != nil && proc.Process.Process != nil {
-		if globalconfig.DebugLog != nil {
-			globalconfig.DebugLog.Printf("[MCP] stopPluginUnsafe: Forcefully killing process for '%s' (PID: %d)", pluginID, proc.Process.Process.Pid)
+	if cmd != nil {
+		defer pluginCmds.Delete(cmd)
+	}
+	if cmd != nil && cmd.Process != nil {
+		switch {
+		case globalconfig.DebugLog != nil:
+			globalconfig.DebugLog.Printf("[MCP] closePlugin: Terminating process group for '%s' (PID: %d)", pluginID, cmd.Process.Pid)
 		}
 
-		if err := proc.Process.Process.Kill(); err != nil {
-			if globalconfig.DebugLog != nil {
-				globalconfig.DebugLog.Printf("[MCP] stopPluginUnsafe: Error killing process for '%s': %v", pluginID, err)
-			}
-		} else {
-			if globalconfig.DebugLog != nil {
-				globalconfig.DebugLog.Printf("[MCP] stopPluginUnsafe: Process killed successfully for '%s'", pluginID)
+		if err := terminateProcessGroup(cmd); err != nil {
+			switch {
+			case globalconfig.DebugLog != nil:
+				globalconfig.DebugLog.Printf("[MCP] closePlugin: Error terminating process for '%s': %v", pluginID, err)
 			}
 		}
 	}
+}
 
-	if globalconfig.DebugLog != nil {
-		globalconfig.DebugLog.Printf("[MCP] stopPluginUnsafe: Plugin '%s' stopped and removed from map", pluginID)
+// drainStderr reads a local plugin's stderr until it closes, logging it to
+// the debug log (or discarding it)
+func drainStderr(pluginID string, r io.Reader) {
+	if globalconfig.DebugLog == nil {
+		_, _ = io.Copy(io.Discard, r)
+		return
 	}
 
-	return nil
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if runes := []rune(line); len(runes) > 500 {
+			line = string(runes[:500]) + "…"
+		}
+		globalconfig.DebugLog.Printf("[MCP] %s stderr: %s", pluginID, line)
+	}
+	// Line too long or read error - keep the pipe drained
+	_, _ = io.Copy(io.Discard, r)
 }
 
 // createRemoteClient creates an MCP client for remote plugins
@@ -384,9 +393,10 @@ func (pm *ProcessManager) createHeadersClient(ctx context.Context, config Plugin
 		return nil, err
 	}
 
-	// Start SSE transport (required before Initialize/ListTools)
+	// Start SSE transport (required before Initialize/ListTools). The event
+	// stream lives until Close, not until the caller's ctx is cancelled
 	transport := mcpClient.GetTransport()
-	if err := transport.Start(ctx); err != nil {
+	if err := transport.Start(context.Background()); err != nil {
 		return nil, fmt.Errorf("failed to start SSE transport: %w", err)
 	}
 
@@ -455,9 +465,10 @@ func (pm *ProcessManager) createOAuthClient(ctx context.Context, config PluginCo
 		return nil, err
 	}
 
-	// Start SSE transport (required before Initialize/ListTools)
+	// Start SSE transport (required before Initialize/ListTools). The event
+	// stream lives until Close, not until the caller's ctx is cancelled
 	transport := mcpClient.GetTransport()
-	if err := transport.Start(ctx); err != nil {
+	if err := transport.Start(context.Background()); err != nil {
 		return nil, fmt.Errorf("failed to start SSE transport: %w", err)
 	}
 
@@ -490,9 +501,10 @@ func (pm *ProcessManager) createStreamableHttpClient(ctx context.Context, config
 		return nil, err
 	}
 
-	// Start HTTP transport (required before Initialize/ListTools)
+	// Start HTTP transport (required before Initialize/ListTools). It lives
+	// until Close, not until the caller's ctx is cancelled
 	transportObj := mcpClient.GetTransport()
-	if err := transportObj.Start(ctx); err != nil {
+	if err := transportObj.Start(context.Background()); err != nil {
 		return nil, fmt.Errorf("failed to start HTTP transport: %w", err)
 	}
 
@@ -520,6 +532,7 @@ func (pm *ProcessManager) createLocalClient(ctx context.Context, config PluginCo
 	cmdFunc := func(ctx context.Context, command string, env []string, args []string) (*exec.Cmd, error) {
 		cmd := exec.CommandContext(ctx, command, args...)
 		cmd.Env = env
+		setProcessGroup(cmd)
 		capturedCmd = cmd
 
 		switch {

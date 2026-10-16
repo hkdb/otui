@@ -41,6 +41,9 @@
 - Compaction no longer re-summarizes already compacted history; a failed summary keeps the previous one instead of replacing it with a generic note
 - Fixed auto-compaction removing the wrong message (e.g. a pending tool permission prompt) when it finished
 - The compaction notice now shows more accurate context usage
+- Fixed remote SSE plugins disconnecting after being enabled
+- Fixed plugins freezing when logging heavily
+- Fixed plugin processes (and their child processes) left running after a failed start or disable
 
 ---
 
