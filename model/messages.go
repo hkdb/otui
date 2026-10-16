@@ -72,6 +72,9 @@ type ToolExecutionCompleteMsg struct {
 	NextContext         []Message  // Context for next iteration
 	NextInitialResponse string     // LLM text that came with NextToolCalls
 
+	Step       *IterationStep // This step (multi-step enabled), added to the history by ApplyToolStep
+	MaxReached bool           // Stopped at max iterations with tool calls left
+
 	RequestID uint64
 }
 
@@ -90,6 +93,9 @@ type ModelsListMsg struct {
 	Models       []ollama.ModelInfo
 	Err          error
 	ShowSelector bool // Whether to auto-show model selector (user-initiated vs background fetch)
+
+	// Model lists fetched by FetchAllModels, per provider (for StoreModelCache)
+	Fetched map[string][]ollama.ModelInfo
 }
 
 type SessionsListMsg struct {

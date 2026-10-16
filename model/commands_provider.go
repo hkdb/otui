@@ -11,19 +11,18 @@ import (
 	"otui/ollama"
 )
 
-// getModelsFromProvider fetches models with caching for cloud providers
-func (m *Model) getModelsFromProvider(providerID string, providerClient Provider) ([]ollama.ModelInfo, error) {
-	ctx := context.Background()
+// modelCacheTTL is how long cloud providers' model lists are cached
+const modelCacheTTL = time.Hour
 
-	// Use switch instead of if/else per Rule 14
-	switch providerID {
-	case "ollama":
-		// Ollama: always fetch fresh (local, fast, free)
-		models, err := providerClient.ListModels(ctx)
-		if err != nil {
-			return nil, err
-		}
+// getModelsFromProvider fetches a provider's models. Ollama models get their
+// provider info filled in. Runs in a Cmd: must not touch the Model.
+func getModelsFromProvider(providerID string, providerClient Provider) ([]ollama.ModelInfo, error) {
+	models, err := providerClient.ListModels(context.Background())
+	if err != nil {
+		return nil, err
+	}
 
+	if providerID == "ollama" {
 		// Ensure provider info is set (belt and suspenders)
 		for i := range models {
 			models[i].Provider = "ollama"
@@ -31,51 +30,36 @@ func (m *Model) getModelsFromProvider(providerID string, providerClient Provider
 				models[i].InternalName = models[i].Name
 			}
 		}
-
-		return models, nil
-
-	default:
-		// Cloud providers: use cache if valid
-		if cached, ok := m.ModelCache[providerID]; ok {
-			if time.Now().Before(m.CacheExpiry[providerID]) {
-				if config.Debug {
-					config.DebugLog.Printf("[Model] Using cached models for provider %s", providerID)
-				}
-				return cached, nil
-			}
-		}
-
-		// Fetch from provider
-		models, err := providerClient.ListModels(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		// Cache for 1 hour
-		m.ModelCache[providerID] = models
-		m.CacheExpiry[providerID] = time.Now().Add(1 * time.Hour)
-
-		if config.Debug {
-			config.DebugLog.Printf("[Model] Fetched and cached %d models for provider %s", len(models), providerID)
-		}
-
-		return models, nil
 	}
+
+	return models, nil
 }
 
-// AggregateAllModels fetches and aggregates models from all enabled providers
-func (m *Model) AggregateAllModels() ([]ollama.ModelInfo, error) {
+// aggregateModels fetches the models of all providers, using cached lists
+// where given. Returns all models (sorted by name) and the lists that were
+// fetched, for the cache. Runs in a Cmd: must not touch the Model.
+func aggregateModels(providers map[string]Provider, cached map[string][]ollama.ModelInfo) ([]ollama.ModelInfo, map[string][]ollama.ModelInfo) {
 	var allModels []ollama.ModelInfo
+	fetched := make(map[string][]ollama.ModelInfo)
 
 	// Include models from all providers
-	for providerID, providerClient := range m.Providers {
-		models, err := m.getModelsFromProvider(providerID, providerClient)
-		if err != nil {
-			// Log but don't fail - allow showing models from other providers
+	for providerID, providerClient := range providers {
+		models, ok := cached[providerID]
+		if ok {
 			if config.Debug {
-				config.DebugLog.Printf("Warning: failed to fetch models from %s: %v", providerID, err)
+				config.DebugLog.Printf("[Model] Using cached models for provider %s", providerID)
 			}
-			continue
+		} else {
+			var err error
+			models, err = getModelsFromProvider(providerID, providerClient)
+			if err != nil {
+				// Log but don't fail - allow showing models from other providers
+				if config.Debug {
+					config.DebugLog.Printf("Warning: failed to fetch models from %s: %v", providerID, err)
+				}
+				continue
+			}
+			fetched[providerID] = models
 		}
 		allModels = append(allModels, models...)
 	}
@@ -85,18 +69,56 @@ func (m *Model) AggregateAllModels() ([]ollama.ModelInfo, error) {
 		return allModels[i].Name < allModels[j].Name
 	})
 
-	return allModels, nil
+	return allModels, fetched
 }
 
 // FetchAllModels retrieves models from all enabled providers
 // showSelector: whether to auto-show model selector after fetch (user-initiated vs background)
+//
+// Call from Update: the providers and valid cache entries are snapshotted
+// here; fetched lists come back in ModelsListMsg.Fetched for StoreModelCache.
 func (m *Model) FetchAllModels(showSelector bool) tea.Cmd {
+	providers := make(map[string]Provider, len(m.Providers))
+	cached := make(map[string][]ollama.ModelInfo)
+	now := time.Now()
+	for providerID, client := range m.Providers {
+		providers[providerID] = client
+		// Ollama: always fetch fresh (local, fast, free); cloud providers: use cache if valid
+		if providerID == "ollama" {
+			continue
+		}
+		if models, ok := m.ModelCache[providerID]; ok && now.Before(m.CacheExpiry[providerID]) {
+			cached[providerID] = models
+		}
+	}
+
 	return func() tea.Msg {
-		models, err := m.AggregateAllModels()
+		models, fetched := aggregateModels(providers, cached)
 		return ModelsListMsg{
 			Models:       models,
-			Err:          err,
+			Fetched:      fetched,
 			ShowSelector: showSelector,
+		}
+	}
+}
+
+// StoreModelCache caches model lists fetched by FetchAllModels (cloud
+// providers only - Ollama is always fetched fresh). Call from Update.
+func (m *Model) StoreModelCache(fetched map[string][]ollama.ModelInfo) {
+	if m.ModelCache == nil {
+		m.ModelCache = make(map[string][]ollama.ModelInfo)
+	}
+	if m.CacheExpiry == nil {
+		m.CacheExpiry = make(map[string]time.Time)
+	}
+	for providerID, models := range fetched {
+		if providerID == "ollama" {
+			continue
+		}
+		m.ModelCache[providerID] = models
+		m.CacheExpiry[providerID] = time.Now().Add(modelCacheTTL)
+		if config.Debug {
+			config.DebugLog.Printf("[Model] Cached %d models for provider %s", len(models), providerID)
 		}
 	}
 }

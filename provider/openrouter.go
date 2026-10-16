@@ -21,6 +21,7 @@ import (
 type OpenRouterProvider struct {
 	client  openai.Client
 	model   string
+	modelMu sync.RWMutex // SetModel (Update) vs requests (Cmd goroutines)
 	baseURL string
 	apiKey  string
 
@@ -90,9 +91,11 @@ func (p *OpenRouterProvider) Chat(ctx context.Context, messages []model.Message,
 
 // ChatWithTools implements Provider.ChatWithTools with streaming support.
 func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model.Message, tools []mcptypes.Tool, callback model.StreamCallback) error {
+	modelName := p.GetModel()
+
 	// Prepend tool instructions if tools present (unless model is blacklisted)
 	messagesWithInstructions := messages
-	if len(tools) > 0 && !shouldSkipToolInstructions(p.model) {
+	if len(tools) > 0 && !shouldSkipToolInstructions(modelName) {
 		toolInstruction := model.Message{
 			Role:    "system",
 			Content: buildOpenRouterToolInstructions(tools),
@@ -101,12 +104,12 @@ func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model
 	}
 
 	// Debug logging for tool instruction decisions (no else statements)
-	if config.DebugLog != nil && len(tools) > 0 && shouldSkipToolInstructions(p.model) {
-		config.DebugLog.Printf("[OpenRouter] Model '%s': Skipping tool instructions (blacklisted - uses native understanding)", p.model)
+	if config.DebugLog != nil && len(tools) > 0 && shouldSkipToolInstructions(modelName) {
+		config.DebugLog.Printf("[OpenRouter] Model '%s': Skipping tool instructions (blacklisted - uses native understanding)", modelName)
 	}
 
-	if config.DebugLog != nil && len(tools) > 0 && !shouldSkipToolInstructions(p.model) {
-		config.DebugLog.Printf("[OpenRouter] Model '%s': Adding tool instructions", p.model)
+	if config.DebugLog != nil && len(tools) > 0 && !shouldSkipToolInstructions(modelName) {
+		config.DebugLog.Printf("[OpenRouter] Model '%s': Adding tool instructions", modelName)
 	}
 
 	// Convert OTUI messages to OpenAI format
@@ -115,7 +118,7 @@ func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model
 	// Build request parameters
 	params := openai.ChatCompletionNewParams{
 		Messages: openaiMessages,
-		Model:    openai.ChatModel(p.model),
+		Model:    openai.ChatModel(modelName),
 	}
 
 	// Add tools if provided (tool names are encoded to the API safe format)
@@ -175,6 +178,8 @@ func (p *OpenRouterProvider) ListModels(ctx context.Context) ([]ollama.ModelInfo
 // Returns the full model name with vendor prefix for API calls.
 // Example: "qwen/qwen3-coder:free"
 func (p *OpenRouterProvider) GetModel() string {
+	p.modelMu.RLock()
+	defer p.modelMu.RUnlock()
 	return p.model
 }
 
@@ -182,11 +187,13 @@ func (p *OpenRouterProvider) GetModel() string {
 // Returns the model name with vendor prefix stripped for UI display.
 // Example: "qwen/qwen3-coder:free" → "qwen3-coder:free"
 func (p *OpenRouterProvider) GetDisplayName() string {
-	return stripProviderPrefix(p.model)
+	return stripProviderPrefix(p.GetModel())
 }
 
 // SetModel implements Provider.SetModel.
 func (p *OpenRouterProvider) SetModel(model string) {
+	p.modelMu.Lock()
+	defer p.modelMu.Unlock()
 	p.model = model
 }
 

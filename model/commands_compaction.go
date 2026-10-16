@@ -67,27 +67,6 @@ func (m *Model) CompactSessionCmd(keepPercentage float64) tea.Cmd {
 	return m.CompactSessionMarkerCmd(markerIndex)
 }
 
-// UpdateTokenUsageCmd updates token usage for current session
-func (m *Model) UpdateTokenUsageCmd() tea.Cmd {
-	return func() tea.Msg {
-		if m.CurrentSession == nil {
-			return TokenUsageUpdatedMsg{}
-		}
-
-		usage := m.CalculateTokenUsage()
-		m.CurrentSession.TokenUsage = usage
-
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[compaction] Token usage updated: %d active / %d total tokens",
-				usage.ActiveTokens, usage.TotalTokens)
-		}
-
-		return TokenUsageUpdatedMsg{
-			Usage: usage,
-		}
-	}
-}
-
 // CheckAutoCompactionCmd checks if auto-compaction should trigger and returns compaction command if needed
 func (m *Model) CheckAutoCompactionCmd() tea.Cmd {
 	if !m.ShouldAutoCompact() {

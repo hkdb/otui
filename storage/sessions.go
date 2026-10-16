@@ -51,6 +51,16 @@ type Session struct {
 	TokenUsage          TokenUsage `json:"token_usage,omitempty"`
 }
 
+// Clone returns a copy of the session that shares no slices with it, e.g.
+// to save it in the background while the original keeps changing
+func (s *Session) Clone() *Session {
+	c := *s
+	c.Messages = append([]Message(nil), s.Messages...)
+	c.EnabledPlugins = append([]string(nil), s.EnabledPlugins...)
+	c.AllowedTools = append([]string(nil), s.AllowedTools...)
+	return &c
+}
+
 // SessionMetadata is a lightweight version of Session for listing
 type SessionMetadata struct {
 	ID             string    `json:"id"`

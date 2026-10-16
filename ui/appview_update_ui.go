@@ -59,6 +59,7 @@ func (a AppView) handleUIMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			return a, nil
 		}
 
+		a.dataModel.StoreModelCache(msg.Fetched)
 		a.modelList = msg.Models
 		a.modelListCached = true
 

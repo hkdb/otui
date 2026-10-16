@@ -53,6 +53,8 @@
 - Fixed a cancelled response appearing under the next question
 - Esc denies a tool permission request
 - Block session switch during response until multi-session is implemented
+- Fixed a possible crash when model lists were refreshed at the same time
+- Fixed data races between background tasks and the UI
 
 ---
 

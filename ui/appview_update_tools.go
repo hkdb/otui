@@ -57,6 +57,9 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			return a, nil
 		}
 
+		// Record the step (fills in the summary when the response is complete)
+		a.dataModel.ApplyToolStep(&msg)
+
 		// Clear tool execution state
 		a.executingTool = ""
 
@@ -112,7 +115,7 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		a.dataModel.Streaming = false
 		a.currentResp.Reset()
 		a.iterationCount = 0
-		a.dataModel.CurrentIteration = 0
+		a.dataModel.ResetIterations()
 		a.pendingNextStep = false
 
 		// CLEANUP: Remove temporarily allowed tools

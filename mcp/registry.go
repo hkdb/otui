@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"otui/config"
@@ -17,6 +18,9 @@ import (
 const registryURL = "https://raw.githubusercontent.com/hkdb/otui-registry/main/plugins.json"
 
 type Registry struct {
+	// Guards plugins and customPlugins: Refresh runs in a Cmd goroutine
+	// while the plugin manager reads the lists
+	mu            sync.RWMutex
 	plugins       []Plugin
 	customPlugins []Plugin
 	cacheDir      string
@@ -60,6 +64,9 @@ func NewRegistry(dataDir string) (*Registry, error) {
 }
 
 func (r *Registry) Load() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	cachedPath := filepath.Join(r.cacheDir, "plugin_registry.json")
 
 	if config.FileExists(cachedPath) {
@@ -100,7 +107,9 @@ func (r *Registry) Refresh() error {
 		return fmt.Errorf("failed to fetch plugin registry: %w", err)
 	}
 
+	r.mu.Lock()
 	r.plugins = freshPlugins
+	r.mu.Unlock()
 
 	cachedPath := filepath.Join(r.cacheDir, "plugin_registry.json")
 	data, err := json.MarshalIndent(freshPlugins, "", "  ")
@@ -116,6 +125,9 @@ func (r *Registry) Refresh() error {
 }
 
 func (r *Registry) GetAll() []Plugin {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	// Build map of custom plugin IDs for fast lookup
 	customIDs := make(map[string]bool)
 	for _, cp := range r.customPlugins {
@@ -228,6 +240,8 @@ func (r *Registry) AddCustomPlugin(repoURL string) (*Plugin, []string, error) {
 		Custom:      true,
 	}
 
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.customPlugins = append(r.customPlugins, *plugin)
 
 	if err := r.saveCustomPlugins(); err != nil {
@@ -245,6 +259,9 @@ func (r *Registry) AddCustomPluginDirect(plugin *Plugin) ([]string, error) {
 
 	// Ensure it's marked as custom
 	plugin.Custom = true
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	// Check for duplicate ID
 	for _, p := range r.customPlugins {
@@ -273,6 +290,9 @@ func (r *Registry) AddCustomPluginDirect(plugin *Plugin) ([]string, error) {
 }
 
 func (r *Registry) RemoveCustomPlugin(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	found := false
 
 	// Remove from r.customPlugins
@@ -299,6 +319,7 @@ func (r *Registry) RemoveCustomPlugin(id string) error {
 	return r.saveCustomPlugins()
 }
 
+// saveCustomPlugins writes the custom plugins. Call with r.mu held.
 func (r *Registry) saveCustomPlugins() error {
 	customPath := filepath.Join(r.cacheDir, "custom_plugins.json")
 	data, err := json.MarshalIndent(r.customPlugins, "", "  ")
@@ -493,6 +514,9 @@ func (r *Registry) UpdateCustomPlugin(pluginID string, updatedPlugin *Plugin) ([
 
 	// Ensure it's marked as custom
 	updatedPlugin.Custom = true
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	// Find and update in customPlugins slice
 	found := false

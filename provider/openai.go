@@ -6,6 +6,7 @@ import (
 	"otui/mcp"
 	"otui/model"
 	"otui/ollama"
+	"sync"
 
 	mcptypes "github.com/mark3labs/mcp-go/mcp"
 	"github.com/openai/openai-go/v3"
@@ -20,6 +21,7 @@ import (
 type OpenAIProvider struct {
 	client     openai.Client
 	model      string
+	modelMu    sync.RWMutex // SetModel (Update) vs requests (Cmd goroutines)
 	baseURL    string
 	apiKey     string
 	providerID string // "openai" or "openai-compatible"
@@ -129,7 +131,7 @@ func (p *OpenAIProvider) ChatWithTools(ctx context.Context, messages []model.Mes
 	// Build request parameters
 	params := openai.ChatCompletionNewParams{
 		Messages: openaiMessages,
-		Model:    openai.ChatModel(p.model),
+		Model:    openai.ChatModel(p.GetModel()),
 	}
 
 	// Add tools if provided
@@ -185,17 +187,21 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]ollama.ModelInfo, er
 // GetModel implements Provider.GetModel.
 // Returns the full model name for API calls.
 func (p *OpenAIProvider) GetModel() string {
+	p.modelMu.RLock()
+	defer p.modelMu.RUnlock()
 	return p.model
 }
 
 // GetDisplayName implements Provider.GetDisplayName.
 // Returns the model name for UI display (same as GetModel for OpenAI).
 func (p *OpenAIProvider) GetDisplayName() string {
-	return p.model
+	return p.GetModel()
 }
 
 // SetModel implements Provider.SetModel.
 func (p *OpenAIProvider) SetModel(model string) {
+	p.modelMu.Lock()
+	defer p.modelMu.Unlock()
 	p.model = model
 }
 

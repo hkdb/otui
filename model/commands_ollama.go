@@ -150,7 +150,7 @@ func (m *Model) SendToOllama() tea.Cmd {
 	// Apply compaction filtering to m.Messages: only messages after the
 	// marker are sent; the LLM summary is injected as synthetic
 	// user/assistant messages below
-	uiMessages = messagesAfterMarker(m.Messages, compactionMarker)
+	uiMessages = append([]Message(nil), messagesAfterMarker(m.Messages, compactionMarker)...)
 
 	// Inject compaction context as user/assistant exchange so LLM reliably reads it
 	// All LLMs treat user messages as conversational context, unlike system messages
@@ -178,11 +178,10 @@ func (m *Model) SendToOllama() tea.Cmd {
 	// A new user message starts a new request (cancelling any previous one)
 	reqCtx, reqID := m.beginRequest()
 
-	return func() tea.Msg {
-		// Reset iteration state for new user message (Phase 2)
-		m.CurrentIteration = 0
-		m.IterationHistory = []IterationStep{}
+	// Reset iteration state for new user message (Phase 2)
+	m.ResetIterations()
 
+	return func() tea.Msg {
 		if config.DebugLog != nil {
 			config.DebugLog.Printf("sendToOllama goroutine started")
 		}
@@ -454,17 +453,67 @@ func (m *Model) StepPurpose(contextMessages []Message, initialResponse string, t
 	return "Execute " + strings.Join(names, ", ")
 }
 
-// ExecuteToolsAndContinue executes detected tool calls and sends results back to LLM
+// ExecuteToolsAndContinue executes detected tool calls and sends results back to LLM.
+//
+// Called from Update: permission checks and iteration state happen here. The
+// returned Cmd only does I/O (tools, LLM) and reports the step in its result,
+// which Update applies with ApplyToolStep.
 func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
-	mcpManager := m.MCPManager
-	client := m.Provider
-
 	// Tool steps belong to the request that detected the tool calls
 	reqID := msg.RequestID
 	reqCtx := m.requestContext(reqID)
 	if reqCtx == nil {
 		return nil // Cancelled
 	}
+
+	// Check permissions BEFORE incrementing iteration (Phase 1: Permission System)
+	// Only check if RequireApproval is enabled
+	if m.Config.RequireApproval {
+		for _, toolCall := range msg.ToolCalls {
+			// Check if tool is whitelisted (global config or session-specific)
+			if m.isToolAllowed(toolCall.Name) {
+				continue
+			}
+
+			// Tool not allowed - request permission (don't increment iteration yet)
+			purpose := m.ExtractPurpose(withResponse(msg.ContextMessages, msg.InitialResponse), &toolCall)
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("Permission required for tool: %s (purpose: %s)", toolCall.Name, purpose)
+			}
+
+			// Carry the whole batch so approving this tool re-runs
+			// all calls (asking about any other unapproved ones next)
+			request := ToolPermissionRequestMsg{
+				ToolName:        toolCall.Name,
+				Purpose:         purpose,
+				ToolCall:        toolCall,
+				ToolCalls:       msg.ToolCalls,
+				InitialResponse: msg.InitialResponse,
+				ContextMessages: msg.ContextMessages,
+				RequestID:       reqID,
+			}
+			return func() tea.Msg { return request }
+		}
+	}
+
+	// Increment iteration AFTER permission check passes (Phase 2)
+	m.CurrentIteration++
+	iteration := m.CurrentIteration
+	maxReached := iteration >= m.MaxIterations
+
+	if config.DebugLog != nil {
+		config.DebugLog.Printf("Starting iteration %d", iteration)
+	}
+
+	// Everything the Cmd needs, captured now (the Cmd must not read m)
+	mcpManager := m.MCPManager
+	client := m.Provider
+	hasSession := m.CurrentSession != nil
+	enableMultiStep := m.Config.EnableMultiStep
+	purpose := m.StepPurpose(msg.ContextMessages, msg.InitialResponse, msg.ToolCalls)
+
+	// Disable tools if multi-step disabled OR max iterations reached
+	disableNextTools := !enableMultiStep || maxReached
 
 	return func() tea.Msg {
 		// Track step start time (Phase 2)
@@ -473,49 +522,8 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 		ctx, cancel := context.WithTimeout(reqCtx, 120*time.Second)
 		defer cancel()
 
-		if err := reqCtx.Err(); err != nil {
-			return ToolExecutionErrorMsg{Err: err, RequestID: reqID}
-		}
-
 		if config.DebugLog != nil {
 			config.DebugLog.Printf("Executing %d tool calls", len(msg.ToolCalls))
-		}
-
-		// Check permissions BEFORE incrementing iteration (Phase 1: Permission System)
-		// Only check if RequireApproval is enabled
-		if m.Config.RequireApproval {
-			for _, toolCall := range msg.ToolCalls {
-				toolName := toolCall.Name
-
-				// Check if tool is whitelisted (global config or session-specific)
-				if !m.isToolAllowed(toolName) {
-					// Tool not allowed - request permission (don't increment iteration yet)
-					purpose := m.ExtractPurpose(withResponse(msg.ContextMessages, msg.InitialResponse), &toolCall)
-
-					if config.DebugLog != nil {
-						config.DebugLog.Printf("Permission required for tool: %s (purpose: %s)", toolName, purpose)
-					}
-
-					// Carry the whole batch so approving this tool re-runs
-					// all calls (asking about any other unapproved ones next)
-					return ToolPermissionRequestMsg{
-						ToolName:        toolName,
-						Purpose:         purpose,
-						ToolCall:        toolCall,
-						ToolCalls:       msg.ToolCalls,
-						InitialResponse: msg.InitialResponse,
-						ContextMessages: msg.ContextMessages,
-						RequestID:       reqID,
-					}
-				}
-			}
-		}
-
-		// Increment iteration AFTER permission check passes (Phase 2)
-		m.CurrentIteration++
-
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Starting iteration %d", m.CurrentIteration)
 		}
 
 		// Execute each tool call and collect results (one per call, in order)
@@ -572,18 +580,12 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 		// tool calls, then one result per call tied to the call's ID
 		fullMessages := buildToolStepMessages(msg.ContextMessages, msg.InitialResponse, msg.ToolCalls, results)
 
-		// Record step (Phase 2: ALL steps, not just tool executions)
-		if m.Config.EnableMultiStep {
-			// Extract purpose for this step
-			var firstToolCall *ToolCall
-			if len(msg.ToolCalls) > 0 {
-				firstToolCall = &msg.ToolCalls[0]
-			}
-
-			purpose := m.StepPurpose(msg.ContextMessages, msg.InitialResponse, msg.ToolCalls)
-
-			step := IterationStep{
-				StepNumber: m.CurrentIteration,
+		// Record step (Phase 2: ALL steps, not just tool executions).
+		// Update adds it to IterationHistory (ApplyToolStep).
+		var step *IterationStep
+		if enableMultiStep {
+			step = &IterationStep{
+				StepNumber: iteration,
 				Purpose:    purpose,
 				StartTime:  stepStartTime,
 				EndTime:    time.Now(),
@@ -592,8 +594,8 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 			step.Duration = step.EndTime.Sub(step.StartTime)
 
 			// Store tool info (all tools of this step when there are several)
-			if firstToolCall != nil {
-				step.ToolName = firstToolCall.Name
+			if len(msg.ToolCalls) > 0 {
+				step.ToolName = msg.ToolCalls[0].Name
 				var shortNames []string
 				for _, tc := range msg.ToolCalls {
 					shortName := tc.Name
@@ -605,8 +607,6 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 				step.ShortName = strings.Join(shortNames, ", ")
 			}
 
-			m.IterationHistory = append(m.IterationHistory, step)
-
 			if config.DebugLog != nil {
 				config.DebugLog.Printf("Recorded step %d: %s (%.1fs)",
 					step.StepNumber, step.Purpose, step.Duration.Seconds())
@@ -615,19 +615,13 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 
 		// Get tools for next iteration
 		var nextTools []mcptypes.Tool
-		if mcpManager != nil && m.CurrentSession != nil {
-			ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+		if mcpManager != nil && hasSession && !disableNextTools {
+			ctx2, cancel2 := context.WithTimeout(reqCtx, 10*time.Second)
 			defer cancel2()
 			mcpTools, err := mcpManager.GetTools(ctx2)
 			if err == nil {
 				nextTools = mcpTools
 			}
-		}
-
-		// Disable tools if multi-step disabled OR max iterations reached
-		shouldDisableTools := !m.Config.EnableMultiStep || m.CurrentIteration >= m.MaxIterations
-		if shouldDisableTools {
-			nextTools = nil
 		}
 
 		if config.DebugLog != nil {
@@ -652,8 +646,6 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 			if config.DebugLog != nil {
 				config.DebugLog.Printf("Error getting response after tools: %v", err)
 			}
-			m.CurrentIteration = 0
-			m.IterationHistory = []IterationStep{}
 			return ToolExecutionErrorMsg{Err: err, RequestID: reqID}
 		}
 
@@ -700,78 +692,68 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 			}
 		}
 
-		// Check completion
-		hasToolCalls := len(detectedToolCalls) > 0
-		isComplete := !hasToolCalls
-
-		// Complete - build summary
-		if isComplete {
-			var summaryMsg IterationSummaryMsg
-			if len(m.IterationHistory) > 0 {
-				summaryMsg = IterationSummaryMsg{
-					Steps:      m.IterationHistory,
-					TotalSteps: len(m.IterationHistory),
-				}
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("Multi-step complete: %d steps", summaryMsg.TotalSteps)
-				}
-			}
-
-			m.IterationHistory = []IterationStep{}
-			m.CurrentIteration = 0
-
-			return ToolExecutionCompleteMsg{
-				Chunks:           chunks,
-				FullResponse:     finalResponse,
-				IterationSummary: summaryMsg,
-				HasMoreSteps:     false,
-				RequestID:        reqID,
-			}
+		result := ToolExecutionCompleteMsg{
+			Chunks:       chunks,
+			FullResponse: finalResponse,
+			Step:         step,
+			MaxReached:   maxReached && len(detectedToolCalls) > 0,
+			RequestID:    reqID,
 		}
 
-		// Check max iterations
-		if m.CurrentIteration >= m.MaxIterations {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Max iterations (%d) reached", m.MaxIterations)
+		// Complete (no more tool calls) or max iterations reached: Update
+		// builds the summary (ApplyToolStep)
+		if len(detectedToolCalls) == 0 || maxReached {
+			if maxReached && len(detectedToolCalls) > 0 && config.DebugLog != nil {
+				config.DebugLog.Printf("Max iterations (%d) reached", iteration)
 			}
-
-			summaryMsg := IterationSummaryMsg{
-				Steps:      m.IterationHistory,
-				TotalSteps: len(m.IterationHistory),
-				MaxReached: true,
-			}
-
-			m.IterationHistory = []IterationStep{}
-			m.CurrentIteration = 0
-
-			return ToolExecutionCompleteMsg{
-				Chunks:           chunks,
-				FullResponse:     finalResponse,
-				IterationSummary: summaryMsg,
-				HasMoreSteps:     false,
-				RequestID:        reqID,
-			}
+			return result
 		}
 
 		// Continue iteration
 		if config.DebugLog != nil {
 			config.DebugLog.Printf("Next iteration will be %d: %d tool calls detected",
-				m.CurrentIteration+1, len(detectedToolCalls))
+				iteration+1, len(detectedToolCalls))
 		}
 
 		// Context for the next step. The LLM's current response becomes the
 		// next step's assistant turn together with its tool calls (not a
 		// separate turn), so it's passed as NextInitialResponse.
-		return ToolExecutionCompleteMsg{
-			Chunks:              chunks,
-			FullResponse:        finalResponse,
-			HasMoreSteps:        true,
-			NextToolCalls:       ensureToolCallIDs(detectedToolCalls),
-			NextContext:         fullMessages,
-			NextInitialResponse: finalResponse,
-			RequestID:           reqID,
+		result.HasMoreSteps = true
+		result.NextToolCalls = ensureToolCallIDs(detectedToolCalls)
+		result.NextContext = fullMessages
+		result.NextInitialResponse = finalResponse
+		return result
+	}
+}
+
+// ApplyToolStep records a finished tool step (from ToolExecutionCompleteMsg)
+// in the iteration state. When the response is complete it fills in the
+// step summary and resets the iteration state. Call from Update.
+func (m *Model) ApplyToolStep(msg *ToolExecutionCompleteMsg) {
+	if msg.Step != nil {
+		m.IterationHistory = append(m.IterationHistory, *msg.Step)
+	}
+	if msg.HasMoreSteps {
+		return
+	}
+
+	if len(m.IterationHistory) > 0 || msg.MaxReached {
+		msg.IterationSummary = IterationSummaryMsg{
+			Steps:      m.IterationHistory,
+			TotalSteps: len(m.IterationHistory),
+			MaxReached: msg.MaxReached,
+		}
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("Multi-step complete: %d steps (max reached: %v)", len(m.IterationHistory), msg.MaxReached)
 		}
 	}
+	m.ResetIterations()
+}
+
+// ResetIterations clears the multi-step iteration state. Call from Update.
+func (m *Model) ResetIterations() {
+	m.CurrentIteration = 0
+	m.IterationHistory = nil
 }
 
 // getDefaultEditor returns the user's preferred editor from environment variables

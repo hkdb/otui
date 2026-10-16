@@ -522,8 +522,7 @@ func (a *AppView) cancelRequest() {
 	a.pendingToolResponse = ""
 	a.pendingSummary = nil
 	a.iterationCount = 0
-	a.dataModel.CurrentIteration = 0
-	a.dataModel.IterationHistory = nil
+	a.dataModel.ResetIterations()
 
 	// Tools approved "once" for this request
 	*a = a.cleanupTemporaryTools()

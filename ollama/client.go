@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ollama/ollama/api"
@@ -15,6 +16,7 @@ import (
 type Client struct {
 	client  *api.Client
 	model   string
+	modelMu sync.RWMutex // SetModel (Update) vs requests (Cmd goroutines)
 	baseURL string
 }
 
@@ -71,7 +73,7 @@ func (c *Client) Chat(ctx context.Context, messages []api.Message, callback Stre
 // ChatWithTools sends a chat request with optional tool definitions
 func (c *Client) ChatWithTools(ctx context.Context, messages []api.Message, tools []api.Tool, callback StreamCallback) error {
 	req := &api.ChatRequest{
-		Model:    c.model,
+		Model:    c.GetModel(),
 		Messages: messages,
 		Tools:    tools,
 		Stream:   func(b bool) *bool { return &b }(true),
@@ -115,10 +117,14 @@ func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
 }
 
 func (c *Client) SetModel(model string) {
+	c.modelMu.Lock()
+	defer c.modelMu.Unlock()
 	c.model = model
 }
 
 func (c *Client) GetModel() string {
+	c.modelMu.RLock()
+	defer c.modelMu.RUnlock()
 	return c.model
 }
 
@@ -296,7 +302,7 @@ var orderedPrefixes = []string{
 // SupportsToolCalling checks if the current model supports Ollama's tool calling API
 // Returns true if the model is known to support tool calling, false otherwise
 func (c *Client) SupportsToolCalling() bool {
-	modelName := strings.ToLower(c.model)
+	modelName := strings.ToLower(c.GetModel())
 
 	// Check prefixes in deterministic order (most specific first)
 	for _, prefix := range orderedPrefixes {

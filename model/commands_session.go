@@ -43,9 +43,10 @@ func (m *Model) LoadSession(sessionID string) tea.Cmd {
 	// Skip if reloading current session (no need to check our own lock)
 	if m.CurrentSession != nil && m.CurrentSession.ID == sessionID {
 		// Already loaded, just close session manager
+		session := m.CurrentSession
 		return func() tea.Msg {
 			return SessionLoadedMsg{
-				Session: m.CurrentSession,
+				Session: session,
 				Err:     nil,
 			}
 		}
@@ -146,7 +147,16 @@ func (m *Model) SaveCurrentSession() tea.Cmd {
 	// Note: CurrentSession.Provider is set by SwitchModel() and preserved here
 	// The entire session object (including Provider field) is saved to JSON storage
 
-	session := m.CurrentSession
+	// Fields Save would otherwise fill in, set on the live session now
+	if m.CurrentSession.ID == "" {
+		m.CurrentSession.ID = uuid.New().String()
+	}
+	if m.CurrentSession.CreatedAt.IsZero() {
+		m.CurrentSession.CreatedAt = m.CurrentSession.UpdatedAt
+	}
+
+	// Save a copy: the live session keeps changing while the Cmd runs
+	session := m.CurrentSession.Clone()
 	storage := m.SessionStorage
 
 	return func() tea.Msg {
@@ -394,13 +404,22 @@ func fileExists(path string) bool {
 
 // UpdateSessionPropertiesCmd updates session properties and refreshes the session list
 func (m *Model) UpdateSessionPropertiesCmd(sessionID, newName, newSystemPrompt string, enabledPlugins []string) tea.Cmd {
+	// Update in-memory current session if it's the one being edited (here,
+	// not in the Cmd: View reads it)
+	if m.CurrentSession != nil && m.CurrentSession.ID == sessionID {
+		m.CurrentSession.Name = newName
+		m.CurrentSession.SystemPrompt = newSystemPrompt
+		m.CurrentSession.EnabledPlugins = enabledPlugins
+	}
+
+	sessionStorage := m.SessionStorage
 	return func() tea.Msg {
-		if m.SessionStorage == nil {
+		if sessionStorage == nil {
 			return SessionsListMsg{Err: fmt.Errorf("session storage not initialized")}
 		}
 
 		// Load full session
-		session, err := m.SessionStorage.Load(sessionID)
+		session, err := sessionStorage.Load(sessionID)
 		if err != nil {
 			return SessionsListMsg{Err: err}
 		}
@@ -411,19 +430,12 @@ func (m *Model) UpdateSessionPropertiesCmd(sessionID, newName, newSystemPrompt s
 		session.EnabledPlugins = enabledPlugins
 
 		// Save back
-		if err := m.SessionStorage.Save(session); err != nil {
+		if err := sessionStorage.Save(session); err != nil {
 			return SessionsListMsg{Err: err}
 		}
 
-		// Update in-memory current session if it's the one being edited
-		if m.CurrentSession != nil && m.CurrentSession.ID == sessionID {
-			m.CurrentSession.Name = newName
-			m.CurrentSession.SystemPrompt = newSystemPrompt
-			m.CurrentSession.EnabledPlugins = enabledPlugins
-		}
-
 		// Refresh list
-		sessions, err := m.SessionStorage.List()
+		sessions, err := sessionStorage.List()
 		if err != nil {
 			return SessionsListMsg{Err: err}
 		}

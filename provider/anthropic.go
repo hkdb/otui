@@ -20,6 +20,7 @@ import (
 type AnthropicProvider struct {
 	client  *anthropic.Client
 	model   anthropic.Model
+	modelMu sync.RWMutex // SetModel (Update) vs requests (Cmd goroutines)
 	baseURL string
 	apiKey  string
 
@@ -89,7 +90,7 @@ func (p *AnthropicProvider) ChatWithTools(ctx context.Context, messages []model.
 
 	// Build request parameters
 	params := anthropic.MessageNewParams{
-		Model:     p.model,
+		Model:     anthropic.Model(p.GetModel()),
 		Messages:  anthropicMessages,
 		MaxTokens: 4096, // Required by Anthropic API
 	}
@@ -195,17 +196,23 @@ func (p *AnthropicProvider) ListModels(ctx context.Context) ([]ollama.ModelInfo,
 // GetModel implements Provider.GetModel.
 // Returns the full model name for API calls.
 func (p *AnthropicProvider) GetModel() string {
+	p.modelMu.RLock()
+	defer p.modelMu.RUnlock()
 	return string(p.model)
 }
 
 // GetDisplayName implements Provider.GetDisplayName.
 // Returns the model name for UI display (same as GetModel for Anthropic).
 func (p *AnthropicProvider) GetDisplayName() string {
+	p.modelMu.RLock()
+	defer p.modelMu.RUnlock()
 	return string(p.model)
 }
 
 // SetModel implements Provider.SetModel.
 func (p *AnthropicProvider) SetModel(model string) {
+	p.modelMu.Lock()
+	defer p.modelMu.Unlock()
 	p.model = anthropic.Model(model)
 }
 
@@ -213,7 +220,7 @@ func (p *AnthropicProvider) SetModel(model string) {
 func (p *AnthropicProvider) Ping(ctx context.Context) error {
 	// Anthropic doesn't have a ping/health endpoint, so we make a minimal request
 	_, err := p.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     p.model,
+		Model:     anthropic.Model(p.GetModel()),
 		MaxTokens: 1,
 		Messages: []anthropic.MessageParam{
 			anthropic.NewUserMessage(anthropic.NewTextBlock("ping")),
