@@ -280,35 +280,43 @@ func convertToAnthropicMessages(messages []model.Message) ([]anthropic.MessagePa
 	anthropicMsgs := make([]anthropic.MessageParam, 0, len(messages))
 
 	for _, msg := range messages {
-		switch msg.Role {
-		case "system":
-			// Anthropic uses a separate system parameter, not in messages array
-			systemBlocks = append(systemBlocks, anthropic.TextBlockParam{
-				Text: msg.Content,
-			})
+		// The API rejects empty or whitespace-only text blocks. They come from
+		// e.g. a tool-only assistant reply in the tool loop and carry nothing.
+		if strings.TrimSpace(msg.Content) == "" {
+			continue
+		}
 
-		case "user":
-			anthropicMsgs = append(anthropicMsgs,
-				anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content)),
-			)
+		// Anthropic uses a separate system parameter, not in messages array
+		if msg.Role == "system" {
+			systemBlocks = append(systemBlocks, anthropic.TextBlockParam{Text: msg.Content})
+			continue
+		}
 
-		case "assistant":
-			anthropicMsgs = append(anthropicMsgs,
-				anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content)),
-			)
+		// Tool results (and unknown roles) go to user messages until native
+		// tool_result blocks are supported
+		role := anthropic.MessageParamRoleUser
+		if msg.Role == "assistant" {
+			role = anthropic.MessageParamRoleAssistant
+		}
 
-		case "tool":
-			// Tool results go to user messages for now
-			// TODO: Properly handle tool result format when implementing tool support
-			anthropicMsgs = append(anthropicMsgs,
-				anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content)),
-			)
+		// Consecutive messages with the same role become one turn (e.g. the
+		// results of several tool calls)
+		block := anthropic.NewTextBlock(msg.Content)
+		if n := len(anthropicMsgs); n > 0 && anthropicMsgs[n-1].Role == role {
+			anthropicMsgs[n-1].Content = append(anthropicMsgs[n-1].Content, block)
+			continue
+		}
+		anthropicMsgs = append(anthropicMsgs, anthropic.MessageParam{
+			Role:    role,
+			Content: []anthropic.ContentBlockParamUnion{block},
+		})
+	}
 
-		default:
-			// Default to user message
-			anthropicMsgs = append(anthropicMsgs,
-				anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content)),
-			)
+	// A final assistant turn (prefill) must not end with whitespace
+	if n := len(anthropicMsgs); n > 0 && anthropicMsgs[n-1].Role == anthropic.MessageParamRoleAssistant {
+		blocks := anthropicMsgs[n-1].Content
+		if last := blocks[len(blocks)-1].OfText; last != nil {
+			last.Text = strings.TrimRight(last.Text, " \t\r\n")
 		}
 	}
 

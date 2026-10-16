@@ -27,6 +27,7 @@
 - Fixed another running instance deleting the external editor draft
 - Fixed handling of multiple tool calls at once
 - Fixed tool calls being missed with some OpenAI compatible servers and OpenRouter models
+- Fixed Anthropic requests failing after a tool call
 - Fixed a crash when saving an API key or plugin setting while `credentials.toml` was empty
 - Sessions, credentials, OAuth tokens and config files are now written atomically, so a crash or power loss while saving can no longer leave them truncated (which could make a session disappear). Saving also restores `0600` permissions on these files and keeps symlinked config files (e.g. from a dotfiles manager) as symlinks
 - Fixed hand edits to the generated `config.toml` being ignored: `require_approval`, `max_iterations`, `default_system_prompt`, `plugins_enabled`, `enable_multi_step`, `notify_on_complete` and `allowed_tools` were written under `[ollama]`. New files put them at the top level, and existing files with the old layout are read correctly without being rewritten
