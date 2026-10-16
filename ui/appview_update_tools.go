@@ -18,6 +18,11 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			config.DebugLog.Printf("Tool calls detected: %d calls", len(msg.ToolCalls))
 		}
 
+		// Tool calls of a cancelled request must not run
+		if a.staleRequest(msg.RequestID) {
+			return a, nil
+		}
+
 		// Sync iteration state
 		a.iterationCount = a.dataModel.CurrentIteration
 		a.maxIterations = a.dataModel.MaxIterations
@@ -45,6 +50,11 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 	case toolExecutionCompleteMsg:
 		if config.DebugLog != nil {
 			config.DebugLog.Printf("Tool execution complete - %d chunks", len(msg.Chunks))
+		}
+
+		// Cancelled (Esc already reset the tool state)
+		if a.staleRequest(msg.RequestID) {
+			return a, nil
 		}
 
 		// Clear tool execution state
@@ -93,6 +103,10 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			config.DebugLog.Printf("Tool execution error: %v", msg.Err)
 		}
 
+		if a.staleRequest(msg.RequestID) {
+			return a, nil
+		}
+
 		// Clear state
 		a.executingTool = ""
 		a.dataModel.Streaming = false
@@ -127,6 +141,10 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			config.DebugLog.Printf("Permission request for tool: %s", msg.ToolName)
 		}
 
+		if a.staleRequest(msg.RequestID) {
+			return a, nil
+		}
+
 		// Clear tool execution state (we're paused for permission)
 		a.executingTool = ""
 
@@ -154,6 +172,10 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			config.DebugLog.Printf("Permission response - Approved: %v, AlwaysAllow: %v", msg.Approved, msg.AlwaysAllow)
 		}
 
+		if a.staleRequest(msg.RequestID) {
+			return a, nil
+		}
+
 		// Remove permission message from chat
 		a = a.removeLastSystemMessage()
 
@@ -164,6 +186,7 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		// EARLY RETURN: Handle denial
 		if !msg.Approved {
 			a.dataModel.Streaming = false
+			a.dataModel.CancelRequest()
 
 			// Tools approved "once" earlier in this batch didn't run - drop them
 			a = a.cleanupTemporaryTools()
@@ -225,6 +248,7 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			ToolCalls:       toolCalls,
 			InitialResponse: msg.InitialResponse,
 			ContextMessages: msg.ContextMessages,
+			RequestID:       msg.RequestID,
 		}
 
 		// Start tool execution with proper state

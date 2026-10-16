@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -39,6 +40,11 @@ type Model struct {
 	CurrentIteration int             // Current step number (0 = no iteration)
 	MaxIterations    int             // Max steps from config
 	IterationHistory []IterationStep // ALL steps (including non-tool steps)
+
+	// Current request (see request.go)
+	requestID     uint64
+	requestCtx    context.Context
+	requestCancel context.CancelFunc
 
 	// Context window tracking cache (to avoid recalculating every render frame)
 	// Guarded by usageMu since compaction Cmds read it off the Update loop

@@ -49,6 +49,9 @@
 - Custom manual plugins now receive their arguments
 - Editing a custom plugin no longer removes its arguments or turns settings into environment variables
 - Automating docker plugins more - WIP
+- Esc now cancels the request, including pending tool calls
+- Fixed a cancelled response appearing under the next question
+- Esc denies a tool permission request
 
 ---
 

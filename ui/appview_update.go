@@ -203,6 +203,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					ToolCalls:       a.pendingPermission.ToolCalls,
 					InitialResponse: a.pendingPermission.InitialResponse,
 					ContextMessages: a.pendingPermission.ContextMessages,
+					RequestID:       a.pendingPermission.RequestID,
 				}
 				return a.Update(response)
 
@@ -216,10 +217,11 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					ToolCalls:       a.pendingPermission.ToolCalls,
 					InitialResponse: a.pendingPermission.InitialResponse,
 					ContextMessages: a.pendingPermission.ContextMessages,
+					RequestID:       a.pendingPermission.RequestID,
 				}
 				return a.Update(response)
 
-			case "n":
+			case "n", "esc":
 				// No - Deny
 				response := toolPermissionResponseMsg{
 					Approved:        false,
@@ -229,6 +231,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					ToolCalls:       a.pendingPermission.ToolCalls,
 					InitialResponse: a.pendingPermission.InitialResponse,
 					ContextMessages: a.pendingPermission.ContextMessages,
+					RequestID:       a.pendingPermission.RequestID,
 				}
 				return a.Update(response)
 
@@ -735,8 +738,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// PRIORITY 4: Streaming cancellation (only if no modal open)
 		if msg.String() == "esc" && a.dataModel.Streaming {
-			a.dataModel.Streaming = false
-			a.userScrolledUp = false
+			a.cancelRequest()
 
 			partialResp := a.currentResp.String()
 

@@ -438,7 +438,7 @@ func buildPermissionContent(toolName, purpose string, details map[string]string)
 
 	content.WriteString(greenBold + "[y]" + reset + " Yes    ")
 	content.WriteString(blueBold + "[a]" + reset + " Always    ")
-	content.WriteString(redBold + "[n]" + reset + " No")
+	content.WriteString(redBold + "[n/Esc]" + reset + " No")
 
 	return content.String()
 }

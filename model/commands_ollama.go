@@ -175,6 +175,9 @@ func (m *Model) SendToOllama() tea.Cmd {
 			len(uiMessages), compactionMarker, len(m.Messages))
 	}
 
+	// A new user message starts a new request (cancelling any previous one)
+	reqCtx, reqID := m.beginRequest()
+
 	return func() tea.Msg {
 		// Reset iteration state for new user message (Phase 2)
 		m.CurrentIteration = 0
@@ -184,7 +187,7 @@ func (m *Model) SendToOllama() tea.Cmd {
 			config.DebugLog.Printf("sendToOllama goroutine started")
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		ctx, cancel := context.WithTimeout(reqCtx, 120*time.Second)
 		defer cancel()
 
 		// Get enabled plugins and their tools (Phase 6)
@@ -240,7 +243,7 @@ func (m *Model) SendToOllama() tea.Cmd {
 			if config.DebugLog != nil {
 				config.DebugLog.Printf("Ollama error after %v: %v", elapsed, err)
 			}
-			return StreamErrorMsg{Err: err}
+			return StreamErrorMsg{Err: err, RequestID: reqID}
 		}
 
 		response := responseBuilder.String()
@@ -257,6 +260,7 @@ func (m *Model) SendToOllama() tea.Cmd {
 				ToolCalls:       ensureToolCallIDs(detectedToolCalls),
 				InitialResponse: response,
 				ContextMessages: messages,
+				RequestID:       reqID,
 			}
 		}
 
@@ -264,6 +268,7 @@ func (m *Model) SendToOllama() tea.Cmd {
 		return StreamChunksCollectedMsg{
 			Chunks:       chunks,
 			FullResponse: response,
+			RequestID:    reqID,
 		}
 	}
 }
@@ -454,12 +459,23 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 	mcpManager := m.MCPManager
 	client := m.Provider
 
+	// Tool steps belong to the request that detected the tool calls
+	reqID := msg.RequestID
+	reqCtx := m.requestContext(reqID)
+	if reqCtx == nil {
+		return nil // Cancelled
+	}
+
 	return func() tea.Msg {
 		// Track step start time (Phase 2)
 		stepStartTime := time.Now()
 
-		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		ctx, cancel := context.WithTimeout(reqCtx, 120*time.Second)
 		defer cancel()
+
+		if err := reqCtx.Err(); err != nil {
+			return ToolExecutionErrorMsg{Err: err, RequestID: reqID}
+		}
 
 		if config.DebugLog != nil {
 			config.DebugLog.Printf("Executing %d tool calls", len(msg.ToolCalls))
@@ -489,6 +505,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 						ToolCalls:       msg.ToolCalls,
 						InitialResponse: msg.InitialResponse,
 						ContextMessages: msg.ContextMessages,
+						RequestID:       reqID,
 					}
 				}
 			}
@@ -505,6 +522,11 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 		results := make([]string, len(msg.ToolCalls))
 
 		for i, toolCall := range msg.ToolCalls {
+			// Don't start tools once the request is cancelled
+			if err := reqCtx.Err(); err != nil {
+				return ToolExecutionErrorMsg{Err: err, RequestID: reqID}
+			}
+
 			if config.DebugLog != nil {
 				config.DebugLog.Printf("Executing tool call %d: %s", i+1, toolCall.Name)
 			}
@@ -632,7 +654,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 			}
 			m.CurrentIteration = 0
 			m.IterationHistory = []IterationStep{}
-			return ToolExecutionErrorMsg{Err: err}
+			return ToolExecutionErrorMsg{Err: err, RequestID: reqID}
 		}
 
 		finalResponse := responseBuilder.String()
@@ -703,6 +725,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 				FullResponse:     finalResponse,
 				IterationSummary: summaryMsg,
 				HasMoreSteps:     false,
+				RequestID:        reqID,
 			}
 		}
 
@@ -726,6 +749,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 				FullResponse:     finalResponse,
 				IterationSummary: summaryMsg,
 				HasMoreSteps:     false,
+				RequestID:        reqID,
 			}
 		}
 
@@ -745,6 +769,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 			NextToolCalls:       ensureToolCallIDs(detectedToolCalls),
 			NextContext:         fullMessages,
 			NextInitialResponse: finalResponse,
+			RequestID:           reqID,
 		}
 	}
 }

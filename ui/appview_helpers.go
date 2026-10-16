@@ -415,9 +415,22 @@ func (a *AppView) startTypewriter(chunks []string) tea.Cmd {
 	a.chunks = chunks
 	a.chunkIndex = 0
 	a.currentResp.Reset()
+	requestID := a.dataModel.RequestID()
 	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
-		return displayChunkTickMsg{}
+		return displayChunkTickMsg{RequestID: requestID}
 	})
+}
+
+// staleRequest reports whether a message belongs to a request that was
+// cancelled or replaced by a newer one
+func (a *AppView) staleRequest(requestID uint64) bool {
+	if requestID != a.dataModel.RequestID() {
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("Ignoring message of stale request %d (current %d)", requestID, a.dataModel.RequestID())
+		}
+		return true
+	}
+	return false
 }
 
 // getPluginShortName extracts plugin ID from tool name and gets short display name
@@ -492,4 +505,26 @@ func (a *AppView) refreshProvidersAndModels() tea.Cmd {
 		a.dataModel.FetchAllModels(false), // Background refresh, don't show selector
 		a.dataModel.RefreshModelMetadataCmd(),
 	)
+}
+
+// cancelRequest cancels the in-progress request (Esc): the provider call and
+// any tool calls are stopped, their results will be ignored, and the
+// response and tool step state is reset
+func (a *AppView) cancelRequest() {
+	a.dataModel.CancelRequest()
+	a.dataModel.Streaming = false
+	a.userScrolledUp = false
+
+	a.executingTool = ""
+	a.pendingNextStep = false
+	a.pendingToolCalls = nil
+	a.pendingToolContext = nil
+	a.pendingToolResponse = ""
+	a.pendingSummary = nil
+	a.iterationCount = 0
+	a.dataModel.CurrentIteration = 0
+	a.dataModel.IterationHistory = nil
+
+	// Tools approved "once" for this request
+	*a = a.cleanupTemporaryTools()
 }

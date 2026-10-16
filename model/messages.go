@@ -39,21 +39,26 @@ type StreamDoneMsg struct {
 }
 
 type StreamErrorMsg struct {
-	Err error
+	Err       error
+	RequestID uint64
 }
 
 type StreamChunksCollectedMsg struct {
 	Chunks       []string
 	FullResponse string
+	RequestID    uint64
 }
 
-type DisplayChunkTickMsg struct{}
+type DisplayChunkTickMsg struct {
+	RequestID uint64
+}
 
 // Tool execution messages (Phase 6)
 type ToolCallsDetectedMsg struct {
 	ToolCalls       []ToolCall
 	InitialResponse string
 	ContextMessages []Message
+	RequestID       uint64
 }
 
 type ToolExecutionCompleteMsg struct {
@@ -66,10 +71,13 @@ type ToolExecutionCompleteMsg struct {
 	NextToolCalls       []ToolCall // Tools to execute in next step
 	NextContext         []Message  // Context for next iteration
 	NextInitialResponse string     // LLM text that came with NextToolCalls
+
+	RequestID uint64
 }
 
 type ToolExecutionErrorMsg struct {
-	Err error
+	Err       error
+	RequestID uint64
 }
 
 type MarkdownRenderedMsg struct {
@@ -172,6 +180,7 @@ type ToolPermissionRequestMsg struct {
 	ToolCalls       []ToolCall // All calls of this step, re-run after approval
 	InitialResponse string     // Assistant text that came with the calls
 	ContextMessages []Message
+	RequestID       uint64
 }
 
 // ToolPermissionResponseMsg is sent when the user responds to a permission request
@@ -183,6 +192,7 @@ type ToolPermissionResponseMsg struct {
 	ToolCalls       []ToolCall // All calls of this step (see ToolPermissionRequestMsg)
 	InitialResponse string
 	ContextMessages []Message
+	RequestID       uint64
 }
 
 // CompactionRequestMsg is sent when compaction approval is needed

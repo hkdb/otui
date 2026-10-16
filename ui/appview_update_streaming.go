@@ -21,8 +21,8 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			config.DebugLog.Printf("streamChunksCollectedMsg received - %d chunks collected", len(msg.Chunks))
 		}
 
-		// Ignore if user cancelled
-		if !a.dataModel.Streaming {
+		// Ignore if user cancelled (or a newer request started)
+		if a.staleRequest(msg.RequestID) || !a.dataModel.Streaming {
 			if config.DebugLog != nil {
 				config.DebugLog.Printf("Ignoring streamChunksCollectedMsg - user cancelled")
 			}
@@ -40,12 +40,12 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		// Start displaying chunks with typewriter effect after a brief delay
 		// System message with animated spinner stays visible during this delay
 		return a, tea.Tick(300*time.Millisecond, func(time.Time) tea.Msg {
-			return displayChunkTickMsg{}
+			return displayChunkTickMsg{RequestID: msg.RequestID}
 		})
 
 	case displayChunkTickMsg:
-		// Stop typewriter if user cancelled
-		if !a.dataModel.Streaming {
+		// Stop typewriter if user cancelled (ticks of an older request too)
+		if a.staleRequest(msg.RequestID) || !a.dataModel.Streaming {
 			return a, nil
 		}
 
@@ -71,6 +71,7 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 					ToolCalls:       a.pendingToolCalls,
 					InitialResponse: a.pendingToolResponse,
 					ContextMessages: a.pendingToolContext,
+					RequestID:       msg.RequestID,
 				}
 
 				// Clear pending state
@@ -182,7 +183,7 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		}
 
 		return a, tea.Tick(delay, func(time.Time) tea.Msg {
-			return displayChunkTickMsg{}
+			return displayChunkTickMsg{RequestID: msg.RequestID}
 		})
 
 	case streamChunkMsg:
@@ -250,6 +251,11 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 	case streamErrorMsg:
 		if config.DebugLog != nil {
 			config.DebugLog.Printf("streamErrorMsg received: %v", msg.Err)
+		}
+
+		// Errors of a cancelled request (e.g. "context canceled") aren't shown
+		if a.staleRequest(msg.RequestID) {
+			return a, nil
 		}
 
 		a.dataModel.Streaming = false
