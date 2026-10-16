@@ -69,7 +69,7 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			if a.pendingNextStep {
 				toolMsg := toolCallsDetectedMsg{
 					ToolCalls:       a.pendingToolCalls,
-					InitialResponse: "",
+					InitialResponse: a.pendingToolResponse,
 					ContextMessages: a.pendingToolContext,
 				}
 
@@ -77,6 +77,7 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 				a.pendingNextStep = false
 				a.pendingToolCalls = nil
 				a.pendingToolContext = nil
+				a.pendingToolResponse = ""
 
 				// Only add non-empty responses
 				if fullResp != "" {

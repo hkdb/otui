@@ -30,7 +30,7 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		a.removeLastNonPersistentSystemMessage()
 
 		// Extract purpose (covering every tool of this step) and create step message
-		purpose := a.dataModel.StepPurpose(msg.ContextMessages, msg.ToolCalls)
+		purpose := a.dataModel.StepPurpose(msg.ContextMessages, msg.InitialResponse, msg.ToolCalls)
 		a.createStepMessage(purpose, a.iterationCount+1)
 
 		// Start tool execution
@@ -77,6 +77,7 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			a.pendingNextStep = true
 			a.pendingToolCalls = msg.NextToolCalls
 			a.pendingToolContext = msg.NextContext
+			a.pendingToolResponse = msg.NextInitialResponse
 		}
 		if !msg.HasMoreSteps {
 			a.pendingNextStep = false

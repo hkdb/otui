@@ -55,6 +55,9 @@ func streamOpenAIChat(ctx context.Context, client openai.Client, params openai.C
 					call = &streamedToolCall{}
 					calls[delta.Index] = call
 				}
+				if delta.ID != "" {
+					call.id = delta.ID
+				}
 				call.name.WriteString(delta.Function.Name)
 				call.arguments.WriteString(delta.Function.Arguments)
 			}
@@ -77,6 +80,7 @@ func streamOpenAIChat(ctx context.Context, client openai.Client, params openai.C
 
 // streamedToolCall collects one tool call's deltas
 type streamedToolCall struct {
+	id        string
 	name      strings.Builder
 	arguments strings.Builder
 }
@@ -98,6 +102,7 @@ func assembleToolCalls(calls map[int64]*streamedToolCall) []model.ToolCall {
 			continue
 		}
 		toolCalls = append(toolCalls, model.ToolCall{
+			ID:        call.id,
 			Name:      mcp.DecodeToolName(name),
 			Arguments: ParseToolArguments(call.arguments.String()),
 		})

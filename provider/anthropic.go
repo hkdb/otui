@@ -75,7 +75,7 @@ func (p *AnthropicProvider) Chat(ctx context.Context, messages []model.Message, 
 // ChatWithTools implements Provider.ChatWithTools with streaming support.
 func (p *AnthropicProvider) ChatWithTools(ctx context.Context, messages []model.Message, tools []mcptypes.Tool, callback model.StreamCallback) error {
 	// Convert OTUI messages to Anthropic format
-	anthropicMessages, systemPrompt := convertToAnthropicMessages(messages)
+	anthropicMessages, systemPrompt := convertToAnthropicMessages(messages, len(tools) > 0)
 
 	// Prepend tool instructions to system blocks if tools present
 	finalSystemPrompt := systemPrompt
@@ -275,14 +275,19 @@ func (p *AnthropicProvider) FallbackModelMetadata(modelName string) model.ModelM
 
 // convertToAnthropicMessages converts OTUI messages to Anthropic format.
 // Returns the message array and any system prompt found.
-func convertToAnthropicMessages(messages []model.Message) ([]anthropic.MessageParam, []anthropic.TextBlockParam) {
+func convertToAnthropicMessages(messages []model.Message, nativeTools bool) ([]anthropic.MessageParam, []anthropic.TextBlockParam) {
 	var systemBlocks []anthropic.TextBlockParam
 	anthropicMsgs := make([]anthropic.MessageParam, 0, len(messages))
 
 	for _, msg := range messages {
+		// Native tool calls and results (the API requires tools in the request
+		// whenever history has tool_use/tool_result blocks)
+		nativeCall := nativeTools && msg.Role == "assistant" && len(msg.ToolCalls) > 0
+		nativeResult := nativeTools && msg.Role == "tool" && msg.ToolCallID != ""
+
 		// The API rejects empty or whitespace-only text blocks. They come from
 		// e.g. a tool-only assistant reply in the tool loop and carry nothing.
-		if strings.TrimSpace(msg.Content) == "" {
+		if strings.TrimSpace(msg.Content) == "" && !nativeCall && !nativeResult {
 			continue
 		}
 
@@ -292,24 +297,39 @@ func convertToAnthropicMessages(messages []model.Message) ([]anthropic.MessagePa
 			continue
 		}
 
-		// Tool results (and unknown roles) go to user messages until native
-		// tool_result blocks are supported
+		// Tool results (and unknown roles) go to user messages
 		role := anthropic.MessageParamRoleUser
 		if msg.Role == "assistant" {
 			role = anthropic.MessageParamRoleAssistant
 		}
 
+		var blocks []anthropic.ContentBlockParamUnion
+		switch {
+		case nativeResult:
+			blocks = append(blocks, anthropic.NewToolResultBlock(msg.ToolCallID, msg.Content, false))
+		case nativeCall:
+			if strings.TrimSpace(msg.Content) != "" {
+				blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
+			}
+			for _, call := range msg.ToolCalls {
+				input := call.Arguments
+				if input == nil {
+					input = map[string]any{}
+				}
+				blocks = append(blocks, anthropic.NewToolUseBlock(call.ID, input, mcp.EncodeToolName(call.Name)))
+			}
+		default:
+			blocks = append(blocks, anthropic.NewTextBlock(msg.Content))
+		}
+
 		// Consecutive messages with the same role become one turn (e.g. the
-		// results of several tool calls)
-		block := anthropic.NewTextBlock(msg.Content)
+		// results of several tool calls, which always come right after the
+		// tool_use turn and so stay first in their turn)
 		if n := len(anthropicMsgs); n > 0 && anthropicMsgs[n-1].Role == role {
-			anthropicMsgs[n-1].Content = append(anthropicMsgs[n-1].Content, block)
+			anthropicMsgs[n-1].Content = append(anthropicMsgs[n-1].Content, blocks...)
 			continue
 		}
-		anthropicMsgs = append(anthropicMsgs, anthropic.MessageParam{
-			Role:    role,
-			Content: []anthropic.ContentBlockParamUnion{block},
-		})
+		anthropicMsgs = append(anthropicMsgs, anthropic.MessageParam{Role: role, Content: blocks})
 	}
 
 	// A final assistant turn (prefill) must not end with whitespace
@@ -338,6 +358,7 @@ func extractToolCalls(content []anthropic.ContentBlockUnion) []model.ToolCall {
 			}
 
 			toolCalls = append(toolCalls, model.ToolCall{
+				ID:        toolUse.ID,
 				Name:      mcp.DecodeToolName(toolUse.Name),
 				Arguments: args,
 			})

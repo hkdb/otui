@@ -112,11 +112,53 @@ func TestStepPurposeNamesAllTools(t *testing.T) {
 	m := toolCallModel(&toolCallProvider{})
 	calls := []ToolCall{{Name: "fake-echo.echo_a"}, {Name: "fake-echo.echo_b"}}
 
-	if got := m.StepPurpose(nil, calls); got != "Execute echo_a, echo_b" {
+	if got := m.StepPurpose(nil, "", calls); got != "Execute echo_a, echo_b" {
 		t.Errorf("StepPurpose = %q", got)
 	}
-	reasoning := []Message{{Role: "assistant", Content: "Checking both. Then answering"}}
-	if got := m.StepPurpose(reasoning, calls); got != "Checking both" {
+	// The LLM's text for this step is its reasoning
+	if got := m.StepPurpose(nil, "Checking both. Then answering", calls); got != "Checking both" {
 		t.Errorf("StepPurpose with reasoning = %q", got)
+	}
+}
+
+func TestEnsureToolCallIDs(t *testing.T) {
+	calls := ensureToolCallIDs([]ToolCall{{Name: "a"}, {ID: "keep", Name: "b"}, {Name: "c"}})
+	if calls[1].ID != "keep" {
+		t.Errorf("existing ID replaced: %q", calls[1].ID)
+	}
+	if calls[0].ID == "" || calls[2].ID == "" || calls[0].ID == calls[2].ID {
+		t.Errorf("generated IDs = %q, %q", calls[0].ID, calls[2].ID)
+	}
+}
+
+func TestBuildToolStepMessages(t *testing.T) {
+	context := []Message{{Role: "user", Content: "q"}}
+	calls := []ToolCall{{ID: "c1", Name: "t.a"}, {ID: "c2", Name: "t.b"}}
+
+	msgs := buildToolStepMessages(context, "Checking.", calls, []string{"ra", "rb"})
+
+	if len(msgs) != 4 {
+		t.Fatalf("got %d messages, want user, assistant, tool, tool", len(msgs))
+	}
+	if msgs[1].Role != "assistant" || msgs[1].Content != "Checking." || len(msgs[1].ToolCalls) != 2 {
+		t.Errorf("assistant turn = %+v", msgs[1])
+	}
+	if msgs[2].ToolCallID != "c1" || msgs[2].Content != "ra" || msgs[3].ToolCallID != "c2" || msgs[3].ToolName != "t.b" {
+		t.Errorf("results = %+v %+v", msgs[2], msgs[3])
+	}
+	if len(context) != 1 {
+		t.Error("context was modified")
+	}
+
+	// A follow-up step adds exactly one assistant turn (no duplicate)
+	next := buildToolStepMessages(msgs, "Now B.", []ToolCall{{ID: "c3", Name: "t.c"}}, []string{"rc"})
+	assistants := 0
+	for _, m := range next {
+		if m.Role == "assistant" {
+			assistants++
+		}
+	}
+	if assistants != 2 || next[4].Content != "Now B." {
+		t.Errorf("follow-up step: %d assistant turns, step 2 turn = %+v", assistants, next[4])
 	}
 }

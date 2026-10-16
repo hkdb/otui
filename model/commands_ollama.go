@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/google/uuid"
 	mcptypes "github.com/mark3labs/mcp-go/mcp"
 
 	"otui/config"
@@ -253,7 +254,7 @@ func (m *Model) SendToOllama() tea.Cmd {
 				config.DebugLog.Printf("Tool calls detected: %d", len(detectedToolCalls))
 			}
 			return ToolCallsDetectedMsg{
-				ToolCalls:       detectedToolCalls,
+				ToolCalls:       ensureToolCallIDs(detectedToolCalls),
 				InitialResponse: response,
 				ContextMessages: messages,
 			}
@@ -424,7 +425,9 @@ func extractReasoning(contextMessages []Message) string {
 // StepPurpose describes a step that runs toolCalls: the LLM's reasoning if
 // there is any, otherwise the purpose of a single call, or the names of all
 // tools when there are several
-func (m *Model) StepPurpose(contextMessages []Message, toolCalls []ToolCall) string {
+func (m *Model) StepPurpose(contextMessages []Message, initialResponse string, toolCalls []ToolCall) string {
+	contextMessages = withResponse(contextMessages, initialResponse)
+
 	switch {
 	case len(toolCalls) == 0:
 		return m.ExtractPurpose(contextMessages, nil)
@@ -471,7 +474,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 				// Check if tool is whitelisted (global config or session-specific)
 				if !m.isToolAllowed(toolName) {
 					// Tool not allowed - request permission (don't increment iteration yet)
-					purpose := m.ExtractPurpose(msg.ContextMessages, &toolCall)
+					purpose := m.ExtractPurpose(withResponse(msg.ContextMessages, msg.InitialResponse), &toolCall)
 
 					if config.DebugLog != nil {
 						config.DebugLog.Printf("Permission required for tool: %s (purpose: %s)", toolName, purpose)
@@ -498,8 +501,8 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 			config.DebugLog.Printf("Starting iteration %d", m.CurrentIteration)
 		}
 
-		// Execute each tool call and collect results
-		var toolResultMsgs []Message
+		// Execute each tool call and collect results (one per call, in order)
+		results := make([]string, len(msg.ToolCalls))
 
 		for i, toolCall := range msg.ToolCalls {
 			if config.DebugLog != nil {
@@ -517,10 +520,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 				if config.DebugLog != nil {
 					config.DebugLog.Printf("Error executing tool %s: %v", toolName, err)
 				}
-				toolResultMsgs = append(toolResultMsgs, Message{
-					Role:    "tool",
-					Content: fmt.Sprintf("Error executing %s: %v", toolName, err),
-				})
+				results[i] = fmt.Sprintf("Error executing %s: %v", toolName, err)
 				continue
 			}
 
@@ -543,19 +543,12 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 				config.DebugLog.Printf("Tool %s result: %d chars", toolName, len(resultContent))
 			}
 
-			toolResultMsgs = append(toolResultMsgs, Message{
-				Role:    "tool",
-				Content: resultContent,
-			})
+			results[i] = resultContent
 		}
 
-		// Build complete message history for LLM
-		fullMessages := msg.ContextMessages
-		fullMessages = append(fullMessages, Message{
-			Role:    "assistant",
-			Content: msg.InitialResponse,
-		})
-		fullMessages = append(fullMessages, toolResultMsgs...)
+		// Build complete message history for LLM: the assistant turn with its
+		// tool calls, then one result per call tied to the call's ID
+		fullMessages := buildToolStepMessages(msg.ContextMessages, msg.InitialResponse, msg.ToolCalls, results)
 
 		// Record step (Phase 2: ALL steps, not just tool executions)
 		if m.Config.EnableMultiStep {
@@ -565,7 +558,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 				firstToolCall = &msg.ToolCalls[0]
 			}
 
-			purpose := m.StepPurpose(msg.ContextMessages, msg.ToolCalls)
+			purpose := m.StepPurpose(msg.ContextMessages, msg.InitialResponse, msg.ToolCalls)
 
 			step := IterationStep{
 				StepNumber: m.CurrentIteration,
@@ -616,7 +609,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 		}
 
 		if config.DebugLog != nil {
-			config.DebugLog.Printf("Sending %d messages back to LLM (including %d tool results)", len(fullMessages), len(toolResultMsgs))
+			config.DebugLog.Printf("Sending %d messages back to LLM (including %d tool results)", len(fullMessages), len(results))
 		}
 
 		// Send back to LLM
@@ -742,23 +735,16 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 				m.CurrentIteration+1, len(detectedToolCalls))
 		}
 
-		// Build context for next step - include the LLM's current response
-		// so ExtractPurpose can find the reasoning for the next tool calls
-		nextContext := fullMessages
-		if finalResponse != "" {
-			nextContext = append(nextContext, Message{
-				Role:    "assistant",
-				Content: finalResponse,
-			})
-		}
-
-		// Return for typewriter display, then next step
+		// Context for the next step. The LLM's current response becomes the
+		// next step's assistant turn together with its tool calls (not a
+		// separate turn), so it's passed as NextInitialResponse.
 		return ToolExecutionCompleteMsg{
-			Chunks:        chunks,
-			FullResponse:  finalResponse,
-			HasMoreSteps:  true,
-			NextToolCalls: detectedToolCalls,
-			NextContext:   nextContext,
+			Chunks:              chunks,
+			FullResponse:        finalResponse,
+			HasMoreSteps:        true,
+			NextToolCalls:       ensureToolCallIDs(detectedToolCalls),
+			NextContext:         fullMessages,
+			NextInitialResponse: finalResponse,
 		}
 	}
 }
@@ -911,4 +897,50 @@ func sameToolCall(a, b ToolCall) bool {
 	argsA, errA := json.Marshal(a.Arguments)
 	argsB, errB := json.Marshal(b.Arguments)
 	return errA == nil && errB == nil && string(argsA) == string(argsB)
+}
+
+// ensureToolCallIDs gives every tool call an ID. Providers without call IDs
+// (Ollama, tool calls parsed from text) get generated ones, which tie the
+// call to its result in the next request.
+func ensureToolCallIDs(calls []ToolCall) []ToolCall {
+	for i := range calls {
+		if calls[i].ID == "" {
+			calls[i].ID = "call_" + uuid.NewString()[:8]
+		}
+	}
+	return calls
+}
+
+// buildToolStepMessages appends a tool step to the context: the assistant
+// turn (its text and the tool calls it made), then one tool result per call
+// in the same order, tied to the call by ID
+func buildToolStepMessages(context []Message, initialResponse string, calls []ToolCall, results []string) []Message {
+	messages := append([]Message(nil), context...)
+	messages = append(messages, Message{
+		Role:      "assistant",
+		Content:   initialResponse,
+		ToolCalls: calls,
+	})
+	for i, call := range calls {
+		result := ""
+		if i < len(results) {
+			result = results[i]
+		}
+		messages = append(messages, Message{
+			Role:       "tool",
+			Content:    result,
+			ToolCallID: call.ID,
+			ToolName:   call.Name,
+		})
+	}
+	return messages
+}
+
+// withResponse returns the context with the LLM's response for this step
+// appended, so purpose extraction can find its reasoning
+func withResponse(context []Message, response string) []Message {
+	if strings.TrimSpace(response) == "" {
+		return context
+	}
+	return append(append([]Message(nil), context...), Message{Role: "assistant", Content: response})
 }

@@ -217,12 +217,13 @@ type AppView struct {
 	pluginOperationSpinner   spinner.Model
 
 	// Multi-step iteration UI state (Phase 2)
-	iterationCount     int  // Current step number
-	maxIterations      int  // Max from config
-	pendingNextStep    bool // Continue after typewriter?
-	pendingToolCalls   []ToolCall
-	pendingToolContext []Message
-	pendingSummary     *IterationSummaryMsg // Summary to add after typewriter completes
+	iterationCount      int  // Current step number
+	maxIterations       int  // Max from config
+	pendingNextStep     bool // Continue after typewriter?
+	pendingToolCalls    []ToolCall
+	pendingToolContext  []Message
+	pendingToolResponse string               // LLM text that came with pendingToolCalls
+	pendingSummary      *IterationSummaryMsg // Summary to add after typewriter completes
 
 	// Session generation counter — incremented on session switch to invalidate stale async renders
 	sessionGeneration uint64

@@ -110,7 +110,7 @@ func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model
 	}
 
 	// Convert OTUI messages to OpenAI format
-	openaiMessages := ConvertToOpenAIMessages(messagesWithInstructions)
+	openaiMessages := ConvertToOpenAIMessages(messagesWithInstructions, len(tools) > 0)
 
 	// Build request parameters
 	params := openai.ChatCompletionNewParams{
@@ -299,24 +299,55 @@ func stripProviderPrefix(modelName string) string {
 }
 
 // ConvertToOpenAIMessages converts OTUI messages to OpenAI format.
-func ConvertToOpenAIMessages(messages []model.Message) []openai.ChatCompletionMessageParamUnion {
-	result := make([]openai.ChatCompletionMessageParamUnion, len(messages))
+func ConvertToOpenAIMessages(messages []model.Message, nativeTools bool) []openai.ChatCompletionMessageParamUnion {
+	result := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
 
-	for i, msg := range messages {
+	for _, msg := range messages {
 		switch msg.Role {
 		case "system":
-			result[i] = openai.SystemMessage(msg.Content)
-		case "user":
-			result[i] = openai.UserMessage(msg.Content)
+			result = append(result, openai.SystemMessage(msg.Content))
+
 		case "assistant":
-			result[i] = openai.AssistantMessage(msg.Content)
+			// Native: the assistant turn records the tool calls it made (the
+			// API requires tools in the request whenever history has them)
+			if nativeTools && len(msg.ToolCalls) > 0 {
+				assistant := openai.ChatCompletionAssistantMessageParam{}
+				if msg.Content != "" {
+					assistant.Content.OfString = openai.String(msg.Content)
+				}
+				for _, call := range msg.ToolCalls {
+					args, err := json.Marshal(call.Arguments)
+					if err != nil || call.Arguments == nil {
+						args = []byte("{}")
+					}
+					assistant.ToolCalls = append(assistant.ToolCalls, openai.ChatCompletionMessageToolCallUnionParam{
+						OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+							ID: call.ID,
+							Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+								Name:      mcp.EncodeToolName(call.Name),
+								Arguments: string(args),
+							},
+						},
+					})
+				}
+				result = append(result, openai.ChatCompletionMessageParamUnion{OfAssistant: &assistant})
+				continue
+			}
+			if msg.Content == "" {
+				continue // A tool-only turn without native tool calls carries nothing
+			}
+			result = append(result, openai.AssistantMessage(msg.Content))
+
 		case "tool":
-			// Tool messages are sent as user messages for now
-			// TODO: Add ToolCallID to Message struct to properly handle tool responses
-			result[i] = openai.UserMessage(msg.Content)
-		default:
-			// Default to user message
-			result[i] = openai.UserMessage(msg.Content)
+			// Native: the result answers a specific tool call
+			if nativeTools && msg.ToolCallID != "" {
+				result = append(result, openai.ToolMessage(msg.Content, msg.ToolCallID))
+				continue
+			}
+			result = append(result, openai.UserMessage(msg.Content))
+
+		default: // "user" and anything unknown
+			result = append(result, openai.UserMessage(msg.Content))
 		}
 	}
 

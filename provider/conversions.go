@@ -28,12 +28,25 @@ import (
 //	}
 //	ollamaMessages := ConvertToOllamaMessages(otuiMessages)
 //	// ollamaMessages now contains Ollama-compatible messages
+//
+// Tool calls of assistant turns and the tool name of tool results are passed
+// natively (Ollama has no tool call IDs; results are matched by order/name).
 func ConvertToOllamaMessages(messages []model.Message) []api.Message {
 	result := make([]api.Message, len(messages))
 	for i, msg := range messages {
 		result[i] = api.Message{
-			Role:    msg.Role,
-			Content: msg.Content,
+			Role:     msg.Role,
+			Content:  msg.Content,
+			ToolName: msg.ToolName,
+		}
+		for j, call := range msg.ToolCalls {
+			result[i].ToolCalls = append(result[i].ToolCalls, api.ToolCall{
+				Function: api.ToolCallFunction{
+					Index:     j,
+					Name:      call.Name,
+					Arguments: call.Arguments,
+				},
+			})
 		}
 	}
 	return result

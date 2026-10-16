@@ -80,7 +80,7 @@ func TestConvertToAnthropicMessages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			msgs, system := convertToAnthropicMessages(tt.messages)
+			msgs, system := convertToAnthropicMessages(tt.messages, false)
 			if got := texts(msgs); strings.Join(got, "\n") != strings.Join(tt.want, "\n") {
 				t.Errorf("messages = %q, want %q", got, tt.want)
 			}
@@ -159,7 +159,7 @@ func TestAnthropicToolOnlyReplyFollowUp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first request: %v", err)
 	}
-	if len(calls) != 1 || calls[0].Name != "fake-echo.echo_a" || calls[0].Arguments["text"] != "one" {
+	if len(calls) != 1 || calls[0].ID != "toolu_1" || calls[0].Name != "fake-echo.echo_a" || calls[0].Arguments["text"] != "one" {
 		t.Fatalf("tool calls = %+v", calls)
 	}
 

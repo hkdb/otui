@@ -124,7 +124,7 @@ func (p *OpenAIProvider) ChatWithTools(ctx context.Context, messages []model.Mes
 	}
 
 	// Convert OTUI messages to OpenAI format
-	openaiMessages := ConvertToOpenAIMessages(messagesWithInstructions)
+	openaiMessages := ConvertToOpenAIMessages(messagesWithInstructions, len(tools) > 0)
 
 	// Build request parameters
 	params := openai.ChatCompletionNewParams{

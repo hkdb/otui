@@ -63,8 +63,9 @@ type ToolExecutionCompleteMsg struct {
 
 	// Phase 2: Multi-step continuation
 	HasMoreSteps  bool       // Continue iteration after typewriter?
-	NextToolCalls []ToolCall // Tools to execute in next step
-	NextContext   []Message  // Context for next iteration
+	NextToolCalls       []ToolCall // Tools to execute in next step
+	NextContext         []Message  // Context for next iteration
+	NextInitialResponse string     // LLM text that came with NextToolCalls
 }
 
 type ToolExecutionErrorMsg struct {
