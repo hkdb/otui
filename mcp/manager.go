@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -101,6 +102,51 @@ func detectNpmBinary(installPath, packageName string) string {
 	return ""
 }
 
+// pluginBinaryPath resolves a plugin's Command override: absolute, or
+// relative to InstallPath/bin. Returns "" if there's no override.
+func pluginBinaryPath(installPath, command string) string {
+	switch {
+	case command == "":
+		return ""
+	case filepath.IsAbs(command):
+		return command
+	default:
+		return filepath.Join(installPath, "bin", command)
+	}
+}
+
+// goBinaryName returns the name of the binary "go install pkg" creates: the
+// last element of the package path, skipping a major version suffix (v2, v3...)
+func goBinaryName(pkg string) string {
+	pkg, _, _ = strings.Cut(pkg, "@")
+	pkg = strings.TrimSuffix(pkg, "/")
+
+	parts := strings.Split(pkg, "/")
+	name := parts[len(parts)-1]
+	if len(parts) > 1 && isMajorVersionSuffix(name) {
+		name = parts[len(parts)-2]
+	}
+
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return name
+}
+
+// isMajorVersionSuffix reports whether s is a module major version suffix
+// like "v2"
+func isMajorVersionSuffix(s string) bool {
+	if len(s) < 2 || s[0] != 'v' || s[1] == '0' {
+		return false
+	}
+	for _, c := range s[1:] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return s != "v1"
+}
+
 func (m *MCPManager) buildPluginCommand(plugin *Plugin, installed *storage.InstalledPlugin, pluginConfig map[string]string) (string, []string) {
 	switch plugin.InstallType {
 	case "remote":
@@ -142,26 +188,41 @@ func (m *MCPManager) buildPluginCommand(plugin *Plugin, installed *storage.Insta
 		args := append([]string{modulePath}, SubstituteArgs(plugin.Args, pluginConfig)...)
 		return venvPath, args
 	case "go":
-		binaryPath := filepath.Join(installed.InstallPath, plugin.Package)
+		// go install puts the binary in InstallPath/bin (GOBIN)
+		binaryPath := pluginBinaryPath(installed.InstallPath, plugin.Command)
+		if binaryPath == "" {
+			binaryPath = filepath.Join(installed.InstallPath, "bin", goBinaryName(plugin.Package))
+		}
 		args := SubstituteArgs(plugin.Args, pluginConfig)
 		return binaryPath, args
 	case "binary":
-		binaryPath := filepath.Join(installed.InstallPath, plugin.Package)
+		binaryPath := pluginBinaryPath(installed.InstallPath, plugin.Command)
+		if binaryPath == "" {
+			binaryPath = filepath.Join(installed.InstallPath, "bin", filepath.Base(plugin.Package))
+			if _, err := os.Stat(binaryPath); err != nil {
+				// Older setups: binary placed at InstallPath/Package
+				binaryPath = filepath.Join(installed.InstallPath, plugin.Package)
+			}
+		}
 		args := SubstituteArgs(plugin.Args, pluginConfig)
 		return binaryPath, args
-	case "manual", "docker":
+	case "docker":
+		return buildDockerCommand(plugin, pluginConfig)
+	case "manual":
+		extraArgs := SubstituteArgs(plugin.Args, pluginConfig)
+
 		// Priority 1: Check for command in config (from plugins.toml)
 		if cmdValue, ok := pluginConfig["__command__"]; ok && cmdValue != "" {
 			parts := strings.Fields(cmdValue)
 			if len(parts) > 0 {
-				return parts[0], parts[1:]
+				return parts[0], append(parts[1:], extraArgs...)
 			}
 		}
 		// Priority 2: Check plugin's default Command field (from custom_plugins.json)
 		if plugin.Command != "" {
 			parts := strings.Fields(plugin.Command)
 			if len(parts) > 0 {
-				return parts[0], parts[1:]
+				return parts[0], append(parts[1:], extraArgs...)
 			}
 		}
 		// Priority 3: Fallback to InstallPath/Package

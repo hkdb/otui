@@ -44,6 +44,11 @@
 - Fixed remote SSE plugins disconnecting after being enabled
 - Fixed plugins freezing when logging heavily
 - Fixed plugin processes (and their child processes) left running after a failed start or disable
+- Fixed plugins installed with Go failing to start
+- Fixed plugin argument templates (labels with spaces, defaults, empty values)
+- Custom manual plugins now receive their arguments
+- Editing a custom plugin no longer removes its arguments or turns settings into environment variables
+- Automating docker plugins more - WIP
 
 ---
 

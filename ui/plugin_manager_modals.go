@@ -273,6 +273,9 @@ func renderConfigModal(
 		} else {
 			if commandValue == "" {
 				commandValue = "(not configured - plugin may not start)"
+				if plugin.InstallType == "docker" && plugin.Package != "" {
+					commandValue = "(default: docker run -i --rm ... " + plugin.Package + ")"
+				}
 			}
 			line = fmt.Sprintf("%sCommand:  %s", indicator, commandValue)
 		}
@@ -288,7 +291,7 @@ func renderConfigModal(
 			var hint string
 			switch plugin.InstallType {
 			case "docker":
-				hint = "Example: docker run -it container-name"
+				hint = "Optional - default: docker run -i --rm <image>"
 			case "manual":
 				hint = "Example: /path/to/executable --args"
 			default:
@@ -501,7 +504,7 @@ func (a *AppView) renderAddCustomModal() string {
 		hint := "(optional - command to start plugin)"
 		switch installType {
 		case "docker":
-			hint = "(optional - e.g., 'docker run -it container-name')"
+			hint = "(optional - e.g., 'docker run -i --rm image')"
 		case "manual":
 			hint = "(optional - e.g., '/path/to/executable --args')"
 		case "binary":
@@ -788,9 +791,16 @@ func (a *AppView) renderArgsEditModal() string {
 				valueStr = fmt.Sprintf("= %s", arg.Value)
 			case "value":
 				valueStr = fmt.Sprintf("= value (%s)", arg.Label)
+				if arg.Default != "" {
+					valueStr = fmt.Sprintf("= value (%s, default: %s)", arg.Label, arg.Default)
+				}
 			}
 
-			line := fmt.Sprintf("%s%s  %s", indicator, arg.Flag, valueStr)
+			flag := arg.Flag
+			if flag == "" {
+				flag = "(positional)"
+			}
+			line := fmt.Sprintf("%s%s  %s", indicator, flag, valueStr)
 
 			lineStyle := lipgloss.NewStyle().Width(modalWidth)
 			if isSelected {
@@ -1067,6 +1077,10 @@ func (a *AppView) renderRuntimeMissing() string {
 		titleText = "⚠️  Go Required"
 		runtimeName = "Go"
 		websiteURL = "https://go.dev"
+	case "docker":
+		titleText = "⚠️  Docker Required"
+		runtimeName = "Docker"
+		websiteURL = "https://docs.docker.com/get-docker/"
 	default:
 		return ""
 	}

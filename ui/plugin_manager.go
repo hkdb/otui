@@ -87,7 +87,7 @@ func (a *AppView) initPluginManager() {
 			{"server_url", "http://localhost:8080", 200},
 			{"auth_type", "none", 50},
 			{"transport", "sse", 50},
-			{"command", "docker run -it container-name", 300},
+			{"command", "docker run -i --rm image", 300},
 			{"description", "Brief description", 300},
 			{"category", "utility", 50},
 			{"language", "TypeScript", 50},
@@ -353,4 +353,34 @@ func (a *AppView) renderPluginManager() string {
 		Height(a.height).
 		Align(lipgloss.Center, lipgloss.Center).
 		Render(content)
+}
+
+// customPluginEnvVars returns a custom plugin's env vars (the keys in its
+// Environment field, in order) with their configured values for the edit form.
+// Other config keys (argument values, server URL...) aren't env vars.
+func customPluginEnvVars(plugin *mcp.Plugin, pluginCfg map[string]string) []EnvVarPair {
+	envVars := []EnvVarPair{}
+	for _, key := range mcp.EnvironmentKeys(plugin.Environment) {
+		envVars = append(envVars, EnvVarPair{Key: key, Value: pluginCfg[key]})
+	}
+	return envVars
+}
+
+// mergeCustomPluginConfig returns a custom plugin's config after editing its
+// env vars: the previous env keys are replaced by envVars, other settings are
+// kept
+func mergeCustomPluginConfig(existing map[string]string, oldEnvironment string, envVars []EnvVarPair) map[string]string {
+	merged := make(map[string]string, len(existing)+len(envVars))
+	for k, v := range existing {
+		merged[k] = v
+	}
+	for _, key := range mcp.EnvironmentKeys(oldEnvironment) {
+		delete(merged, key)
+	}
+	for _, pair := range envVars {
+		if pair.Key != "" {
+			merged[pair.Key] = pair.Value
+		}
+	}
+	return merged
 }

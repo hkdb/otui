@@ -323,7 +323,7 @@ func (a AppView) handleConfigModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 			a.pluginManagerState.configModal.preInstallMode = false
 
 			// Route based on install type
-			if plugin.InstallType == "manual" || plugin.InstallType == "docker" {
+			if plugin.InstallType == "manual" {
 				// Show manual instructions next
 				return a.startManualInstall(plugin)
 			} else {
@@ -1227,22 +1227,10 @@ func (a AppView) handlePluginManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 					a.pluginManagerState.addCustomModal.fields[fieldName] = field
 				}
 
-				// Load env vars from plugin config
-				if pluginCfg := a.pluginManagerState.pluginState.Config.GetPluginConfig(plugin.ID); pluginCfg != nil {
-					// Convert config map to EnvVarPair array
-					envVars := []EnvVarPair{}
-					for k, v := range pluginCfg {
-						envVars = append(envVars, EnvVarPair{Key: k, Value: v})
-					}
-					a.pluginManagerState.addCustomModal.envVars = envVars
-				}
-
-				// Parse args from plugin.Args string if present
-				if plugin.Args != "" {
-					// Args are stored as JSON string in plugin.Args
-					// We'll leave them empty for now - user can reconfigure if needed
-					a.pluginManagerState.addCustomModal.args = []mcp.ArgPair{}
-				}
+				// Load env vars and args
+				pluginCfg := a.pluginManagerState.pluginState.Config.GetPluginConfig(plugin.ID)
+				a.pluginManagerState.addCustomModal.envVars = customPluginEnvVars(plugin, pluginCfg)
+				a.pluginManagerState.addCustomModal.args = mcp.StringToArgs(plugin.Args)
 
 				// Focus first field
 				field := a.pluginManagerState.addCustomModal.fields["repository"]
@@ -1466,22 +1454,10 @@ func (a AppView) handlePluginManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 				a.pluginManagerState.addCustomModal.fields[fieldName] = field
 			}
 
-			// Load env vars from plugin config
-			if pluginCfg := a.pluginManagerState.pluginState.Config.GetPluginConfig(plugin.ID); pluginCfg != nil {
-				// Convert config map to EnvVarPair array
-				envVars := []EnvVarPair{}
-				for k, v := range pluginCfg {
-					envVars = append(envVars, EnvVarPair{Key: k, Value: v})
-				}
-				a.pluginManagerState.addCustomModal.envVars = envVars
-			}
-
-			// Parse args from plugin.Args string if present
-			if plugin.Args != "" {
-				// Args are stored as JSON string in plugin.Args
-				// We'll leave them empty for now - user can reconfigure if needed
-				a.pluginManagerState.addCustomModal.args = []mcp.ArgPair{}
-			}
+			// Load env vars and args
+			pluginCfg := a.pluginManagerState.pluginState.Config.GetPluginConfig(plugin.ID)
+			a.pluginManagerState.addCustomModal.envVars = customPluginEnvVars(plugin, pluginCfg)
+			a.pluginManagerState.addCustomModal.args = mcp.StringToArgs(plugin.Args)
 
 			// Focus first field
 			field := a.pluginManagerState.addCustomModal.fields["repository"]
@@ -1611,8 +1587,20 @@ func (a AppView) waitForUninstallProgress() tea.Msg {
 // checkRuntimeAndProceed checks for required runtime and proceeds with installation
 func (a AppView) checkRuntimeAndProceed(plugin *mcp.Plugin) (AppView, tea.Cmd) {
 	// For manual and docker installs, show config before manual instructions
-	if plugin.InstallType == "manual" || plugin.InstallType == "docker" {
+	if plugin.InstallType == "manual" {
 		return a.showPreInstallConfig(plugin)
+	}
+
+	if plugin.InstallType == "docker" {
+		if plugin.Package != "" {
+			if _, err := mcp.NewRuntimeChecker().CheckRuntime("docker"); err != nil {
+				a.pluginManagerState.warnings.showRuntimeMissing = true
+				a.pluginManagerState.warnings.runtimeType = "docker"
+				a.pluginManagerState.warnings.runtimePlugin = plugin
+				return a, nil
+			}
+		}
+		return a.checkApiKeyAndProceed(plugin)
 	}
 
 	if plugin.InstallType == "binary" {
@@ -1902,6 +1890,9 @@ func (a AppView) handleEditCustomPluginSubmit() (AppView, tea.Cmd) {
 		Args:        mcp.ArgsToString(a.pluginManagerState.addCustomModal.args),
 	}
 
+	// Env keys before the edit (the registry entry is updated below)
+	oldEnvironment := a.pluginManagerState.addCustomModal.editingPlugin.Environment
+
 	// Update in registry (in-memory + custom_plugins.json)
 	warnings, err := a.pluginManagerState.pluginState.Registry.UpdateCustomPlugin(id, updatedPlugin)
 	if err != nil {
@@ -1921,13 +1912,13 @@ func (a AppView) handleEditCustomPluginSubmit() (AppView, tea.Cmd) {
 		return a, nil
 	}
 
-	// Update plugin config (env vars)
-	envMap := make(map[string]string)
-	for _, pair := range a.pluginManagerState.addCustomModal.envVars {
-		if pair.Key != "" {
-			envMap[pair.Key] = pair.Value
-		}
-	}
+	// Update plugin config (env vars), keeping its other settings (argument
+	// values, server URL...)
+	envMap := mergeCustomPluginConfig(
+		a.pluginManagerState.pluginState.Config.GetPluginConfig(id),
+		oldEnvironment,
+		a.pluginManagerState.addCustomModal.envVars,
+	)
 
 	// Save env vars to config
 	a.pluginManagerState.pluginState.Config.SetPluginConfig(id, envMap)

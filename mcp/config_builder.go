@@ -10,11 +10,19 @@ import (
 
 // ArgPair represents a command-line argument for custom plugin definition
 type ArgPair struct {
-	Flag  string // e.g., "--dir", "-p", "-y"
-	Type  string // "none", "value", "fixed"
-	Value string // For type="fixed": the fixed value
-	Label string // For type="value": label shown in configure screen
+	Flag    string // e.g., "--dir", "-p", "-y" ("" for a positional argument)
+	Type    string // "none", "value", "fixed"
+	Value   string // For type="fixed": the fixed value
+	Label   string // For type="value": label shown in configure screen
+	Default string // For type="value": optional default (value::'Label';;'default')
 }
+
+// valueTagPrefix starts an argument template: value::'Label' with an
+// optional default: value::'Label';;'default'
+const valueTagPrefix = "value::'"
+
+// valueTagRe matches a value tag and its optional default
+var valueTagRe = regexp.MustCompile(`value::'([^']+)'(?:;;'([^']*)')?`)
 
 // EnvVarsToString converts environment variable keys to space-separated string
 func EnvVarsToString(envVarKeys []string) string {
@@ -29,17 +37,33 @@ func StringToEnvVars(envString string) []string {
 	return strings.Fields(envString)
 }
 
+// EnvironmentKeys returns the env var keys of a plugin's Environment field
+// (without their ;;'default' suffixes)
+func EnvironmentKeys(envString string) []string {
+	defs := parseEnvironmentWithDefaults(envString)
+	keys := make([]string, len(defs))
+	for i, def := range defs {
+		keys[i] = def.Key
+	}
+	return keys
+}
+
 // ArgsToString converts []ArgPair to args string with value:: tags
 func ArgsToString(args []ArgPair) string {
 	parts := []string{}
 	for _, arg := range args {
-		switch arg.Type {
-		case "none":
+		if arg.Flag != "" {
 			parts = append(parts, arg.Flag)
+		}
+		switch arg.Type {
 		case "fixed":
-			parts = append(parts, arg.Flag, arg.Value)
+			parts = append(parts, arg.Value)
 		case "value":
-			parts = append(parts, arg.Flag, fmt.Sprintf("value::'%s'", arg.Label))
+			tag := fmt.Sprintf("value::'%s'", arg.Label)
+			if arg.Default != "" {
+				tag += fmt.Sprintf(";;'%s'", arg.Default)
+			}
+			parts = append(parts, tag)
 		}
 	}
 	return strings.Join(parts, " ")
@@ -57,80 +81,74 @@ func StringToArgs(argsString string) []ArgPair {
 	for i := 0; i < len(tokens); i++ {
 		token := tokens[i]
 
-		// Check if it's a value:: tag
-		if strings.HasPrefix(token, "value::") {
-			// This shouldn't be a standalone token, skip
+		// Positional value tag
+		if label, def, ok := parseValueTag(token); ok {
+			args = append(args, ArgPair{Type: "value", Label: label, Default: def})
 			continue
 		}
 
-		// Check if token looks like a flag
-		if strings.HasPrefix(token, "-") {
-			// Check if next token exists
-			if i+1 < len(tokens) {
-				nextToken := tokens[i+1]
+		// Positional fixed value
+		if !strings.HasPrefix(token, "-") {
+			args = append(args, ArgPair{Type: "fixed", Value: token})
+			continue
+		}
 
-				// Check if next token is value:: tag
-				if strings.HasPrefix(nextToken, "value::'") && strings.HasSuffix(nextToken, "'") {
-					label := strings.TrimSuffix(strings.TrimPrefix(nextToken, "value::'"), "'")
-					args = append(args, ArgPair{
-						Flag:  token,
-						Type:  "value",
-						Label: label,
-					})
-					i++ // Skip next token
-					continue
-				}
+		if i+1 < len(tokens) {
+			nextToken := tokens[i+1]
 
-				// Check if next token is NOT a flag (fixed value)
-				if !strings.HasPrefix(nextToken, "-") && !strings.HasPrefix(nextToken, "value::") {
-					args = append(args, ArgPair{
-						Flag:  token,
-						Type:  "fixed",
-						Value: nextToken,
-					})
-					i++ // Skip next token
-					continue
-				}
+			// Flag followed by a value tag
+			if label, def, ok := parseValueTag(nextToken); ok {
+				args = append(args, ArgPair{Flag: token, Type: "value", Label: label, Default: def})
+				i++ // Skip next token
+				continue
 			}
 
-			// Flag with no value
-			args = append(args, ArgPair{
-				Flag: token,
-				Type: "none",
-			})
+			// Flag followed by a fixed value
+			if !strings.HasPrefix(nextToken, "-") {
+				args = append(args, ArgPair{Flag: token, Type: "fixed", Value: nextToken})
+				i++ // Skip next token
+				continue
+			}
 		}
+
+		// Flag with no value
+		args = append(args, ArgPair{Flag: token, Type: "none"})
 	}
 
 	return args
 }
 
-// tokenizeArgs splits args string into tokens, handling value:: tags as single tokens
+// parseValueTag parses a token that is exactly value::'Label' or
+// value::'Label';;'default'
+func parseValueTag(token string) (label, def string, ok bool) {
+	m := valueTagRe.FindStringSubmatchIndex(token)
+	if m == nil || m[0] != 0 || m[1] != len(token) {
+		return "", "", false
+	}
+	label = token[m[2]:m[3]]
+	if m[4] >= 0 {
+		def = token[m[4]:m[5]]
+	}
+	return label, def, true
+}
+
+// tokenizeArgs splits args string on spaces, keeping value:: tags (whose
+// labels and defaults may contain spaces) intact
 func tokenizeArgs(argsString string) []string {
 	tokens := []string{}
 	current := ""
 
 	for i := 0; i < len(argsString); i++ {
-		char := argsString[i]
-
-		// Check for start of value:: tag
-		if i+7 < len(argsString) && argsString[i:i+7] == "value::'" {
-			// Save current token if exists
-			if current != "" {
-				tokens = append(tokens, current)
-				current = ""
-			}
-
-			// Find closing quote
-			endIdx := strings.Index(argsString[i+7:], "'")
-			if endIdx != -1 {
-				// Extract entire value:: tag
-				valueTag := argsString[i : i+7+endIdx+1]
-				tokens = append(tokens, valueTag)
-				i = i + 7 + endIdx
+		// A value tag (and its optional default) is part of the current token
+		if strings.HasPrefix(argsString[i:], valueTagPrefix) {
+			if m := valueTagRe.FindStringIndex(argsString[i:]); m != nil && m[0] == 0 {
+				current += argsString[i : i+m[1]]
+				i += m[1] - 1
 				continue
 			}
 		}
 
+		char := argsString[i]
 		if char == ' ' {
 			if current != "" {
 				tokens = append(tokens, current)
@@ -199,36 +217,52 @@ func BuildFullConfigSchema(plugin *Plugin) []ConfigField {
 	return schema
 }
 
-// SubstituteArgs replaces value::'Label' tags with actual user values
+// SubstituteArgs replaces value::'Label' tags with the user's values (config
+// keys ARG_0, ARG_1, ... in tag order) or their defaults. Each substituted
+// value is one argument, even if it contains spaces. A tag without a value is
+// dropped together with the flag directly before it.
 func SubstituteArgs(argsString string, userConfig map[string]string) []string {
 	if argsString == "" {
 		return []string{}
 	}
 
-	if globalconfig.DebugLog != nil {
-		globalconfig.DebugLog.Printf("[ConfigBuilder] SubstituteArgs: argsString=%s, userConfig=%v", argsString, userConfig)
-	}
+	args := []string{}
+	argIndex := 0
+	prevWasFlag := false
 
-	result := argsString
-	re := regexp.MustCompile(`value::'([^']+)'`)
-	matches := re.FindAllStringSubmatch(argsString, -1)
-
-	for i, match := range matches {
-		key := fmt.Sprintf("ARG_%d", i)
-		value := userConfig[key]
-
-		if globalconfig.DebugLog != nil {
-			globalconfig.DebugLog.Printf("[ConfigBuilder] Replacing '%s' with '%s' (key=%s)", match[0], value, key)
+	for _, token := range tokenizeArgs(argsString) {
+		if !strings.Contains(token, valueTagPrefix) {
+			args = append(args, token)
+			prevWasFlag = strings.HasPrefix(token, "-")
+			continue
 		}
 
-		result = strings.Replace(result, match[0], value, 1)
+		_, _, tagOnly := parseValueTag(token)
+		arg := valueTagRe.ReplaceAllStringFunc(token, func(tag string) string {
+			m := valueTagRe.FindStringSubmatch(tag)
+			value := userConfig[fmt.Sprintf("ARG_%d", argIndex)]
+			argIndex++
+			if value == "" {
+				value = m[2]
+			}
+			return value
+		})
+
+		if tagOnly && arg == "" {
+			// No value: drop the flag it belongs to as well
+			if prevWasFlag {
+				args = args[:len(args)-1]
+			}
+			prevWasFlag = false
+			continue
+		}
+
+		args = append(args, arg)
+		prevWasFlag = false
 	}
 
-	// Split into args array
-	args := strings.Fields(result)
-
 	if globalconfig.DebugLog != nil {
-		globalconfig.DebugLog.Printf("[ConfigBuilder] Final args: %v", args)
+		globalconfig.DebugLog.Printf("[ConfigBuilder] SubstituteArgs: %d args", len(args))
 	}
 
 	return args
@@ -269,8 +303,7 @@ func parseArgsWithDefaults(argsString string) []ArgDefinition {
 	// Regex to match: value::'Label' or value::'Label';;'default'
 	// Group 1: Label (required)
 	// Group 2: Optional default (after ;;)
-	re := regexp.MustCompile(`value::'([^']+)'(?:;;'([^']*)')?`)
-	matches := re.FindAllStringSubmatch(argsString, -1)
+	matches := valueTagRe.FindAllStringSubmatch(argsString, -1)
 
 	for _, match := range matches {
 		label := match[1]

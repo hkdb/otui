@@ -77,6 +77,8 @@ func (i *Installer) InstallWithContext(ctx context.Context, plugin *Plugin, prog
 		return i.installBinaryWithContext(ctx, plugin, progressCh)
 	case "remote":
 		return i.installRemoteWithContext(ctx, plugin, progressCh)
+	case "docker":
+		return i.installDockerWithContext(ctx, plugin, progressCh)
 	default:
 		// Treat all other install types (manual, docker, uvx, etc.) as manual installation
 		return i.installManualWithContext(ctx, plugin, progressCh)
@@ -183,6 +185,15 @@ func (i *Installer) checkRuntimeDeps(plugin *Plugin) error {
 				if err := i.runtimeChecker.CheckVersion("python", minVersion); err != nil {
 					return err
 				}
+			}
+		}
+
+	case "docker":
+		// A custom docker plugin with its own startup command and no image
+		// is run as configured
+		if plugin.Package != "" {
+			if _, err := i.runtimeChecker.CheckRuntime("docker"); err != nil {
+				return fmt.Errorf("Docker is required: %w", err)
 			}
 		}
 
@@ -606,6 +617,65 @@ func (i *Installer) installBinaryWithContext(ctx context.Context, plugin *Plugin
 	default:
 	}
 	return i.installBinary(plugin, progressCh)
+}
+
+// installDockerWithContext pulls a docker plugin's image. Images that can't
+// be pulled are accepted if they exist locally (e.g. built from the plugin's
+// repository).
+func (i *Installer) installDockerWithContext(ctx context.Context, plugin *Plugin, progressCh chan<- InstallProgress) error {
+	image := strings.TrimSpace(plugin.Package)
+	if image == "" {
+		// Custom plugin with its own startup command
+		return i.installManualWithContext(ctx, plugin, progressCh)
+	}
+
+	if progressCh != nil {
+		progressCh <- InstallProgress{Stage: "installing", Percent: 40, Message: fmt.Sprintf("Pulling %s...", image)}
+	}
+
+	pullOutput, pullErr := exec.CommandContext(ctx, "docker", "pull", image).CombinedOutput()
+	if ctx.Err() != nil {
+		return fmt.Errorf("installation cancelled")
+	}
+	if pullErr != nil {
+		if err := exec.CommandContext(ctx, "docker", "image", "inspect", image).Run(); err != nil {
+			return fmt.Errorf("docker pull %s failed: %w\n%s\nIf this image is built locally, build it first (see the plugin's README)",
+				image, pullErr, strings.TrimSpace(string(pullOutput)))
+		}
+	}
+
+	pluginDir := filepath.Join(i.pluginsDir, plugin.ID)
+	if err := os.MkdirAll(pluginDir, 0700); err != nil {
+		return fmt.Errorf("failed to create plugin directory: %w", err)
+	}
+
+	now := time.Now()
+	installed := storage.InstalledPlugin{
+		ID:            plugin.ID,
+		Name:          plugin.Name,
+		Version:       image,
+		InstallPath:   pluginDir,
+		InstallMethod: "docker",
+		InstalledAt:   now,
+		UpdatedAt:     now,
+	}
+
+	if err := i.storage.Save(installed); err != nil {
+		return fmt.Errorf("failed to save plugin metadata: %w", err)
+	}
+
+	freshConfig, err := config.LoadPluginsConfig(i.dataDir)
+	if err == nil {
+		freshConfig.SetPluginEnabled(plugin.ID, false)
+		_ = config.SavePluginsConfig(i.dataDir, freshConfig)
+		i.pluginsConfig = freshConfig
+	}
+
+	if progressCh != nil {
+		progressCh <- InstallProgress{Stage: "complete", Percent: 100, Message: "Installation complete"}
+	}
+
+	return nil
 }
 
 func (i *Installer) installManualWithContext(ctx context.Context, plugin *Plugin, progressCh chan<- InstallProgress) error {
