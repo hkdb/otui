@@ -52,6 +52,7 @@
 - Esc now cancels the request, including pending tool calls
 - Fixed a cancelled response appearing under the next question
 - Esc denies a tool permission request
+- Block session switch during response until multi-session is implemented
 
 ---
 

@@ -26,12 +26,8 @@ func (a AppView) handleSessionManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 			isDeletingCurrentSession := a.dataModel.CurrentSession != nil && a.dataModel.CurrentSession.ID == sessionID
 
 			// Block deletion if current session is streaming
-			if isDeletingCurrentSession && a.dataModel.Streaming {
+			if isDeletingCurrentSession && a.blockedByActiveResponse("deleting this session") {
 				a.confirmDeleteSession = nil
-				a.showAcknowledgeModal = true
-				a.acknowledgeModalTitle = "Cannot Delete Session"
-				a.acknowledgeModalMsg = "Session has an active response.\nCancel the response before deleting."
-				a.acknowledgeModalType = ModalTypeWarning
 				return a, nil
 			}
 
@@ -112,6 +108,9 @@ func (a AppView) handleSessionManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 			list := a.getSessionList()
 			if a.selectedSessionIdx >= 0 && a.selectedSessionIdx < len(list) {
 				selectedSession := list[a.selectedSessionIdx]
+				if a.blockedByActiveResponse("switching sessions") {
+					return a, nil
+				}
 				a.showSessionManager = false
 				a.sessionFilterMode = false
 				return a, a.dataModel.LoadSession(selectedSession.ID)
@@ -186,10 +185,16 @@ func (a AppView) handleSessionManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 		list := a.getSessionList()
 		if a.selectedSessionIdx >= 0 && a.selectedSessionIdx < len(list) {
 			selectedSession := list[a.selectedSessionIdx]
+			if a.blockedByActiveResponse("switching sessions") {
+				return a, nil
+			}
 			return a, a.dataModel.LoadSession(selectedSession.ID)
 		}
 		return a, nil
 	case "n":
+		if a.blockedByActiveResponse("creating a session") {
+			return a, nil
+		}
 		if a.newSessionNameInput.Width == 0 {
 			a.newSessionNameInput = textinput.New()
 			a.newSessionNameInput.Width = 60
@@ -815,6 +820,9 @@ func (a AppView) handleGlobalSearchUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 	case "enter":
 		if a.selectedGlobalIdx >= 0 && a.selectedGlobalIdx < len(a.globalSearchResults) {
 			selectedMatch := a.globalSearchResults[a.selectedGlobalIdx]
+			if a.blockedByActiveResponse("opening another session") {
+				return a, nil
+			}
 			a.showGlobalSearch = false
 			a.pendingScrollToMessageIdx = selectedMatch.MessageIndex
 			return a, a.dataModel.LoadSession(selectedMatch.SessionID)

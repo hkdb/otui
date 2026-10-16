@@ -825,6 +825,10 @@ func (a AppView) formatKeyDisplay(modifier, key string) string {
 // setCurrentSession sets the current session and syncs it with the MCP manager
 // This ensures plugin isolation and prevents security holes from stale session references
 func (a *AppView) setCurrentSession(session *storage.Session) {
+	// Switching is blocked while a response is in progress; if a switch still
+	// happens, the old request must not reach the new session
+	a.cancelRequestOnSwitch()
+
 	a.dataModel.CurrentSession = session
 	// Lock the session so other OTUI instances can't open it at the same time
 	if session != nil && a.dataModel.SessionStorage != nil {
@@ -835,6 +839,15 @@ func (a *AppView) setCurrentSession(session *storage.Session) {
 	}
 	// Reset system prompt tool warning flag when switching sessions
 	a.systemPromptToolWarningShown = false
+}
+
+// modalVisible reports whether a modal is drawn over the chat (see View)
+func (a *AppView) modalVisible() bool {
+	return a.pluginSystemState.Active || a.showPluginOperationModal || a.showPassphraseForDataDir ||
+		a.showInfoModal || a.showSessionLockedModal || a.showAcknowledgeModal || a.showHelp ||
+		a.showModelSelector || a.showSettings || a.showNewSessionModal || a.showEditSessionModal ||
+		a.showSessionManager || a.showPluginManager || a.showGlobalSearch || a.showMessageSearch ||
+		a.showAbout || a.showToolWarningModal || a.showSystemPromptToolWarning
 }
 
 func (a *AppView) closeAllModals() {

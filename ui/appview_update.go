@@ -190,8 +190,10 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Quit
 		}
 
-		// PRIORITY 0.5: Permission system key handling (blocks all other keys when active)
-		if a.waitingForPermission && a.pendingPermission != nil {
+		// PRIORITY 0.5: Permission system key handling (blocks all other keys when active).
+		// The prompt is in the chat, so while a modal is open over it the
+		// modal gets the keys; the prompt is answered once it's closed.
+		if a.waitingForPermission && a.pendingPermission != nil && !a.modalVisible() {
 			switch msg.String() {
 			case "y":
 				// Yes - Approve once
@@ -273,6 +275,9 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case kb.GetActionKey("new_session"):
+			if a.blockedByActiveResponse("creating a session") {
+				return a, nil
+			}
 			a.closeAllModals()
 
 			// Unlock current session before clearing
@@ -644,7 +649,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if a.showAcknowledgeModal {
-			if msg.String() == "enter" {
+			if msg.String() == "enter" || msg.String() == "esc" {
 				a.showAcknowledgeModal = false
 				return a, nil
 			}

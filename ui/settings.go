@@ -636,6 +636,12 @@ func (a AppView) handleSettingsNavigationMode(msg tea.KeyMsg) (tea.Model, tea.Cm
 		return a, textinput.Blink
 
 	case "alt+enter":
+		// A data directory switch replaces the current session
+		if newDir, err := config.NormalizeDataDirectory(a.settingsFields[0].Value); err == nil &&
+			newDir != a.dataModel.Config.DataDir() && a.blockedByActiveResponse("switching data directories") {
+			return a, nil
+		}
+
 		// Save settings
 		return a, a.saveSettingsCmd()
 	}

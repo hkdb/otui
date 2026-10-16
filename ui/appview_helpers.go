@@ -528,3 +528,31 @@ func (a *AppView) cancelRequest() {
 	// Tools approved "once" for this request
 	*a = a.cleanupTemporaryTools()
 }
+
+// blockedByActiveResponse shows a warning and returns true if a response is
+// in progress. Used before actions that switch sessions or data directories:
+// the response would otherwise end up in the other session.
+func (a *AppView) blockedByActiveResponse(action string) bool {
+	if !a.dataModel.Streaming {
+		return false
+	}
+	a.showAcknowledgeModal = true
+	a.acknowledgeModalTitle = "Response in Progress"
+	a.acknowledgeModalMsg = fmt.Sprintf("A response is in progress.\nWait for it to finish or cancel it with Esc before %s.", action)
+	a.acknowledgeModalType = ModalTypeWarning
+	return true
+}
+
+// cancelRequestOnSwitch cancels a request still in progress when the current
+// session is replaced, so its results can't end up in the new session
+func (a *AppView) cancelRequestOnSwitch() {
+	if !a.dataModel.Streaming && !a.waitingForPermission {
+		return
+	}
+	if config.DebugLog != nil {
+		config.DebugLog.Printf("[Session] Switching while a response is in progress - cancelling it")
+	}
+	a.cancelRequest()
+	a.waitingForPermission = false
+	a.pendingPermission = nil
+}
