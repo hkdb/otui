@@ -124,62 +124,21 @@ func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model
 		params.Tools = openaiTools
 	}
 
-	// Create streaming request
-	stream := p.client.Chat.Completions.NewStreaming(ctx, params)
-	acc := openai.ChatCompletionAccumulator{}
-
-	// Track if we got tool calls via API
-	var apiToolCallsDetected bool
-	var contentBuilder strings.Builder
-
-	// Process stream
-	for stream.Next() {
-		chunk := stream.Current()
-		acc.AddChunk(chunk)
-
-		// Handle finished tool calls
-		if tool, ok := acc.JustFinishedToolCall(); ok {
-			apiToolCallsDetected = true
-			if callback != nil {
-				// Convert to provider tool call (decode the API safe tool name)
-				args := ParseToolArguments(tool.Arguments)
-				toolCall := model.ToolCall{
-					Name:      mcp.DecodeToolName(tool.Name),
-					Arguments: args,
-				}
-				callback("", []model.ToolCall{toolCall})
-			}
-		}
-
-		// Send content delta and accumulate for leak detection
-		if len(chunk.Choices) > 0 && chunk.Choices[0].Delta.Content != "" {
-			content := chunk.Choices[0].Delta.Content
-			contentBuilder.WriteString(content)
-			if callback != nil {
-				callback(content, nil)
-			}
-		}
+	// Stream the response (tool calls are reported once the stream ends)
+	content, toolCalls, err := streamOpenAIChat(ctx, p.client, params, "OpenRouter", callback)
+	if err != nil {
+		return err
 	}
 
-	// Check for errors
-	if err := stream.Err(); err != nil {
-		return fmt.Errorf("OpenRouter streaming error: %w", err)
-	}
-
-	// Safety check: detect leaked tool calls if none were detected via API
-	if !apiToolCallsDetected && callback != nil {
-		fullContent := contentBuilder.String()
-
+	// Safety check: detect leaked tool calls if none were reported via the API
+	if len(toolCalls) == 0 && callback != nil {
 		// Check for JSON leaked tool calls
-		if leakedCalls := ParseLeakedJSONToolCalls(fullContent); len(leakedCalls) > 0 {
+		if leakedCalls := ParseLeakedJSONToolCalls(content); len(leakedCalls) > 0 {
 			callback("", decodeToolCallNames(leakedCalls))
-
-			// Note: Content was already streamed, but we could clean it in future
-			// by tracking and re-sending cleaned content
 		}
 
 		// Check for XML leaked tool calls
-		if leakedCalls := ParseLeakedXMLToolCalls(fullContent); len(leakedCalls) > 0 {
+		if leakedCalls := ParseLeakedXMLToolCalls(content); len(leakedCalls) > 0 {
 			callback("", decodeToolCallNames(leakedCalls))
 		}
 	}
