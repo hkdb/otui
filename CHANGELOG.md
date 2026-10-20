@@ -66,6 +66,7 @@
 - API keys and plugin settings are no longer written to the debug log
 - The SSH key passphrase is no longer visible in the process list while the key is created
 - Remote plugins no longer send OTUI's own settings (e.g. the server URL override) as HTTP headers; credentials over plain http:// are flagged
+- Implemented checksum during installation
 
 ---
 

@@ -97,6 +97,8 @@ For Windows, download the binary for the latest release:
 - [Windows (x64)](https://github.com/hkdb/otui/releases/latest/download/otui-windows-amd64.exe)
 - [Windows (arm)](https://github.com/hkdb/otui/releases/latest/download/otui-windows-arm64.exe)
 
+The installer checks the download against the release's `SHA256SUMS` before installing. To check a binary you downloaded yourself, compare it with [`SHA256SUMS`](https://github.com/hkdb/otui/releases/latest/download/SHA256SUMS), or verify where it was built with the [GitHub CLI](https://cli.github.com/): `gh attestation verify <file> --repo hkdb/otui`.
+
 ## 🐳 Containerized for Sandboxing or running Multiple Instances on the same host
 
 If you want to sandbox OTUI so that it can't touch your host filesystem or you want to run multiple instances of OTUI, you can run it with any OCI container. For the convenience of the majority, you probably already have docker and you can run it by aliasing this command:
