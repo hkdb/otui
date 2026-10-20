@@ -84,10 +84,12 @@ type AppView struct {
 	sessionExportSuccess string // Contains export path if successful, empty otherwise
 
 	// Import session state
-	sessionImportPicker     FilePickerState
-	sessionImportSuccess    *storage.Session
-	sessionImportCancelCtx  context.Context
-	sessionImportCancelFunc context.CancelFunc
+	sessionImportPicker  FilePickerState
+	sessionImportSuccess *storage.Session
+	// Permissions removed from the imported session (k keeps them)
+	sessionImportPermissions appmodel.ImportedPermissions
+	sessionImportCancelCtx   context.Context
+	sessionImportCancelFunc  context.CancelFunc
 
 	// Export state
 	exportingSession bool

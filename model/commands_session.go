@@ -352,6 +352,12 @@ func (m *Model) ImportSessionCmd(ctx context.Context, filePath string) tea.Cmd {
 			return SessionImportedMsg{Err: fmt.Errorf("invalid Session: no messages")}
 		}
 
+		// A session file from elsewhere could pre-approve tools (they'd run
+		// without asking): saved without them, the user can keep them
+		permissions := ImportedPermissions{EnabledPlugins: session.EnabledPlugins, AllowedTools: session.AllowedTools}
+		session.EnabledPlugins = []string{}
+		session.AllowedTools = []string{}
+
 		// Generate new UUID and timestamps
 		session.ID = uuid.New().String()
 		session.CreatedAt = time.Now()
@@ -369,7 +375,35 @@ func (m *Model) ImportSessionCmd(ctx context.Context, filePath string) tea.Cmd {
 			return SessionImportedMsg{Err: fmt.Errorf("failed to save Session: %w", err)}
 		}
 
-		return SessionImportedMsg{Session: &session}
+		return SessionImportedMsg{Session: &session, Permissions: permissions}
+	}
+}
+
+// RestoreImportedPermissionsCmd gives an imported session back the plugins
+// and pre-approved tools its file came with (the user chose to keep them)
+func (m *Model) RestoreImportedPermissionsCmd(sessionID string, permissions ImportedPermissions) tea.Cmd {
+	if m.SessionStorage == nil {
+		return nil
+	}
+	// Update the open session too (here, not in the Cmd: View reads it)
+	if m.CurrentSession != nil && m.CurrentSession.ID == sessionID {
+		m.CurrentSession.EnabledPlugins = append([]string(nil), permissions.EnabledPlugins...)
+		m.CurrentSession.AllowedTools = append([]string(nil), permissions.AllowedTools...)
+	}
+
+	sessionStorage := m.SessionStorage
+	return func() tea.Msg {
+		session, err := sessionStorage.Load(sessionID)
+		if err != nil {
+			return SessionsListMsg{Err: err}
+		}
+		session.EnabledPlugins = permissions.EnabledPlugins
+		session.AllowedTools = permissions.AllowedTools
+		if err := sessionStorage.Save(session); err != nil {
+			return SessionsListMsg{Err: err}
+		}
+		sessions, err := sessionStorage.List()
+		return SessionsListMsg{Sessions: sessions, Err: err}
 	}
 }
 

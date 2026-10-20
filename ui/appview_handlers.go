@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"otui/config"
+	appmodel "otui/model"
 )
 
 func (a AppView) handleSessionRenameMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -205,8 +206,20 @@ func (a AppView) handleSessionImportMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Handle success acknowledgment (Enter or ESC to dismiss)
 	if a.sessionImportPicker.Success != nil {
 		switch msg.String() {
-		case "enter", "esc":
+		case "k":
+			// Keep the permissions the imported file came with
+			if a.sessionImportPermissions.Empty() || a.sessionImportSuccess == nil {
+				return a, nil
+			}
+			cmd := a.dataModel.RestoreImportedPermissionsCmd(a.sessionImportSuccess.ID, a.sessionImportPermissions)
 			a.sessionImportSuccess = nil
+			a.sessionImportPermissions = appmodel.ImportedPermissions{}
+			a.sessionImportPicker.Reset()
+			return a, cmd
+		case "enter", "esc":
+			// Default: the permissions stay removed
+			a.sessionImportSuccess = nil
+			a.sessionImportPermissions = appmodel.ImportedPermissions{}
 			a.sessionImportPicker.Reset()
 			return a, nil
 		}

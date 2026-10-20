@@ -11,6 +11,7 @@ import (
 
 	"otui/config"
 	appmodel "otui/model"
+	"otui/safetext"
 )
 
 // handleSessionMessage handles session-related messages
@@ -362,6 +363,22 @@ func (a AppView) handleSessionMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		// Success - show success modal and refresh session list
 		successMsg := fmt.Sprintf("Imported: %s\nMessages: %d\nModel: %s",
 			msg.Session.Name, len(msg.Session.Messages), msg.Session.Model)
+
+		// Plugins and pre-approved tools from the file were removed; offer
+		// to keep them
+		a.sessionImportPermissions = msg.Permissions
+		if !msg.Permissions.Empty() {
+			successMsg += "\n\nThis session came with permissions, removed for safety:"
+			if len(msg.Permissions.EnabledPlugins) > 0 {
+				successMsg += "\n• Enabled plugins: " + safetext.Line(strings.Join(msg.Permissions.EnabledPlugins, ", "))
+			}
+			if len(msg.Permissions.AllowedTools) > 0 {
+				successMsg += "\n• Tools that run without asking: " + safetext.Line(strings.Join(msg.Permissions.AllowedTools, ", "))
+			}
+			successMsg += "\nKeep them only if you trust where this file came from."
+			a.sessionImportPicker.SuccessFooter = FormatFooter("k", "Keep permissions", "Enter", "Remove (default)")
+		}
+
 		a.sessionImportPicker.Success = &successMsg
 		a.sessionImportSuccess = msg.Session
 		if config.DebugLog != nil {

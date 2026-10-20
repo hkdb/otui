@@ -126,9 +126,23 @@ type SessionExportedMsg struct {
 }
 
 type SessionImportedMsg struct {
-	Session   *storage.Session
-	Err       error
-	Cancelled bool
+	Session     *storage.Session
+	Err         error
+	Cancelled   bool
+	Permissions ImportedPermissions // Removed from the imported session (see ImportSessionCmd)
+}
+
+// ImportedPermissions are the plugins and pre-approved tools an imported
+// session file came with. They're removed on import; the user can keep them
+// (RestoreImportedPermissionsCmd).
+type ImportedPermissions struct {
+	EnabledPlugins []string
+	AllowedTools   []string
+}
+
+// Empty reports whether the session came without permissions
+func (p ImportedPermissions) Empty() bool {
+	return len(p.EnabledPlugins) == 0 && len(p.AllowedTools) == 0
 }
 
 type ExportCleanupDoneMsg struct{}

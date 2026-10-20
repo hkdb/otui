@@ -34,6 +34,8 @@ type FilePickerState struct {
 	CleaningUp bool
 	Spinner    spinner.Model
 	Success    *string
+	// Footer of the success screen ("" = "Press Enter to acknowledge")
+	SuccessFooter string
 }
 
 func NewFilePickerState(config FilePickerConfig) FilePickerState {
@@ -86,6 +88,7 @@ func (fps *FilePickerState) Reset() {
 	fps.Processing = false
 	fps.CleaningUp = false
 	fps.Success = nil
+	fps.SuccessFooter = ""
 }
 
 func RenderFilePickerModal(state FilePickerState, width, height int) string {
@@ -95,7 +98,7 @@ func RenderFilePickerModal(state FilePickerState, width, height int) string {
 	}
 
 	if state.Success != nil {
-		return renderFilePickerSuccess(*state.Success, state.Config.Title, width, height)
+		return renderFilePickerSuccess(*state.Success, state.Config.Title, state.SuccessFooter, width, height)
 	}
 
 	if state.CleaningUp {
@@ -243,7 +246,7 @@ func renderFilePickerCleanup(sp spinner.Model, width, height int) string {
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
 }
 
-func renderFilePickerSuccess(path string, title string, width, height int) string {
+func renderFilePickerSuccess(path string, title string, footer string, width, height int) string {
 	// Guard clause: prevent rendering in tiny terminals
 	if width < 20 || height < 10 {
 		return "Terminal too small"
@@ -278,7 +281,9 @@ func renderFilePickerSuccess(path string, title string, width, height int) strin
 	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	// Format footer
-	footer := "Press Enter to acknowledge"
+	if footer == "" {
+		footer = "Press Enter to acknowledge"
+	}
 
 	// Use RenderThreeSectionModal but we need successColor for title
 	// Since ModalTypeInfo uses accentColor, we'll need custom rendering for title
