@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -14,7 +15,7 @@ import (
 // progress and session B in the session list
 func streamingAppView() AppView {
 	sessionA := &storage.Session{ID: "a", Name: "A"}
-	a := AppView{dataModel: &appmodel.Model{
+	a := AppView{currentResp: &strings.Builder{}, dataModel: &appmodel.Model{
 		Config:         &config.Config{Keybindings: config.DefaultKeybindings()},
 		CurrentSession: sessionA,
 		Streaming:      true,

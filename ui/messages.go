@@ -12,10 +12,9 @@ type ToolCall = model.ToolCall
 type streamChunkMsg = model.StreamChunkMsg
 type streamDoneMsg = model.StreamDoneMsg
 type streamErrorMsg = model.StreamErrorMsg
-type streamChunksCollectedMsg = model.StreamChunksCollectedMsg
-type displayChunkTickMsg = model.DisplayChunkTickMsg
 type toolCallsDetectedMsg = model.ToolCallsDetectedMsg
 type toolExecutionCompleteMsg = model.ToolExecutionCompleteMsg
+type toolResultsReadyMsg = model.ToolResultsReadyMsg
 type toolExecutionErrorMsg = model.ToolExecutionErrorMsg
 type toolPermissionRequestMsg = model.ToolPermissionRequestMsg
 type toolPermissionResponseMsg = model.ToolPermissionResponseMsg
@@ -63,6 +62,8 @@ const (
 	SettingTypeWarnAtPercentage
 	SettingTypeNotifyOnComplete
 	SettingTypeRequireApproval
+	SettingTypeFirstTokenTimeout
+	SettingTypeStreamIdleTimeout
 )
 
 type SettingFieldValidation int

@@ -40,12 +40,13 @@ func streamOpenAIChat(ctx context.Context, client openai.Client, params openai.C
 				continue // Only one choice is requested
 			}
 
-			if text := choice.Delta.Content; text != "" {
-				content.WriteString(text)
-				if callback != nil {
-					if err := callback(text, nil); err != nil {
-						return content.String(), nil, err
-					}
+			// Every chunk is reported, also those without text (reasoning,
+			// tool call deltas): callers treat them as activity
+			text := choice.Delta.Content
+			content.WriteString(text)
+			if callback != nil {
+				if err := callback(text, nil); err != nil {
+					return content.String(), nil, err
 				}
 			}
 

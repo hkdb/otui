@@ -710,6 +710,9 @@ func (a AppView) handleDataExportMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, cmd
 }
 
+// minResponseTimeout is the smallest response timeout (seconds) Settings accepts
+const minResponseTimeout = 10
+
 func (a AppView) handleSettingsEditMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	kb := a.dataModel.Config.Keybindings
@@ -724,12 +727,22 @@ func (a AppView) handleSettingsEditMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		// Save edited value
 		newValue := a.settingsEditInput.Value()
-		if newValue != a.settingsFields[a.selectedSettingIdx].Value {
+		oldValue := a.settingsFields[a.selectedSettingIdx].Value
+		if newValue != oldValue {
 			a.settingsFields[a.selectedSettingIdx].Value = newValue
 			a.settingsHasChanges = true
 
 			// Handle specific field logic
 			switch a.settingsFields[a.selectedSettingIdx].Type {
+			case SettingTypeFirstTokenTimeout, SettingTypeStreamIdleTimeout:
+				// Seconds, at least 10
+				a.settingsFields[a.selectedSettingIdx].Validation = FieldValidationNone
+				if secs, err := strconv.Atoi(strings.TrimSpace(newValue)); err != nil || secs < minResponseTimeout {
+					a.settingsFields[a.selectedSettingIdx].Value = oldValue
+					a.settingsFields[a.selectedSettingIdx].Validation = FieldValidationError
+				} else {
+					a.settingsFields[a.selectedSettingIdx].Value = strconv.Itoa(secs)
+				}
 			case SettingTypeDataDir:
 				a.settingsFields[a.selectedSettingIdx].Value = newValue
 				a.settingsHasChanges = true
@@ -917,6 +930,14 @@ func (a AppView) saveSettingsCmd() tea.Cmd {
 
 		// Update tool approval setting (field 10)
 		existingCfg.RequireApproval = stringToBool(a.settingsFields[10].Value)
+
+		// Update response timeouts (fields 11-12); invalid values keep the saved ones
+		if secs, err := strconv.Atoi(a.settingsFields[11].Value); err == nil && secs >= minResponseTimeout {
+			existingCfg.FirstTokenTimeout = secs
+		}
+		if secs, err := strconv.Atoi(a.settingsFields[12].Value); err == nil && secs >= minResponseTimeout {
+			existingCfg.StreamIdleTimeout = secs
+		}
 
 		// Save updated config (preserves DefaultProvider, Providers[], Security, etc.)
 		if err := config.SaveUserConfig(existingCfg, dataDir); err != nil {

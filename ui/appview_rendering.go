@@ -8,6 +8,7 @@ import (
 
 	markdown "github.com/MichaelMure/go-term-markdown"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	gomarkdown "github.com/gomarkdown/markdown"
 	"github.com/gomarkdown/markdown/parser"
 
@@ -89,6 +90,15 @@ func (a *AppView) updateViewportContent(gotoBottom bool) {
 		content.WriteString(fmt.Sprintf("%s%s %s\n%s\n\n", highlightPrefix, timestamp, role, renderedContent))
 	}
 
+	// Response text streamed so far (it becomes a message when complete)
+	if a.dataModel.Streaming && a.currentResp.Len() > 0 {
+		timestamp := DimStyle.Render(time.Now().Format("[15:04]"))
+		role := AssistantStyle.Render("Assistant")
+		// Wrapped to the viewport (the viewport cuts long lines off)
+		live := ansi.Wrap(a.currentResp.String()+"▋", max(a.viewport.Width-1, 1), "")
+		content.WriteString(fmt.Sprintf("%s %s\n%s\n\n", timestamp, role, live))
+	}
+
 	a.viewport.SetContent(content.String())
 	if gotoBottom {
 		a.viewport.GotoBottom()
@@ -96,59 +106,6 @@ func (a *AppView) updateViewportContent(gotoBottom bool) {
 	} else {
 		// Re-clamp the offset in case the content got shorter
 		a.viewport.SetYOffset(a.viewport.YOffset)
-	}
-}
-
-func (a *AppView) updateStreamingMessage() {
-	if len(a.dataModel.Messages) == 0 {
-		return
-	}
-
-	var content strings.Builder
-
-	// Render all previous messages
-	for _, msg := range a.dataModel.Messages {
-		timestamp := DimStyle.Render(msg.Timestamp.Format("[15:04]"))
-
-		var roleStyle = DimStyle
-		var roleName string
-		switch msg.Role {
-		case "user":
-			roleStyle = UserStyle
-			roleName = "You"
-		case "assistant":
-			roleStyle = AssistantStyle
-			roleName = "Assistant"
-		default:
-			roleStyle = DimStyle
-			roleName = "System"
-		}
-
-		role := roleStyle.Render(roleName)
-
-		if msg.Role == "user" {
-			formattedUser := formatUserMessage("", timestamp, role, msg.Rendered)
-			content.WriteString(formattedUser)
-		} else {
-			content.WriteString(fmt.Sprintf("%s %s\n%s\n\n", timestamp, role, msg.Rendered))
-		}
-	}
-
-	// Add streaming message (assistant - flush left)
-	timestamp := DimStyle.Render(time.Now().Format("[15:04]"))
-	role := AssistantStyle.Render("Assistant")
-
-	// Show spinner while waiting for first chunk, then show text with cursor
-	streamContent := a.loadingSpinner.View()
-	if a.currentResp.String() != "" {
-		streamContent = a.currentResp.String() + "▋"
-	}
-
-	content.WriteString(fmt.Sprintf("%s %s\n%s\n\n", timestamp, role, streamContent))
-
-	a.viewport.SetContent(content.String())
-	if !a.userScrolledUp {
-		a.viewport.GotoBottom()
 	}
 }
 

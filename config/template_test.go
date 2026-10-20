@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -26,10 +27,12 @@ func TestUserConfigTemplateDecodesCleanly(t *testing.T) {
 		cfg.EnableMultiStep != defaults.EnableMultiStep ||
 		cfg.MaxIterations != defaults.MaxIterations ||
 		cfg.PluginsEnabled != defaults.PluginsEnabled ||
-		cfg.NotifyOnComplete != defaults.NotifyOnComplete {
+		cfg.NotifyOnComplete != defaults.NotifyOnComplete ||
+		cfg.FirstTokenTimeout != defaults.FirstTokenTimeout ||
+		cfg.StreamIdleTimeout != defaults.StreamIdleTimeout {
 		t.Errorf("template values differ from defaults: %+v", cfg)
 	}
-	for _, key := range []string{"require_approval", "enable_multi_step", "max_iterations", "plugins_enabled", "notify_on_complete", "default_system_prompt"} {
+	for _, key := range []string{"require_approval", "enable_multi_step", "max_iterations", "plugins_enabled", "notify_on_complete", "default_system_prompt", "first_token_timeout", "stream_idle_timeout"} {
 		if !md.IsDefined(key) {
 			t.Errorf("template doesn't define top-level %q", key)
 		}
@@ -151,5 +154,17 @@ func TestInsertBeforeFirstTable(t *testing.T) {
 	}
 	if !strings.HasPrefix(insertBeforeFirstTable("[[providers]]\n", "X\n"), "X\n[[providers]]") {
 		t.Error("array of tables header not detected")
+	}
+}
+
+func TestResponseTimeoutDefaults(t *testing.T) {
+	c := &Config{}
+	c.applyUserConfig(&UserConfig{}) // Older config.toml without the keys
+	if c.FirstTokenTimeout() != DefaultFirstTokenTimeout*time.Second || c.StreamIdleTimeout() != DefaultStreamIdleTimeout*time.Second {
+		t.Errorf("defaults = %v / %v", c.FirstTokenTimeout(), c.StreamIdleTimeout())
+	}
+	c.applyUserConfig(&UserConfig{FirstTokenTimeout: 30, StreamIdleTimeout: 20})
+	if c.FirstTokenTimeout() != 30*time.Second || c.StreamIdleTimeout() != 20*time.Second {
+		t.Errorf("configured = %v / %v", c.FirstTokenTimeout(), c.StreamIdleTimeout())
 	}
 }

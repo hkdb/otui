@@ -2,12 +2,12 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"otui/config"
+	appmodel "otui/model"
 )
 
 // handleToolMessage handles tool execution messages
@@ -31,8 +31,11 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			return a, nil
 		}
 
-		// Remove "Waiting for response..." message
+		// Remove "Waiting for response..." message, and the text streamed
+		// with the tool calls (it's part of the step, not an answer)
 		a.removeLastNonPersistentSystemMessage()
+		a.currentResp.Reset()
+		a.resetTypewriter()
 
 		// Extract purpose (covering every tool of this step) and create step message
 		purpose := a.dataModel.StepPurpose(msg.ContextMessages, msg.InitialResponse, msg.ToolCalls)
@@ -47,18 +50,11 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			a.dataModel.ExecuteToolsAndContinue(msg),
 		)
 
-	case toolExecutionCompleteMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Tool execution complete - %d chunks", len(msg.Chunks))
-		}
-
-		// Cancelled (Esc already reset the tool state)
+	case toolResultsReadyMsg:
+		// The step's tools ran; the model's follow-up response streams next
 		if a.staleRequest(msg.RequestID) {
 			return a, nil
 		}
-
-		// Record the step (fills in the summary when the response is complete)
-		a.dataModel.ApplyToolStep(&msg)
 
 		// Clear tool execution state
 		a.executingTool = ""
@@ -66,40 +62,65 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		// CLEANUP: Remove temporarily allowed tools
 		a = a.cleanupTemporaryTools()
 
-		// Ignore if user cancelled
-		if !a.dataModel.Streaming {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Ignoring toolExecutionCompleteMsg - cancelled")
-			}
+		// Complete the step (checkmark + persistent) and show analyzing state
+		a.completeStepMessage()
+		a.showAnalyzingResults()
+
+		return a, appmodel.WaitForStream(msg.Stream)
+
+	case toolExecutionCompleteMsg:
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("Tool step complete - response %d chars, more steps: %v", len(msg.FullResponse), msg.HasMoreSteps)
+		}
+
+		// Cancelled (Esc already reset the tool state)
+		if a.staleRequest(msg.RequestID) || !a.dataModel.Streaming {
 			return a, nil
 		}
 
-		// Complete the step (checkmark + persistent)
-		a.completeStepMessage()
-
-		// Show analyzing state
-		a.showAnalyzingResults()
-
-		// Store summary to add after typewriter completes
-		if msg.IterationSummary.TotalSteps > 0 {
-			a.pendingSummary = &msg.IterationSummary
+		// Continue once the typewriter has shown this step's response
+		if a.deferUntilTyped(msg) {
+			return a, nil
 		}
 
-		// Store pending step info if iteration continues
-		if msg.HasMoreSteps {
-			a.pendingNextStep = true
-			a.pendingToolCalls = msg.NextToolCalls
-			a.pendingToolContext = msg.NextContext
-			a.pendingToolResponse = msg.NextInitialResponse
-		}
+		// Record the step (fills in the summary when the response is complete)
+		a.dataModel.ApplyToolStep(&msg)
+
 		if !msg.HasMoreSteps {
-			a.pendingNextStep = false
 			a.iterationCount = 0
-			a.dataModel.CurrentIteration = 0
+			return a, a.finishResponse(msg.FullResponse, &msg.IterationSummary)
 		}
 
-		// Start typewriter
-		return a, a.startTypewriter(msg.Chunks)
+		// More steps: keep this step's text as an assistant message, then
+		// run the next step's tools
+		var cmds []tea.Cmd
+		a.removeLastNonPersistentSystemMessage()
+		a.currentResp.Reset()
+		a.resetTypewriter()
+		if msg.FullResponse != "" {
+			a.dataModel.Messages = append(a.dataModel.Messages, Message{
+				Role:      "assistant",
+				Content:   msg.FullResponse,
+				Rendered:  msg.FullResponse,
+				Timestamp: time.Now(),
+			})
+			a.updateViewportContent(!a.userScrolledUp)
+			a.dataModel.SessionDirty = true
+
+			cmds = append(cmds,
+				a.renderMarkdownAsync(len(a.dataModel.Messages)-1, msg.FullResponse),
+				a.dataModel.AutoSaveSession(),
+				a.dataModel.CheckAutoCompactionCmd(), // Check if auto-compaction should trigger
+			)
+		}
+
+		next, nextCmd := a.handleToolMessage(toolCallsDetectedMsg{
+			ToolCalls:       msg.NextToolCalls,
+			InitialResponse: msg.NextInitialResponse,
+			ContextMessages: msg.NextContext,
+			RequestID:       msg.RequestID,
+		})
+		return next, tea.Batch(append(cmds, nextCmd)...)
 
 	case toolExecutionErrorMsg:
 		if config.DebugLog != nil {
@@ -113,20 +134,17 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		// Clear state
 		a.executingTool = ""
 		a.dataModel.Streaming = false
-		a.currentResp.Reset()
 		a.iterationCount = 0
 		a.dataModel.ResetIterations()
-		a.pendingNextStep = false
 
 		// CLEANUP: Remove temporarily allowed tools
 		a = a.cleanupTemporaryTools()
 
-		// Remove step message
-		if len(a.dataModel.Messages) > 0 &&
-			a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" &&
-			strings.HasPrefix(a.dataModel.Messages[len(a.dataModel.Messages)-1].Content, "🔧 ") {
-			a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
-		}
+		// Remove the unfinished step or "Analyzing results..." message, and
+		// keep the part of the response that arrived
+		a.removeLastNonPersistentSystemMessage()
+		a.flushTypewriter()
+		a.keepPartialResponse("⚠️ Response incomplete")
 
 		// Show error
 		a.dataModel.Messages = append(a.dataModel.Messages, Message{

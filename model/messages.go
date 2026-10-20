@@ -30,26 +30,30 @@ type IterationSummaryMsg struct {
 	MaxReached bool // True if max iterations reached (warning)
 }
 
+// StreamChunkMsg carries new response text. Update shows it and calls
+// WaitForStream(Stream) for the next part.
 type StreamChunkMsg struct {
-	Chunk string
-}
-
-type StreamDoneMsg struct {
-	FullResponse string
-}
-
-type StreamErrorMsg struct {
-	Err       error
+	Chunk     string
 	RequestID uint64
+	Stream    *ChatStream
 }
 
-type StreamChunksCollectedMsg struct {
-	Chunks       []string
+// StreamDoneMsg ends a response without tool calls
+type StreamDoneMsg struct {
 	FullResponse string
 	RequestID    uint64
 }
 
-type DisplayChunkTickMsg struct {
+// ToolResultsReadyMsg is sent when a step's tools have run and the model's
+// follow-up response starts streaming (read it with WaitForStream(Stream)).
+// The step ends with ToolExecutionCompleteMsg.
+type ToolResultsReadyMsg struct {
+	RequestID uint64
+	Stream    *ChatStream
+}
+
+type StreamErrorMsg struct {
+	Err       error
 	RequestID uint64
 }
 
@@ -62,12 +66,11 @@ type ToolCallsDetectedMsg struct {
 }
 
 type ToolExecutionCompleteMsg struct {
-	Chunks           []string
 	FullResponse     string
 	IterationSummary IterationSummaryMsg // Phase 2
 
 	// Phase 2: Multi-step continuation
-	HasMoreSteps  bool       // Continue iteration after typewriter?
+	HasMoreSteps        bool       // Continue with another step
 	NextToolCalls       []ToolCall // Tools to execute in next step
 	NextContext         []Message  // Context for next iteration
 	NextInitialResponse string     // LLM text that came with NextToolCalls

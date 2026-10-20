@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type SystemConfig struct {
@@ -54,6 +55,8 @@ type UserConfig struct {
 	MaxIterations          int              `toml:"max_iterations"`          // Default: 10
 	EnableMultiStep        bool             `toml:"enable_multi_step"`       // Default: true
 	NotifyOnComplete       bool             `toml:"notify_on_complete"`      // Emit terminal bell when LLM response completes
+	FirstTokenTimeout      int              `toml:"first_token_timeout"`     // Seconds to wait for the first response chunk (0 = default)
+	StreamIdleTimeout      int              `toml:"stream_idle_timeout"`     // Seconds a response may go silent mid-stream (0 = default)
 	Compaction             CompactionConfig `toml:"compaction,omitempty"`    // Context window management settings
 	ModelContextOverrides  map[string]int   `toml:"model_context_overrides,omitempty"` // Per-model context window overrides
 }
@@ -74,6 +77,8 @@ type Config struct {
 	MaxIterations         int      // Max iterations per user message
 	EnableMultiStep       bool     // Allow LLM to execute multiple steps
 	NotifyOnComplete      bool     // Emit terminal bell when LLM response completes
+	FirstTokenTimeoutSecs int      // Seconds to wait for the first response chunk
+	StreamIdleTimeoutSecs int      // Seconds a response may go silent mid-stream
 	Compaction            CompactionConfig // Context window management settings
 	ModelContextOverrides map[string]int   // Per-model context window overrides
 	Keybindings           *KeyBindingsConfig
@@ -89,6 +94,29 @@ func (c *Config) OllamaURL() string {
 
 func (c *Config) Model() string {
 	return c.DefaultModel
+}
+
+// Response timeout defaults (seconds). The first chunk can take long: the
+// server may be loading the model or processing a long prompt.
+const (
+	DefaultFirstTokenTimeout = 600
+	DefaultStreamIdleTimeout = 180
+)
+
+// FirstTokenTimeout is how long to wait for the first chunk of a response
+func (c *Config) FirstTokenTimeout() time.Duration {
+	if c.FirstTokenTimeoutSecs <= 0 {
+		return DefaultFirstTokenTimeout * time.Second
+	}
+	return time.Duration(c.FirstTokenTimeoutSecs) * time.Second
+}
+
+// StreamIdleTimeout is how long a response may go without any chunk
+func (c *Config) StreamIdleTimeout() time.Duration {
+	if c.StreamIdleTimeoutSecs <= 0 {
+		return DefaultStreamIdleTimeout * time.Second
+	}
+	return time.Duration(c.StreamIdleTimeoutSecs) * time.Second
 }
 
 func (c *Config) DataDir() string {
@@ -111,12 +139,22 @@ func (c *Config) applyUserConfig(userCfg *UserConfig) {
 	c.MaxIterations = userCfg.MaxIterations
 	c.EnableMultiStep = userCfg.EnableMultiStep
 	c.NotifyOnComplete = userCfg.NotifyOnComplete
+	c.FirstTokenTimeoutSecs = userCfg.FirstTokenTimeout
+	c.StreamIdleTimeoutSecs = userCfg.StreamIdleTimeout
 	c.Compaction = userCfg.Compaction
 	c.ModelContextOverrides = userCfg.ModelContextOverrides
 
 	// Set defaults for multi-step execution (Phase 2)
 	if c.MaxIterations == 0 {
 		c.MaxIterations = 10
+	}
+
+	// Set defaults for response timeouts
+	if c.FirstTokenTimeoutSecs <= 0 {
+		c.FirstTokenTimeoutSecs = DefaultFirstTokenTimeout
+	}
+	if c.StreamIdleTimeoutSecs <= 0 {
+		c.StreamIdleTimeoutSecs = DefaultStreamIdleTimeout
 	}
 
 	// Set defaults for compaction if not specified

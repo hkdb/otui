@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -471,6 +472,20 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						Type:         SettingTypeRequireApproval,
 						Validation:   FieldValidationNone,
 					},
+					{
+						Label:        "First Token (s)",
+						Value:        strconv.Itoa(a.dataModel.Config.FirstTokenTimeoutSecs),
+						DefaultValue: strconv.Itoa(config.DefaultFirstTokenTimeout),
+						Type:         SettingTypeFirstTokenTimeout,
+						Validation:   FieldValidationNone,
+					},
+					{
+						Label:        "Stream Idle (s)",
+						Value:        strconv.Itoa(a.dataModel.Config.StreamIdleTimeoutSecs),
+						DefaultValue: strconv.Itoa(config.DefaultStreamIdleTimeout),
+						Type:         SettingTypeStreamIdleTimeout,
+						Validation:   FieldValidationNone,
+					},
 				}
 				a.selectedSettingIdx = 0
 				a.settingsEditMode = false
@@ -745,22 +760,12 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "esc" && a.dataModel.Streaming {
 			a.cancelRequest()
 
-			partialResp := a.currentResp.String()
-
 			// Remove loading message (but not persistent step messages)
-			if len(a.dataModel.Messages) > 0 &&
-				a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" &&
-				!a.dataModel.Messages[len(a.dataModel.Messages)-1].Persistent {
-				a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
-			}
+			a.removeLastNonPersistentSystemMessage()
 
-			if partialResp != "" {
-				a.dataModel.Messages = append(a.dataModel.Messages, Message{
-					Role:      "assistant",
-					Content:   partialResp + "\n\n⚠️ Response cancelled",
-					Rendered:  partialResp + "\n\n⚠️ Response cancelled",
-					Timestamp: time.Now(),
-				})
+			// Keep the text that arrived so far
+			if a.currentResp.Len() > 0 {
+				a.keepPartialResponse("⚠️ Response cancelled")
 			} else {
 				a.dataModel.Messages = append(a.dataModel.Messages, Message{
 					Role:      "system",
@@ -769,10 +774,6 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Timestamp: time.Now(),
 				})
 			}
-
-			a.chunks = nil
-			a.chunkIndex = 0
-			a.currentResp.Reset()
 
 			a.updateViewportContent(true)
 			return a, nil
@@ -993,12 +994,12 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	// Streaming messages → appview_update_streaming.go
-	case streamChunksCollectedMsg, displayChunkTickMsg, streamChunkMsg, streamDoneMsg, streamErrorMsg, notifyCompleteMsg:
+	case streamChunkMsg, typewriterTickMsg, streamDoneMsg, streamErrorMsg, notifyCompleteMsg:
 		return a.handleStreamingMessage(msg)
 
 	// Phase 6: Tool execution handlers
 	// Tool messages → appview_update_tools.go
-	case toolCallsDetectedMsg, toolExecutionCompleteMsg, toolExecutionErrorMsg,
+	case toolCallsDetectedMsg, toolResultsReadyMsg, toolExecutionCompleteMsg, toolExecutionErrorMsg,
 		toolPermissionRequestMsg, toolPermissionResponseMsg:
 		return a.handleToolMessage(msg)
 

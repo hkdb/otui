@@ -125,16 +125,18 @@ func (p *AnthropicProvider) ChatWithTools(ctx context.Context, messages []model.
 			return fmt.Errorf("error accumulating message: %w", err)
 		}
 
-		// Handle different event types
-		switch eventVariant := event.AsAny().(type) {
-		case anthropic.ContentBlockDeltaEvent:
-			// Handle text deltas
-			switch deltaVariant := eventVariant.Delta.AsAny().(type) {
-			case anthropic.TextDelta:
-				contentBuilder.WriteString(deltaVariant.Text)
-				if callback != nil {
-					callback(deltaVariant.Text, nil)
-				}
+		// Report text deltas; other events (e.g. tool input deltas) are
+		// reported without text, as activity
+		text := ""
+		if delta, ok := event.AsAny().(anthropic.ContentBlockDeltaEvent); ok {
+			if textDelta, ok := delta.Delta.AsAny().(anthropic.TextDelta); ok {
+				text = textDelta.Text
+				contentBuilder.WriteString(text)
+			}
+		}
+		if callback != nil {
+			if err := callback(text, nil); err != nil {
+				return err
 			}
 		}
 	}

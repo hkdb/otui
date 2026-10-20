@@ -53,8 +53,6 @@ func (a AppView) handleSessionMessage(msg tea.Msg) (AppView, tea.Cmd) {
 
 		// Reset streaming/typewriter state from previous session
 		a.currentResp.Reset()
-		a.chunks = nil
-		a.chunkIndex = 0
 		a.userScrolledUp = false
 		a.highlightedMessageIdx = -1
 		a.highlightFlashCount = 0

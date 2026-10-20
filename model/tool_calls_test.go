@@ -49,7 +49,8 @@ func TestSendToOllamaKeepsAllToolCalls(t *testing.T) {
 	}
 	m := toolCallModel(provider)
 
-	msg, ok := m.SendToOllama()().(ToolCallsDetectedMsg)
+	final, _ := drainStream(t, m.SendToOllama())
+	msg, ok := final.(ToolCallsDetectedMsg)
 	if !ok {
 		t.Fatalf("expected ToolCallsDetectedMsg")
 	}

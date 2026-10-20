@@ -410,17 +410,6 @@ func (a *AppView) showAnalyzingResults() {
 	a.updateViewportContent(!a.userScrolledUp)
 }
 
-// startTypewriter initializes typewriter state and returns tick command
-func (a *AppView) startTypewriter(chunks []string) tea.Cmd {
-	a.chunks = chunks
-	a.chunkIndex = 0
-	a.currentResp.Reset()
-	requestID := a.dataModel.RequestID()
-	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
-		return displayChunkTickMsg{RequestID: requestID}
-	})
-}
-
 // staleRequest reports whether a message belongs to a request that was
 // cancelled or replaced by a newer one
 func (a *AppView) staleRequest(requestID uint64) bool {
@@ -512,15 +501,11 @@ func (a *AppView) refreshProvidersAndModels() tea.Cmd {
 // response and tool step state is reset
 func (a *AppView) cancelRequest() {
 	a.dataModel.CancelRequest()
+	a.flushTypewriter() // Keep everything that arrived
 	a.dataModel.Streaming = false
 	a.userScrolledUp = false
 
 	a.executingTool = ""
-	a.pendingNextStep = false
-	a.pendingToolCalls = nil
-	a.pendingToolContext = nil
-	a.pendingToolResponse = ""
-	a.pendingSummary = nil
 	a.iterationCount = 0
 	a.dataModel.ResetIterations()
 
@@ -552,6 +537,7 @@ func (a *AppView) cancelRequestOnSwitch() {
 		config.DebugLog.Printf("[Session] Switching while a response is in progress - cancelling it")
 	}
 	a.cancelRequest()
+	a.currentResp.Reset()
 	a.waitingForPermission = false
 	a.pendingPermission = nil
 }

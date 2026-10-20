@@ -36,11 +36,15 @@ type AppView struct {
 
 	// Streaming UI state
 	currentResp *strings.Builder // Pointer to avoid copy panic
+
+	// Typewriter (typewriter.go): streamed text not shown yet
+	typeBacklog string
+	typeCarry   float64 // Fraction of a character owed to the next tick
+	typing      bool    // A tick is scheduled
+	typeFinal   tea.Msg // Message ending the response, handled once the text is shown
 	showHelp    bool
 
 	// Typewriter effect fields
-	chunks     []string // Chunks to display with typewriter effect
-	chunkIndex int      // Current chunk being displayed
 
 	// Scroll position state
 	// User scrolled away from the bottom; suppresses auto-scroll until they
@@ -217,13 +221,8 @@ type AppView struct {
 	pluginOperationSpinner   spinner.Model
 
 	// Multi-step iteration UI state (Phase 2)
-	iterationCount      int  // Current step number
-	maxIterations       int  // Max from config
-	pendingNextStep     bool // Continue after typewriter?
-	pendingToolCalls    []ToolCall
-	pendingToolContext  []Message
-	pendingToolResponse string               // LLM text that came with pendingToolCalls
-	pendingSummary      *IterationSummaryMsg // Summary to add after typewriter completes
+	iterationCount int // Current step number
+	maxIterations  int // Max from config
 
 	// Session generation counter — incremented on session switch to invalidate stale async renders
 	sessionGeneration uint64

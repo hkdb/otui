@@ -53,9 +53,9 @@ func TestCancelledRequestRunsNoTools(t *testing.T) {
 
 func TestSendToOllamaTagsRequest(t *testing.T) {
 	m := toolCallModel(&toolCallProvider{text: "hi"})
-	cmd := m.SendToOllama()
-	msg, ok := cmd().(StreamChunksCollectedMsg)
-	if !ok || msg.RequestID != m.RequestID() {
-		t.Fatalf("got %#v, want StreamChunksCollectedMsg for request %d", msg, m.RequestID())
+	final, text := drainStream(t, m.SendToOllama())
+	msg, ok := final.(StreamDoneMsg)
+	if !ok || msg.RequestID != m.RequestID() || text != "hi" {
+		t.Fatalf("got %#v (streamed %q), want StreamDoneMsg for request %d", final, text, m.RequestID())
 	}
 }

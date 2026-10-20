@@ -180,21 +180,21 @@ func (m *Model) SendToOllama() tea.Cmd {
 
 	// Reset iteration state for new user message (Phase 2)
 	m.ResetIterations()
+	timeouts := m.streamTimeouts()
 
 	return func() tea.Msg {
 		if config.DebugLog != nil {
 			config.DebugLog.Printf("sendToOllama goroutine started")
 		}
 
-		ctx, cancel := context.WithTimeout(reqCtx, 120*time.Second)
-		defer cancel()
-
 		// Get enabled plugins and their tools (Phase 6)
 		var mcpTools []mcptypes.Tool
 		if mcpManager != nil && currentSession != nil {
 			// Get tools from all enabled plugins in current session
+			ctx, cancel := context.WithTimeout(reqCtx, 10*time.Second)
 			var err error
 			mcpTools, err = mcpManager.GetTools(ctx)
+			cancel()
 			if err == nil && len(mcpTools) > 0 {
 				if config.DebugLog != nil {
 					config.DebugLog.Printf("Loaded %d tools for current session", len(mcpTools))
@@ -221,54 +221,42 @@ func (m *Model) SendToOllama() tea.Cmd {
 		}
 		messages := buildAPIMessages(uiMessages, systemPrompt, mcpTools)
 
-		var chunks []string
-		var responseBuilder strings.Builder
-		var detectedToolCalls []ToolCall
 		startTime := time.Now()
 
-		// Chat with tools
-		err := client.ChatWithTools(ctx, messages, mcpTools, func(chunk string, toolCalls []ToolCall) error {
-			responseBuilder.WriteString(chunk)
-			chunks = append(chunks, chunk)
-			// Providers report tool calls per callback (OpenAI-style APIs
-			// send one per call), so keep every call, not just the first batch
-			detectedToolCalls = appendToolCalls(detectedToolCalls, toolCalls)
-			return nil
-		})
+		// Stream the response; the final message depends on whether the model
+		// called tools
+		stream := startChatStream(reqCtx, reqID, client, messages, mcpTools, timeouts,
+			func(response string, toolCalls []ToolCall, err error) tea.Msg {
+				elapsed := time.Since(startTime)
+				if err != nil {
+					if config.DebugLog != nil {
+						config.DebugLog.Printf("Ollama error after %v: %v", elapsed, err)
+					}
+					return StreamErrorMsg{Err: err, RequestID: reqID}
+				}
 
-		elapsed := time.Since(startTime)
+				if config.DebugLog != nil {
+					config.DebugLog.Printf("Ollama response received after %v - %d chars", elapsed, len(response))
+				}
 
-		if err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Ollama error after %v: %v", elapsed, err)
-			}
-			return StreamErrorMsg{Err: err, RequestID: reqID}
-		}
+				// If tool calls detected, return special message to trigger execution
+				if len(toolCalls) > 0 {
+					if config.DebugLog != nil {
+						config.DebugLog.Printf("Tool calls detected: %d", len(toolCalls))
+					}
+					return ToolCallsDetectedMsg{
+						ToolCalls:       ensureToolCallIDs(toolCalls),
+						InitialResponse: response,
+						ContextMessages: messages,
+						RequestID:       reqID,
+					}
+				}
 
-		response := responseBuilder.String()
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Ollama response received after %v - %d chunks, %d chars", elapsed, len(chunks), len(response))
-		}
+				// No tool calls - normal response
+				return StreamDoneMsg{FullResponse: response, RequestID: reqID}
+			})
 
-		// If tool calls detected, return special message to trigger execution
-		if len(detectedToolCalls) > 0 {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Tool calls detected: %d", len(detectedToolCalls))
-			}
-			return ToolCallsDetectedMsg{
-				ToolCalls:       ensureToolCallIDs(detectedToolCalls),
-				InitialResponse: response,
-				ContextMessages: messages,
-				RequestID:       reqID,
-			}
-		}
-
-		// No tool calls - normal response
-		return StreamChunksCollectedMsg{
-			Chunks:       chunks,
-			FullResponse: response,
-			RequestID:    reqID,
-		}
+		return WaitForStream(stream)()
 	}
 }
 
@@ -514,11 +502,13 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 
 	// Disable tools if multi-step disabled OR max iterations reached
 	disableNextTools := !enableMultiStep || maxReached
+	timeouts := m.streamTimeouts()
 
 	return func() tea.Msg {
 		// Track step start time (Phase 2)
 		stepStartTime := time.Now()
 
+		// Tools get 120s; the model's response streams without a total limit
 		ctx, cancel := context.WithTimeout(reqCtx, 120*time.Second)
 		defer cancel()
 
@@ -628,101 +618,68 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 			config.DebugLog.Printf("Sending %d messages back to LLM (including %d tool results)", len(fullMessages), len(results))
 		}
 
-		// Send back to LLM
-		var chunks []string
-		var responseBuilder strings.Builder
-		var detectedToolCalls []ToolCall
-
-		err := client.ChatWithTools(ctx, fullMessages, nextTools, func(chunk string, toolCalls []ToolCall) error {
-			responseBuilder.WriteString(chunk)
-			chunks = append(chunks, chunk)
-			// Providers report tool calls per callback (OpenAI-style APIs
-			// send one per call), so keep every call, not just the first batch
-			detectedToolCalls = appendToolCalls(detectedToolCalls, toolCalls)
-			return nil
-		})
-
-		if err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Error getting response after tools: %v", err)
-			}
-			return ToolExecutionErrorMsg{Err: err, RequestID: reqID}
-		}
-
-		finalResponse := responseBuilder.String()
-
-		// Debug: Log response details after tool execution
-		if config.DebugLog != nil {
-			nonEmptyChunks := 0
-			for _, c := range chunks {
-				if c != "" {
-					nonEmptyChunks++
-				}
-			}
-			config.DebugLog.Printf("Post-tool response: %d chunks (%d non-empty), %d chars, hasToolCalls=%v",
-				len(chunks), nonEmptyChunks, len(finalResponse), len(detectedToolCalls) > 0)
-			if len(finalResponse) > 0 && len(finalResponse) <= 200 {
-				config.DebugLog.Printf("Post-tool response content: %s", finalResponse)
-			} else if len(finalResponse) > 200 {
-				config.DebugLog.Printf("Post-tool response content (first 200): %s", truncateRunes(finalResponse, 200))
-			}
-		}
-
-		// Clean leaked tool calls from response (for both context and display)
-		// This prevents leaked JSON/XML from polluting LLM context and user display
-		cleanedResponse := cleanLeakedToolCalls(finalResponse)
-		if cleanedResponse != finalResponse {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Cleaned leaked tool calls from response: %d -> %d chars",
-					len(finalResponse), len(cleanedResponse))
-			}
-			finalResponse = cleanedResponse
-
-			// Rebuild chunks from cleaned response for typewriter display
-			chunks = []string{}
-			if len(finalResponse) > 0 {
-				// Create chunks of ~10 chars each to maintain typewriter effect
-				for i := 0; i < len(finalResponse); i += 10 {
-					end := i + 10
-					if end > len(finalResponse) {
-						end = len(finalResponse)
+		// Send back to LLM, streaming the response; the step ends with
+		// ToolExecutionCompleteMsg
+		stream := startChatStream(reqCtx, reqID, client, fullMessages, nextTools, timeouts,
+			func(finalResponse string, detectedToolCalls []ToolCall, err error) tea.Msg {
+				if err != nil {
+					if config.DebugLog != nil {
+						config.DebugLog.Printf("Error getting response after tools: %v", err)
 					}
-					chunks = append(chunks, finalResponse[i:end])
+					return ToolExecutionErrorMsg{Err: err, RequestID: reqID}
 				}
-			}
-		}
 
-		result := ToolExecutionCompleteMsg{
-			Chunks:       chunks,
-			FullResponse: finalResponse,
-			Step:         step,
-			MaxReached:   maxReached && len(detectedToolCalls) > 0,
-			RequestID:    reqID,
-		}
+				if config.DebugLog != nil {
+					config.DebugLog.Printf("Post-tool response: %d chars, hasToolCalls=%v",
+						len(finalResponse), len(detectedToolCalls) > 0)
+					if len(finalResponse) > 0 {
+						config.DebugLog.Printf("Post-tool response content (first 200): %s", truncateRunes(finalResponse, 200))
+					}
+				}
 
-		// Complete (no more tool calls) or max iterations reached: Update
-		// builds the summary (ApplyToolStep)
-		if len(detectedToolCalls) == 0 || maxReached {
-			if maxReached && len(detectedToolCalls) > 0 && config.DebugLog != nil {
-				config.DebugLog.Printf("Max iterations (%d) reached", iteration)
-			}
-			return result
-		}
+				// Clean leaked tool calls from response (for both context and display)
+				// This prevents leaked JSON/XML from polluting LLM context and user display
+				if cleaned := cleanLeakedToolCalls(finalResponse); cleaned != finalResponse {
+					if config.DebugLog != nil {
+						config.DebugLog.Printf("Cleaned leaked tool calls from response: %d -> %d chars",
+							len(finalResponse), len(cleaned))
+					}
+					finalResponse = cleaned
+				}
 
-		// Continue iteration
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Next iteration will be %d: %d tool calls detected",
-				iteration+1, len(detectedToolCalls))
-		}
+				result := ToolExecutionCompleteMsg{
+					FullResponse: finalResponse,
+					Step:         step,
+					MaxReached:   maxReached && len(detectedToolCalls) > 0,
+					RequestID:    reqID,
+				}
 
-		// Context for the next step. The LLM's current response becomes the
-		// next step's assistant turn together with its tool calls (not a
-		// separate turn), so it's passed as NextInitialResponse.
-		result.HasMoreSteps = true
-		result.NextToolCalls = ensureToolCallIDs(detectedToolCalls)
-		result.NextContext = fullMessages
-		result.NextInitialResponse = finalResponse
-		return result
+				// Complete (no more tool calls) or max iterations reached: Update
+				// builds the summary (ApplyToolStep)
+				if len(detectedToolCalls) == 0 || maxReached {
+					if maxReached && len(detectedToolCalls) > 0 && config.DebugLog != nil {
+						config.DebugLog.Printf("Max iterations (%d) reached", iteration)
+					}
+					return result
+				}
+
+				// Continue iteration
+				if config.DebugLog != nil {
+					config.DebugLog.Printf("Next iteration will be %d: %d tool calls detected",
+						iteration+1, len(detectedToolCalls))
+				}
+
+				// Context for the next step. The LLM's current response becomes the
+				// next step's assistant turn together with its tool calls (not a
+				// separate turn), so it's passed as NextInitialResponse.
+				result.HasMoreSteps = true
+				result.NextToolCalls = ensureToolCallIDs(detectedToolCalls)
+				result.NextContext = fullMessages
+				result.NextInitialResponse = finalResponse
+				return result
+			})
+
+		return ToolResultsReadyMsg{RequestID: reqID, Stream: stream}
 	}
 }
 

@@ -26,6 +26,8 @@ func DefaultUserConfig() *UserConfig {
 		MaxIterations:   10,   // Default max iterations per user message
 		EnableMultiStep:  true,  // Default to allowing multi-step execution
 		NotifyOnComplete: false, // No notification by default
+		FirstTokenTimeout: DefaultFirstTokenTimeout,
+		StreamIdleTimeout: DefaultStreamIdleTimeout,
 		Compaction: CompactionConfig{
 			AutoCompact:          false, // Manual compaction by default
 			AutoCompactThreshold: 0.75,  // Trigger at 75% context usage
@@ -84,6 +86,13 @@ max_iterations = 10       # Maximum steps per user message
 # Works in native, Flatpak, and Docker containers
 # Configure your terminal emulator to show visual notifications on bell
 notify_on_complete = false
+
+# Response timeouts (seconds)
+# How long to wait for the first part of a response (the server may be
+# loading the model or processing a long prompt), and how long a response
+# may go silent before giving up. Esc cancels a response at any time.
+first_token_timeout = 600
+stream_idle_timeout = 180
 
 # Settings above this line must stay before the first [table] header,
 # otherwise TOML puts them in that table and they're ignored

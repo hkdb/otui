@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	appmodel "otui/model"
@@ -10,11 +11,10 @@ import (
 // cancelledAppView returns an AppView whose request was cancelled with Esc,
 // and the ID of that request
 func cancelledAppView() (AppView, uint64) {
-	a := AppView{dataModel: &appmodel.Model{}}
+	a := AppView{dataModel: &appmodel.Model{}, currentResp: &strings.Builder{}}
 	old := a.dataModel.RequestID()
 	a.dataModel.Streaming = true
-	a.pendingNextStep = true
-	a.pendingToolCalls = []ToolCall{{Name: "x.y"}}
+	a.currentResp.WriteString("partial")
 	a.executingTool = "x"
 	a.cancelRequest()
 	return a, old
@@ -22,9 +22,8 @@ func cancelledAppView() (AppView, uint64) {
 
 func TestEscResetsRequestState(t *testing.T) {
 	a, old := cancelledAppView()
-	if a.dataModel.Streaming || a.pendingNextStep || a.pendingToolCalls != nil || a.executingTool != "" {
-		t.Errorf("state not reset: streaming=%v pendingNextStep=%v pendingToolCalls=%v executingTool=%q",
-			a.dataModel.Streaming, a.pendingNextStep, a.pendingToolCalls, a.executingTool)
+	if a.dataModel.Streaming || a.executingTool != "" {
+		t.Errorf("state not reset: streaming=%v executingTool=%q", a.dataModel.Streaming, a.executingTool)
 	}
 	if a.dataModel.RequestID() == old {
 		t.Error("request not cancelled")
@@ -35,11 +34,13 @@ func TestStaleRequestMessagesIgnored(t *testing.T) {
 	a, old := cancelledAppView()
 	// A new question was asked after Esc
 	a.dataModel.Streaming = true
+	a.currentResp.Reset()
 
 	msgs := []any{
 		toolCallsDetectedMsg{ToolCalls: []ToolCall{{Name: "x.y"}}, RequestID: old},
 		toolPermissionRequestMsg{ToolName: "x.y", RequestID: old},
-		toolExecutionCompleteMsg{Chunks: []string{"old answer"}, RequestID: old},
+		toolResultsReadyMsg{RequestID: old},
+		toolExecutionCompleteMsg{FullResponse: "old answer", RequestID: old},
 		toolExecutionErrorMsg{Err: errors.New("context canceled"), RequestID: old},
 	}
 	for _, msg := range msgs {
@@ -50,13 +51,13 @@ func TestStaleRequestMessagesIgnored(t *testing.T) {
 	}
 
 	streaming := []any{
-		streamChunksCollectedMsg{Chunks: []string{"old answer"}, RequestID: old},
-		displayChunkTickMsg{RequestID: old},
+		streamChunkMsg{Chunk: "old answer", RequestID: old},
+		streamDoneMsg{FullResponse: "old answer", RequestID: old},
 		streamErrorMsg{Err: errors.New("context canceled"), RequestID: old},
 	}
 	for _, msg := range streaming {
 		b, cmd := a.handleStreamingMessage(msg)
-		if cmd != nil || len(b.dataModel.Messages) != 0 || b.chunks != nil || !b.dataModel.Streaming {
+		if cmd != nil || len(b.dataModel.Messages) != 0 || b.currentResp.Len() != 0 || !b.dataModel.Streaming {
 			t.Errorf("%T of a cancelled request was acted on", msg)
 		}
 	}

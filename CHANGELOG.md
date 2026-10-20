@@ -55,6 +55,9 @@
 - Block session switch during response until multi-session is implemented
 - Fixed a possible crash when model lists were refreshed at the same time
 - Fixed data races between background tasks and the UI
+- Responses now stream as they're generated, shown with an even typewriter effect
+- Removed the 120 second response limit; first token and idle timeouts are configurable in Settings
+- Partial responses are kept when a response fails
 
 ---
 
