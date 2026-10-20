@@ -341,6 +341,9 @@ func (m *Model) ImportSessionCmd(ctx context.Context, filePath string) tea.Cmd {
 			return SessionImportedMsg{Err: fmt.Errorf("invalid session file: %w", err)}
 		}
 
+		// Imported files are untrusted: no terminal control sequences
+		session.Sanitize()
+
 		// Validate required fields
 		if session.Name == "" {
 			return SessionImportedMsg{Err: fmt.Errorf("invalid Session: missing name")}

@@ -3,6 +3,8 @@ package ui
 import (
 	"fmt"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/gomarkdown/markdown/parser"
 
 	"otui/config"
+	"otui/safetext"
 )
 
 // Pre-compiled regex patterns for better performance
@@ -359,6 +362,9 @@ func stripANSI(s string) string {
 }
 
 // buildPermissionContent creates the formatted permission request content
+// maxPurposeWidth limits the model-written purpose in permission prompts
+const maxPurposeWidth = 120
+
 func buildPermissionContent(toolName, purpose string, details map[string]string) string {
 	var content strings.Builder
 	maxWidth := 60 // Conservative width for wrapping
@@ -366,24 +372,31 @@ func buildPermissionContent(toolName, purpose string, details map[string]string)
 	// Title
 	content.WriteString("🔒 Permission Request\n\n")
 
+	// Everything below comes from the model or tool arguments: one line
+	// each, so it can't add lines that look like part of the prompt
+
 	// Tool name
-	toolLine := wordWrapWithIndent(toolName, "╰── Tool: ", maxWidth)
+	toolLine := wordWrapWithIndent(safetext.Line(toolName), "╰── Tool: ", maxWidth)
 	content.WriteString(toolLine)
 
 	// Purpose (with word wrapping)
-	if purpose != "" {
+	if purpose = truncateWidth(safetext.Line(purpose), maxPurposeWidth); purpose != "" {
 		purposeLine := wordWrapWithIndent(purpose, "╰── Purpose: ", maxWidth)
 		content.WriteString(purposeLine)
 	}
 
-	// Details (file paths, commands, etc.)
-	if len(details) > 0 {
-		for key, value := range details {
-			// Capitalize first letter of key
-			displayKey := strings.ToUpper(key[:1]) + key[1:]
-			detailLine := wordWrapWithIndent(value, "╰── "+displayKey+": ", maxWidth)
-			content.WriteString(detailLine)
-		}
+	// Details (file paths, commands, etc.), quoted: newlines show as \n
+	keys := make([]string, 0, len(details))
+	for key := range details {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		// Capitalize first letter of key
+		displayKey := strings.ToUpper(key[:1]) + key[1:]
+		value := strconv.Quote(safetext.Clean(details[key]))
+		detailLine := wordWrapWithIndent(value, "╰── "+displayKey+": ", maxWidth)
+		content.WriteString(detailLine)
 	}
 
 	// Action prompt
@@ -440,15 +453,15 @@ func buildIterationSummary(summary IterationSummaryMsg) string {
 		if step.Success {
 			b.WriteString(fmt.Sprintf("╰─ Step %d: %s (%s)\n",
 				step.StepNumber,
-				step.Purpose,
+				safetext.Line(step.Purpose),
 				durationStr,
 			))
 		}
 		if !step.Success {
 			b.WriteString(fmt.Sprintf("╰─ Step %d: %s (failed: %s)\n",
 				step.StepNumber,
-				step.Purpose,
-				step.ErrorMsg,
+				safetext.Line(step.Purpose),
+				safetext.Line(step.ErrorMsg),
 			))
 		}
 	}

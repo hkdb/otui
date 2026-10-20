@@ -129,3 +129,17 @@ func TestStreamCancelledEndsWithoutFinal(t *testing.T) {
 		t.Fatal("cancelled stream didn't close")
 	}
 }
+
+func TestStreamRemovesControlSequences(t *testing.T) {
+	p := &scriptProvider{chunks: []string{"\x1b]52;c;aGk=\x07ok", "\r\x1b[2K done‮"}, delay: time.Millisecond}
+	msg, text := drainStream(t, streamFor(context.Background(), p, StreamTimeouts{time.Second, time.Second}))
+	f := msg.(finished)
+	for _, s := range []string{text, f.text} {
+		if strings.ContainsAny(s, "\x1b\x07\r‮") {
+			t.Errorf("control sequences reached the UI: %q", s)
+		}
+	}
+	if f.text != text {
+		t.Errorf("final %q differs from streamed %q", f.text, text)
+	}
+}

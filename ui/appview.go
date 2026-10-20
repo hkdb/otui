@@ -18,6 +18,7 @@ import (
 	appmodel "otui/model"
 	"otui/ollama"
 	"otui/provider"
+	"otui/safetext"
 	"otui/storage"
 )
 
@@ -451,7 +452,14 @@ func (a AppView) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// View renders the screen. Only color sequences reach the terminal: any
+// other control sequence in displayed text (model output, session files,
+// server errors) is removed.
 func (a AppView) View() string {
+	return safetext.SGROnly(a.view())
+}
+
+func (a AppView) view() string {
 	if !a.ready {
 		return "Loading OTUI..."
 	}

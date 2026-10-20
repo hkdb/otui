@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"otui/config"
+	"otui/safetext"
 	"otui/storage"
 )
 
@@ -243,7 +244,7 @@ Summary:`, conversationText.String())
 
 	var summary strings.Builder
 	callback := func(chunk string, toolCalls []ToolCall) error {
-		summary.WriteString(chunk)
+		summary.WriteString(safetext.Clean(chunk))
 		return nil
 	}
 

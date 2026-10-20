@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"otui/config"
+	"otui/safetext"
 )
 
 // Message represents a chat message
@@ -49,6 +50,29 @@ type Session struct {
 	LLMSummary          string     `json:"llm_summary,omitempty"` // Raw LLM summary text for context injection
 	CompactionTimestamp time.Time  `json:"compaction_timestamp,omitempty"`
 	TokenUsage          TokenUsage `json:"token_usage,omitempty"`
+}
+
+// Sanitize removes terminal control sequences from the session's text, so a
+// crafted session file can't control the terminal when it's shown. Cached
+// renderings keep only colors.
+func (s *Session) Sanitize() {
+	s.Name = safetext.Line(s.Name)
+	s.Model = safetext.Line(s.Model)
+	s.Provider = safetext.Line(s.Provider)
+	s.SystemPrompt = safetext.Clean(s.SystemPrompt)
+	s.CompactedSummary = safetext.Clean(s.CompactedSummary)
+	s.LLMSummary = safetext.Clean(s.LLMSummary)
+	for i := range s.EnabledPlugins {
+		s.EnabledPlugins[i] = safetext.Line(s.EnabledPlugins[i])
+	}
+	for i := range s.AllowedTools {
+		s.AllowedTools[i] = safetext.Line(s.AllowedTools[i])
+	}
+	for i := range s.Messages {
+		s.Messages[i].Role = safetext.Line(s.Messages[i].Role)
+		s.Messages[i].Content = safetext.Clean(s.Messages[i].Content)
+		s.Messages[i].Rendered = safetext.SGROnly(s.Messages[i].Rendered)
+	}
 }
 
 // Clone returns a copy of the session that shares no slices with it, e.g.
@@ -142,6 +166,9 @@ func (s *SessionStorage) Load(id string) (*Session, error) {
 		session.Provider = "ollama"
 	}
 
+	// Session files can come from elsewhere (import, older versions)
+	session.Sanitize()
+
 	// Debug: Log compaction state after load
 	if config.Debug && config.DebugLog != nil && session.CompactionMarker > 0 {
 		config.DebugLog.Printf("[storage] Loaded session with compaction: marker=%d, summary=%q",
@@ -178,9 +205,9 @@ func (s *SessionStorage) List() ([]SessionMetadata, error) {
 
 		sessions = append(sessions, SessionMetadata{
 			ID:             session.ID,
-			Name:           session.Name,
-			Model:          session.Model,
-			Provider:       session.Provider,
+			Name:           safetext.Line(session.Name),
+			Model:          safetext.Line(session.Model),
+			Provider:       safetext.Line(session.Provider),
 			CreatedAt:      session.CreatedAt,
 			UpdatedAt:      session.UpdatedAt,
 			MessageCount:   len(session.Messages),

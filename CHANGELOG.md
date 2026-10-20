@@ -58,6 +58,9 @@
 - Responses now stream as they're generated, shown with an even typewriter effect
 - Removed the 120 second response limit; first token and idle timeouts are configurable in Settings
 - Partial responses are kept when a response fails
+- Fixed terminal escape codes in model output, tool arguments, session files or plugin data reaching the terminal (could spoof the tool permission prompt or write the clipboard)
+- Plugin IDs, packages and command paths from the registry are validated (uninstalling a plugin could delete files outside the plugins folder)
+- The plugin install warning and config screen show the command a plugin will install and run, with a warning for risky docker options
 
 ---
 

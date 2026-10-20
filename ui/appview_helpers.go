@@ -15,6 +15,7 @@ import (
 	"otui/mcp"
 	"otui/ollama"
 	"otui/provider"
+	"otui/safetext"
 	"otui/storage"
 )
 
@@ -359,6 +360,8 @@ func (a *AppView) removeLastNonPersistentSystemMessage() {
 
 // createStepMessage creates a step message with spinner (Phase 2 multi-step)
 func (a *AppView) createStepMessage(purpose string, stepNum int) {
+	// The purpose is model-written: one line, limited length
+	purpose = truncateWidth(safetext.Line(purpose), maxPurposeWidth)
 	systemMsg := fmt.Sprintf("🔧 Step %d: %s...", stepNum, purpose)
 	a.dataModel.Messages = append(a.dataModel.Messages, Message{
 		Role:      "system",

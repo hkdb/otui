@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"otui/config"
 	"otui/ollama"
+	"otui/safetext"
 )
 
 // modelCacheTTL is how long cloud providers' model lists are cached
@@ -60,6 +61,10 @@ func aggregateModels(providers map[string]Provider, cached map[string][]ollama.M
 				continue
 			}
 			fetched[providerID] = models
+		}
+		// Model names come from the server and are shown in the selector
+		for i := range models {
+			models[i].Name = safetext.Line(models[i].Name)
 		}
 		allModels = append(allModels, models...)
 	}

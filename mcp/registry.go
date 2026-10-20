@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"otui/config"
+	"otui/safetext"
 )
 
 const registryURL = "https://raw.githubusercontent.com/hkdb/otui-registry/main/plugins.json"
@@ -74,7 +75,7 @@ func (r *Registry) Load() error {
 		if err == nil {
 			var cached []Plugin
 			if err := json.Unmarshal(data, &cached); err == nil {
-				r.plugins = cached
+				r.plugins = validPlugins(cached)
 			}
 		}
 	}
@@ -88,6 +89,7 @@ func (r *Registry) Load() error {
 		data, err := os.ReadFile(customPath)
 		if err == nil {
 			if err := json.Unmarshal(data, &r.customPlugins); err == nil {
+				r.customPlugins = validPlugins(r.customPlugins)
 				for i := range r.customPlugins {
 					r.customPlugins[i].Custom = true
 				}
@@ -106,6 +108,7 @@ func (r *Registry) Refresh() error {
 	if err != nil {
 		return fmt.Errorf("failed to fetch plugin registry: %w", err)
 	}
+	freshPlugins = validPlugins(freshPlugins)
 
 	r.mu.Lock()
 	r.plugins = freshPlugins
@@ -240,6 +243,11 @@ func (r *Registry) AddCustomPlugin(repoURL string) (*Plugin, []string, error) {
 		Custom:      true,
 	}
 
+	sanitizePlugin(plugin) // Built from GitHub API data
+	if err := ValidatePluginID(plugin.ID); err != nil {
+		return nil, nil, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.customPlugins = append(r.customPlugins, *plugin)
@@ -255,6 +263,9 @@ func (r *Registry) AddCustomPlugin(repoURL string) (*Plugin, []string, error) {
 func (r *Registry) AddCustomPluginDirect(plugin *Plugin) ([]string, error) {
 	if plugin == nil {
 		return nil, fmt.Errorf("plugin cannot be nil")
+	}
+	if err := validateCustomPlugin(plugin); err != nil {
+		return nil, err
 	}
 
 	// Ensure it's marked as custom
@@ -317,6 +328,53 @@ func (r *Registry) RemoveCustomPlugin(id string) error {
 	}
 
 	return r.saveCustomPlugins()
+}
+
+// validateCustomPlugin checks a plugin from the custom plugin form
+func validateCustomPlugin(p *Plugin) error {
+	if err := ValidatePluginID(p.ID); err != nil {
+		return err
+	}
+	return ValidatePackage(p.InstallType, p.Package)
+}
+
+// validPlugins removes terminal control sequences from plugin text
+// (registry data is shown in the plugin manager) and drops plugins with an
+// invalid ID (used as a directory name)
+func validPlugins(plugins []Plugin) []Plugin {
+	valid := plugins[:0]
+	for _, p := range plugins {
+		sanitizePlugin(&p)
+		if err := ValidatePluginID(p.ID); err != nil {
+			if config.DebugLog != nil {
+				config.DebugLog.Printf("[Registry] Ignoring plugin: %v", err)
+			}
+			continue
+		}
+		valid = append(valid, p)
+	}
+	return valid
+}
+
+func sanitizePlugin(p *Plugin) {
+	for _, field := range []*string{
+		&p.ID, &p.Name, &p.Description, &p.Category, &p.License, &p.Repository, &p.Author,
+		&p.Language, &p.InstallType, &p.Package, &p.Command, &p.ServerURL, &p.AuthType,
+		&p.Transport, &p.Environment, &p.Args,
+	} {
+		*field = safetext.Line(*field)
+	}
+	for i := range p.Tags {
+		p.Tags[i] = safetext.Line(p.Tags[i])
+	}
+	for i := range p.RuntimeDeps {
+		p.RuntimeDeps[i] = safetext.Line(p.RuntimeDeps[i])
+	}
+	for i := range p.ConfigSchema {
+		f := &p.ConfigSchema[i]
+		f.Key, f.Label, f.Type = safetext.Line(f.Key), safetext.Line(f.Label), safetext.Line(f.Type)
+		f.DefaultValue, f.Description = safetext.Line(f.DefaultValue), safetext.Line(f.Description)
+	}
 }
 
 // saveCustomPlugins writes the custom plugins. Call with r.mu held.
@@ -510,6 +568,10 @@ func (r *Registry) UpdateCustomPlugin(pluginID string, updatedPlugin *Plugin) ([
 		return nil, fmt.Errorf("plugin ID cannot be empty")
 	case updatedPlugin == nil:
 		return nil, fmt.Errorf("updated plugin cannot be nil")
+	}
+
+	if err := validateCustomPlugin(updatedPlugin); err != nil {
+		return nil, err
 	}
 
 	// Ensure it's marked as custom

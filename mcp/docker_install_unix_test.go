@@ -5,6 +5,7 @@ package mcp
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,10 +20,12 @@ func fakeDocker(t *testing.T, localImage string) {
 	t.Helper()
 	dir := t.TempDir()
 	script := `#!/bin/sh
+echo "$@" >> "` + filepath.Join(dir, "argv.log") + `"
+for last; do :; done
 case "$1" in
   --version) echo "Docker version 29.0.0, build test" ;;
-  pull) echo "pull access denied for $2" >&2; exit 1 ;;
-  image) [ "$3" = "` + localImage + `" ] || exit 1 ;;
+  pull) echo "pull access denied for $last" >&2; exit 1 ;;
+  image) [ "$last" = "` + localImage + `" ] || exit 1 ;;
 esac
 `
 	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o755); err != nil {
@@ -54,6 +57,14 @@ func TestInstallDockerLocalImage(t *testing.T) {
 	if err != nil || installed == nil || installed.InstallMethod != "docker" {
 		t.Fatalf("installed = %+v, err %v", installed, err)
 	}
+
+	// The image is passed after "--", so it can't be read as an option
+	argv, _ := os.ReadFile(filepath.Join(filepath.Dir(dockerPath(t)), "argv.log"))
+	for _, want := range []string{"pull -- my/local-image", "image inspect -- my/local-image"} {
+		if !strings.Contains(string(argv), want) {
+			t.Errorf("docker not called with %q:\n%s", want, argv)
+		}
+	}
 }
 
 func TestInstallDockerMissingImage(t *testing.T) {
@@ -68,4 +79,13 @@ func TestInstallDockerMissingImage(t *testing.T) {
 	if ps.IsInstalled("missing") {
 		t.Fatal("plugin recorded as installed after failed pull")
 	}
+}
+
+func dockerPath(t *testing.T) string {
+	t.Helper()
+	p, err := exec.LookPath("docker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }

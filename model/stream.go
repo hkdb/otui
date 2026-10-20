@@ -10,6 +10,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	mcptypes "github.com/mark3labs/mcp-go/mcp"
+
+	"otui/safetext"
 )
 
 // StreamTimeouts limit how long a response may go without any data from the
@@ -86,6 +88,9 @@ func startChatStream(ctx context.Context, requestID uint64, client Provider, mes
 		err := client.ChatWithTools(streamCtx, messages, tools, func(chunk string, calls []ToolCall) error {
 			active.Store(true)
 			timer.Reset(timeouts.Idle)
+
+			// Model output is shown in the terminal: no control sequences
+			chunk = safetext.Clean(chunk)
 
 			full.WriteString(chunk)
 			// Providers report tool calls per callback (OpenAI-style APIs

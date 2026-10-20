@@ -17,6 +17,7 @@ import (
 	"otui/config"
 	"otui/ollama"
 	"otui/provider"
+	"otui/safetext"
 )
 
 type wizardStep int
@@ -1058,7 +1059,14 @@ func (m WelcomeModel) updateDataDirectoryScreen(msg tea.KeyMsg) (tea.Model, tea.
 	return m, cmd
 }
 
+// View renders the screen. Only color sequences reach the terminal: any
+// other control sequence in displayed text (model output, session files,
+// server errors) is removed.
 func (m WelcomeModel) View() string {
+	return safetext.SGROnly(m.view())
+}
+
+func (m WelcomeModel) view() string {
 	// Width/height are 0 until the first WindowSizeMsg
 	if m.width > 0 && terminalTooSmall(m.width, m.height) {
 		return renderTerminalTooSmall(m.width, m.height)

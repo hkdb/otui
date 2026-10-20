@@ -5,6 +5,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"otui/safetext"
 )
 
 // ErrorModal is a simple standalone modal for showing errors before the main UI starts
@@ -44,7 +46,14 @@ func (m ErrorModal) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// View renders the screen. Only color sequences reach the terminal: any
+// other control sequence in displayed text (model output, session files,
+// server errors) is removed.
 func (m ErrorModal) View() string {
+	return safetext.SGROnly(m.view())
+}
+
+func (m ErrorModal) view() string {
 	if m.width < 20 || m.height < 10 {
 		return "Terminal too small"
 	}

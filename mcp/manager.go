@@ -147,7 +147,56 @@ func isMajorVersionSuffix(s string) bool {
 	return s != "v1"
 }
 
+// buildPluginCommand returns the command that starts a plugin. For registry
+// plugins, programs inside the install directory must stay inside it (a
+// Command or Package with "../" or an absolute path is refused); custom
+// plugins you defined yourself may point anywhere. Returns "" if the plugin
+// can't be started.
 func (m *MCPManager) buildPluginCommand(plugin *Plugin, installed *storage.InstalledPlugin, pluginConfig map[string]string) (string, []string) {
+	command, args := pluginCommand(plugin, installed, pluginConfig)
+	if err := checkPluginPaths(plugin, installed, pluginConfig, command, args); err != nil {
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("[MCP] Refusing to start plugin '%s': %v", plugin.ID, err)
+		}
+		return "", nil
+	}
+	return command, args
+}
+
+// checkPluginPaths checks that a registry plugin's program (and pip module)
+// are inside its install directory
+func checkPluginPaths(plugin *Plugin, installed *storage.InstalledPlugin, pluginConfig map[string]string, command string, args []string) error {
+	if plugin.Custom || command == "" || installed == nil {
+		return nil
+	}
+
+	var paths []string
+	switch plugin.InstallType {
+	case "npm", "go", "binary":
+		paths = []string{command}
+	case "pip":
+		paths = []string{command}
+		if len(args) > 0 {
+			paths = append(paths, args[0]) // Module path
+		}
+	case "manual":
+		// Only the fallback runs a program from the install directory; a
+		// configured or registry command is shown before install (preview)
+		if plugin.Command == "" && pluginConfig["__command__"] == "" {
+			paths = []string{command}
+		}
+	}
+
+	for _, path := range paths {
+		if !insideDir(installed.InstallPath, path) {
+			return fmt.Errorf("%s is outside the plugin's directory", path)
+		}
+	}
+	return nil
+}
+
+// pluginCommand builds a plugin's start command (see buildPluginCommand)
+func pluginCommand(plugin *Plugin, installed *storage.InstalledPlugin, pluginConfig map[string]string) (string, []string) {
 	switch plugin.InstallType {
 	case "remote":
 		return "", nil // No command for remote plugins
