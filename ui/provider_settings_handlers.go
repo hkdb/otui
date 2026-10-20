@@ -106,7 +106,7 @@ func (a AppView) handleProviderSettingsInput(msg tea.KeyMsg) (tea.Model, tea.Cmd
 			field := currentFields[a.providerSettingsState.selectedFieldIdx]
 
 			if config.DebugLog != nil {
-				config.DebugLog.Printf("[ProviderSettings] Field: label=%s, type=%d, value=%s", field.Label, field.Type, field.Value)
+				config.DebugLog.Printf("[ProviderSettings] Field: label=%s, type=%d, value=%s", field.Label, field.Type, config.Redact(field.Label, field.Value))
 				config.DebugLog.Printf("[ProviderSettings] ProviderFieldTypeEnabled=%d, match=%v", ProviderFieldTypeEnabled, field.Type == ProviderFieldTypeEnabled)
 			}
 

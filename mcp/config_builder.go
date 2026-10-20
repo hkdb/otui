@@ -433,7 +433,7 @@ func SubstituteSessionVars(env map[string]string, sessionID, sessionName, dataDi
 
 		// Debug log if substitution occurred
 		if globalconfig.DebugLog != nil && substituted != v {
-			globalconfig.DebugLog.Printf("[ConfigBuilder] SubstituteSessionVars: %s = '%s' → '%s'", k, v, substituted)
+			globalconfig.DebugLog.Printf("[ConfigBuilder] SubstituteSessionVars: %s = '%s' → '%s'", k, globalconfig.Redact(k, v), globalconfig.Redact(k, substituted))
 		}
 	}
 

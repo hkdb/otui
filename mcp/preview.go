@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"net"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -37,7 +39,10 @@ func CommandPreview(plugin *Plugin, pluginConfig map[string]string, installPath 
 		if override := pluginConfig["server_url"]; override != "" {
 			url = override
 		}
-		return "", "Connects to: " + url, nil
+		if sendsCredentials(plugin, pluginConfig) && insecureRemote(url) {
+			warnings = append(warnings, "sends its credentials unencrypted (http://)")
+		}
+		return "", "Connects to: " + url, warnings
 	}
 
 	if installPath == "" {
@@ -53,6 +58,35 @@ func CommandPreview(plugin *Plugin, pluginConfig map[string]string, installPath 
 		warnings = dockerWarnings(command, args)
 	}
 	return install, run, warnings
+}
+
+// sendsCredentials reports whether a remote plugin sends auth headers or
+// uses OAuth
+func sendsCredentials(plugin *Plugin, pluginConfig map[string]string) bool {
+	if plugin.AuthType == "oauth" {
+		return true
+	}
+	for key, value := range pluginConfig {
+		if value != "" && !isInternalConfigKey(key) {
+			return true
+		}
+	}
+	return false
+}
+
+// insecureRemote reports whether url is plain http:// to a host other than
+// this machine
+func insecureRemote(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "http" {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip == nil || !ip.IsLoopback()
 }
 
 // maskSecrets returns the config with secret values (by field name or arg

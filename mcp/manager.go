@@ -603,9 +603,12 @@ func (m *MCPManager) StartAllEnabledPlugins(ctx context.Context) error {
 		// (Phase 0 will handle loading encrypted credentials here)
 		switch pts.plugin.InstallType {
 		case "remote":
-			// Get config which may contain auth headers
+			// Get config which may contain auth headers (OTUI's own settings,
+			// like the server URL override, aren't sent)
 			for k, v := range m.pluginsConfig.GetPluginConfig(pts.installed.ID) {
-				mcpConfig.Env[k] = v
+				if !isInternalConfigKey(k) {
+					mcpConfig.Env[k] = v
+				}
 			}
 		}
 
@@ -789,7 +792,7 @@ func (m *MCPManager) StartPlugin(ctx context.Context, pluginID string) error {
 	}
 
 	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] StartPlugin: Built command for '%s': command='%s', args=%v", pluginID, command, args)
+		config.DebugLog.Printf("[MCP] StartPlugin: Built command for '%s': command='%s', %d args", pluginID, command, len(args))
 	}
 
 	// Configure plugin
@@ -817,9 +820,12 @@ func (m *MCPManager) StartPlugin(ctx context.Context, pluginID string) error {
 	// For remote plugins, merge env vars from config into Env
 	switch plugin.InstallType {
 	case "remote":
-		// Get config which may contain auth headers
+		// Get config which may contain auth headers (OTUI's own settings,
+		// like the server URL override, aren't sent)
 		for k, v := range m.pluginsConfig.GetPluginConfig(pluginID) {
-			mcpConfig.Env[k] = v
+			if !isInternalConfigKey(k) {
+				mcpConfig.Env[k] = v
+			}
 		}
 	}
 
@@ -829,7 +835,7 @@ func (m *MCPManager) StartPlugin(ctx context.Context, pluginID string) error {
 	}
 
 	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] StartPlugin: Plugin config for '%s': Runtime=%s, Config=%v", pluginID, mcpConfig.Runtime, mcpConfig.Config)
+		config.DebugLog.Printf("[MCP] StartPlugin: Plugin config for '%s': Runtime=%s, Config=%v", pluginID, mcpConfig.Runtime, config.RedactMap(mcpConfig.Config))
 	}
 
 	// Start the plugin

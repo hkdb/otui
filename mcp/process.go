@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -523,9 +522,10 @@ func (pm *ProcessManager) createLocalClient(ctx context.Context, config PluginCo
 
 	switch {
 	case globalconfig.DebugLog != nil:
-		globalconfig.DebugLog.Printf("[MCP] StartPlugin: Plugin '%s' - Env vars: %v", config.ID, env)
-		globalconfig.DebugLog.Printf("[MCP] StartPlugin: Plugin '%s' - Runtime='%s', EntryPoint='%s', Args=%v",
-			config.ID, config.Runtime, config.EntryPoint, config.Args)
+		// Names and counts only: values can be API keys
+		globalconfig.DebugLog.Printf("[MCP] StartPlugin: Plugin '%s' - Env vars: %v", config.ID, globalconfig.EnvNames(env))
+		globalconfig.DebugLog.Printf("[MCP] StartPlugin: Plugin '%s' - Runtime='%s', EntryPoint='%s', %d args",
+			config.ID, config.Runtime, config.EntryPoint, len(config.Args))
 		globalconfig.DebugLog.Printf("[MCP] StartPlugin: Plugin '%s' - Creating client with custom command func", config.ID)
 	}
 
@@ -564,16 +564,21 @@ func (pm *ProcessManager) createLocalClient(ctx context.Context, config PluginCo
 }
 
 func configToEnv(envMap, configMap map[string]string) []string {
-	// Start with current process environment to preserve PATH and other system vars
-	env := os.Environ()
+	// Only the basics from OTUI's environment (PATH, HOME, locale...), not
+	// secrets it may hold (see env.go)
+	env := inheritedEnv()
 
 	// Add/override with custom env vars
 	for k, v := range envMap {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Add/override with config values
+	// Add/override with config values (the plugin's own variables, not
+	// OTUI's settings like argument values)
 	for k, v := range configMap {
+		if isInternalConfigKey(k) {
+			continue
+		}
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 

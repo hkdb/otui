@@ -62,6 +62,10 @@
 - Plugin IDs, packages and command paths from the registry are validated (uninstalling a plugin could delete files outside the plugins folder)
 - The plugin install warning and config screen show the command a plugin will install and run, with a warning for risky docker options
 - Imported sessions no longer enable plugins or pre-approve tools unless you choose to keep them
+- Plugins no longer receive OTUI's full environment (only basics like PATH and HOME, plus their own settings)
+- API keys and plugin settings are no longer written to the debug log
+- The SSH key passphrase is no longer visible in the process list while the key is created
+- Remote plugins no longer send OTUI's own settings (e.g. the server URL override) as HTTP headers; credentials over plain http:// are flagged
 
 ---
 

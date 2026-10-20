@@ -1,11 +1,13 @@
 package config
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -223,23 +225,10 @@ func CreateOTUIKey(passphrase string) (string, error) {
 		return "", fmt.Errorf("failed to create .ssh directory: %w", err)
 	}
 
-	// Build ssh-keygen command
-	args := []string{
-		"-t", "ed25519",
-		"-f", keyPath,
-		"-C", "otui-encryption-key",
-		"-N", passphrase, // Empty string for no passphrase
-	}
-
-	cmd := exec.Command("ssh-keygen", args...)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("failed to generate SSH key: %w\nOutput: %s", err, output)
-	}
-
-	// Set proper permissions on the private key
-	if err := os.Chmod(keyPath, 0600); err != nil {
-		return "", fmt.Errorf("failed to set key permissions: %w", err)
+	// Generate the key in-process (not with ssh-keygen: its -N argument
+	// would show the passphrase in the process list)
+	if err := writeED25519Key(keyPath, passphrase, "otui-encryption-key"); err != nil {
+		return "", err
 	}
 
 	if DebugLog != nil {
@@ -247,6 +236,53 @@ func CreateOTUIKey(passphrase string) (string, error) {
 	}
 
 	return keyPath, nil
+}
+
+// writeED25519Key generates an ED25519 key pair and writes it in OpenSSH
+// format (same as ssh-keygen -t ed25519): the private key to keyPath (0600,
+// encrypted if passphrase isn't empty) and the public key to keyPath.pub
+func writeED25519Key(keyPath, passphrase, comment string) error {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return fmt.Errorf("failed to generate SSH key: %w", err)
+	}
+
+	var block *pem.Block
+	if passphrase != "" {
+		block, err = ssh.MarshalPrivateKeyWithPassphrase(priv, comment, []byte(passphrase))
+	} else {
+		block, err = ssh.MarshalPrivateKey(priv, comment)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to encode SSH key: %w", err)
+	}
+
+	sshPub, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		return fmt.Errorf("failed to encode SSH public key: %w", err)
+	}
+	pubLine := strings.TrimSuffix(string(ssh.MarshalAuthorizedKey(sshPub)), "\n") + " " + comment + "\n"
+
+	// O_EXCL: never overwrite an existing key
+	f, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to create SSH key file: %w", err)
+	}
+	if err := pem.Encode(f, block); err != nil {
+		f.Close()
+		os.Remove(keyPath)
+		return fmt.Errorf("failed to write SSH key: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(keyPath)
+		return fmt.Errorf("failed to write SSH key: %w", err)
+	}
+
+	if err := os.WriteFile(keyPath+".pub", []byte(pubLine), 0644); err != nil {
+		os.Remove(keyPath)
+		return fmt.Errorf("failed to write SSH public key: %w", err)
+	}
+	return nil
 }
 
 // GetOTUIKeyPath returns the BASE path to the OTUI-specific SSH key.

@@ -1477,7 +1477,9 @@ func renderCommandPreview(plugin *mcp.Plugin, configFields map[string]string, pr
 	if preInstall && install != "" {
 		add("Installs with:", install)
 	}
-	if run != "" {
+	if target, ok := strings.CutPrefix(run, "Connects to: "); ok {
+		add("Connects to:", target)
+	} else if run != "" {
 		add("Will run:", run)
 	}
 	if len(warnings) > 0 {

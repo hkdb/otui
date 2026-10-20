@@ -563,7 +563,7 @@ func (a AppView) handleSettingsNavigationMode(msg tea.KeyMsg) (tea.Model, tea.Cm
 					fields := a.providerSettingsState.currentFieldsMap[providerID]
 					config.DebugLog.Printf("[CacheInit] Provider: %s (%d fields)", providerID, len(fields))
 					for i, f := range fields {
-						config.DebugLog.Printf("[CacheInit]   Field[%d]: %s = '%s'", i, f.Label, f.Value)
+						config.DebugLog.Printf("[CacheInit]   Field[%d]: %s = '%s'", i, f.Label, config.Redact(f.Label, f.Value))
 					}
 				}
 			}
