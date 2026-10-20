@@ -67,6 +67,11 @@
 - The SSH key passphrase is no longer visible in the process list while the key is created
 - Remote plugins no longer send OTUI's own settings (e.g. the server URL override) as HTTP headers; credentials over plain http:// are flagged
 - Implemented checksum during installation
+- Anthropic replies use the model's full output limit
+- Anthropic models are listed from the Models API
+- Updated OpenAI context window defaults
+- Faster global search
+- Added CI checks
 
 ---
 

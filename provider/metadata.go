@@ -39,6 +39,11 @@ var OllamaFallbackMetadata = map[string]ModelMetadata{
 
 // AnthropicFallbackMetadata contains fallback metadata for Anthropic models
 var AnthropicFallbackMetadata = map[string]ModelMetadata{
+	// Claude 5 family (prefix match covers 5.x snapshots): 1M context, 128K output
+	"claude-fable-5":  {ContextWindow: 1000000, MaxOutput: 128000, SupportsTools: true},
+	"claude-opus-5":   {ContextWindow: 1000000, MaxOutput: 128000, SupportsTools: true},
+	"claude-sonnet-5": {ContextWindow: 1000000, MaxOutput: 128000, SupportsTools: true},
+	"claude-haiku-5":  {ContextWindow: 1000000, MaxOutput: 128000, SupportsTools: true},
 	"claude-sonnet-4":              {ContextWindow: 200000, MaxOutput: 8192, SupportsTools: true},
 	"claude-sonnet-4-5":            {ContextWindow: 200000, MaxOutput: 8192, SupportsTools: true},
 	"claude-opus-4":                {ContextWindow: 200000, MaxOutput: 8192, SupportsTools: true},
@@ -52,6 +57,15 @@ var AnthropicFallbackMetadata = map[string]ModelMetadata{
 
 // OpenAIFallbackMetadata contains fallback metadata for OpenAI models
 var OpenAIFallbackMetadata = map[string]ModelMetadata{
+	// OpenAI's API doesn't report context windows: this table is the only
+	// source (prefix match, longest first)
+	"gpt-6":   {ContextWindow: 1050000, MaxOutput: 128000, SupportsTools: true},
+	"gpt-5.5": {ContextWindow: 1050000, MaxOutput: 128000, SupportsTools: true},
+	"gpt-5":   {ContextWindow: 400000, MaxOutput: 128000, SupportsTools: true},
+	"gpt-4.1": {ContextWindow: 1047576, MaxOutput: 32768, SupportsTools: true},
+	"o1":      {ContextWindow: 200000, MaxOutput: 100000, SupportsTools: true},
+	"o3":      {ContextWindow: 200000, MaxOutput: 100000, SupportsTools: true},
+	"o4-mini": {ContextWindow: 200000, MaxOutput: 100000, SupportsTools: true},
 	"gpt-4o":                  {ContextWindow: 128000, MaxOutput: 16384, SupportsTools: true},
 	"gpt-4o-mini":             {ContextWindow: 128000, MaxOutput: 16384, SupportsTools: true},
 	"gpt-4-turbo":             {ContextWindow: 128000, MaxOutput: 4096, SupportsTools: true},
@@ -62,9 +76,16 @@ var OpenAIFallbackMetadata = map[string]ModelMetadata{
 // GetFallbackMetadata returns fallback metadata for a model based on its name
 // This uses pattern matching on the model name to find the best match
 func GetFallbackMetadata(modelName string, fallbackMap map[string]ModelMetadata) ModelMetadata {
+	meta, _ := lookupFallbackMetadata(modelName, fallbackMap)
+	return meta
+}
+
+// lookupFallbackMetadata is GetFallbackMetadata that also reports whether
+// the model was in the table (false: conservative defaults)
+func lookupFallbackMetadata(modelName string, fallbackMap map[string]ModelMetadata) (ModelMetadata, bool) {
 	// Try exact match first
 	if meta, ok := fallbackMap[modelName]; ok {
-		return meta
+		return meta, true
 	}
 
 	// Try prefix matching - sort by length (longest first) to prefer specific matches
@@ -86,7 +107,7 @@ func GetFallbackMetadata(modelName string, fallbackMap map[string]ModelMetadata)
 	// Now try matching with sorted prefixes (longest first)
 	for _, prefix := range prefixes {
 		if len(modelName) >= len(prefix) && modelName[:len(prefix)] == prefix {
-			return fallbackMap[prefix]
+			return fallbackMap[prefix], true
 		}
 	}
 
@@ -95,5 +116,5 @@ func GetFallbackMetadata(modelName string, fallbackMap map[string]ModelMetadata)
 		ContextWindow: 8192,
 		MaxOutput:     2048,
 		SupportsTools: false,
-	}
+	}, false
 }

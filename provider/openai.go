@@ -120,7 +120,7 @@ func (p *OpenAIProvider) ChatWithTools(ctx context.Context, messages []model.Mes
 	if len(tools) > 0 {
 		toolInstruction := model.Message{
 			Role:    "system",
-			Content: buildOpenAIToolInstructions(tools),
+			Content: buildToolInstructions(tools),
 		}
 		messagesWithInstructions = append([]model.Message{toolInstruction}, messages...)
 	}

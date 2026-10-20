@@ -96,6 +96,12 @@ func TestConvertToAnthropicMessages(t *testing.T) {
 func fakeAnthropic(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet { // Models API: not known here (fallback limits)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"type":"error","error":{"type":"not_found_error","message":"model not found"}}`)
+			return
+		}
 		var req struct {
 			Messages []struct {
 				Content []struct {

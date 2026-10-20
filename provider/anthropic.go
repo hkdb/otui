@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"otui/config"
 	"otui/mcp"
 	"otui/model"
 	"otui/ollama"
@@ -82,17 +83,20 @@ func (p *AnthropicProvider) ChatWithTools(ctx context.Context, messages []model.
 	finalSystemPrompt := systemPrompt
 	if len(tools) > 0 {
 		toolInstructionBlock := anthropic.TextBlockParam{
-			Text: buildAnthropicToolInstructions(tools),
+			Text: buildToolInstructions(tools),
 		}
 		// Tool instructions go FIRST (Layer 1), then user prompts (Layer 2)
 		finalSystemPrompt = append([]anthropic.TextBlockParam{toolInstructionBlock}, systemPrompt...)
 	}
 
-	// Build request parameters
+	// Build request parameters. max_tokens is required: the model's own
+	// output limit, so long replies aren't cut off early
+	modelName := p.GetModel()
+	maxTokens := p.maxOutputTokens(ctx, modelName)
 	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(p.GetModel()),
+		Model:     anthropic.Model(modelName),
 		Messages:  anthropicMessages,
-		MaxTokens: 4096, // Required by Anthropic API
+		MaxTokens: int64(maxTokens),
 	}
 
 	// Add system prompt if present
@@ -108,6 +112,7 @@ func (p *AnthropicProvider) ChatWithTools(ctx context.Context, messages []model.
 
 	// Create streaming request
 	stream := p.client.Messages.NewStreaming(ctx, params)
+	defer stream.Close()
 
 	// Accumulate message
 	msg := anthropic.Message{}
@@ -146,6 +151,12 @@ func (p *AnthropicProvider) ChatWithTools(ctx context.Context, messages []model.
 		return fmt.Errorf("Anthropic streaming error: %w", err)
 	}
 
+	// Cut off at the output limit: the text so far is kept by the caller;
+	// tool calls may be incomplete, so they're not run
+	if msg.StopReason == anthropic.StopReasonMaxTokens {
+		return fmt.Errorf("the reply was cut off at the model's output limit (%d tokens)", maxTokens)
+	}
+
 	// After stream completes, check for tool calls in the final message
 	if callback != nil {
 		toolCalls := extractToolCalls(msg.Content)
@@ -170,29 +181,55 @@ func (p *AnthropicProvider) ChatWithTools(ctx context.Context, messages []model.
 	return nil
 }
 
-// ListModels implements Provider.ListModels.
+// anthropicFallbackModels is listed when the Models API can't be reached
+var anthropicFallbackModels = []string{
+	"claude-fable-5-1",
+	"claude-opus-5-5",
+	"claude-sonnet-5-5",
+	"claude-haiku-5-5",
+	"claude-haiku-4-5",
+}
+
+// ListModels implements Provider.ListModels with Anthropic's Models API
+// (falls back to a built-in list if it fails)
 func (p *AnthropicProvider) ListModels(ctx context.Context) ([]ollama.ModelInfo, error) {
-	// Anthropic doesn't have a models list API, so we return a curated list
-	// of known Claude models as of the SDK version we're using
-	models := []anthropic.Model{
-		anthropic.ModelClaudeSonnet4_5_20250929, // Claude 3.5 Sonnet v2 (latest)
-		anthropic.ModelClaude3_5Haiku20241022,   // Claude 3.5 Haiku
-		anthropic.ModelClaude_3_Opus_20240229,   // Claude 3 Opus
-		anthropic.ModelClaude_3_Haiku_20240307,  // Claude 3 Haiku
+	var ids []string
+	pager := p.client.Models.ListAutoPaging(ctx, anthropic.ModelListParams{}, option.WithMaxRetries(0))
+	for pager.Next() {
+		ids = append(ids, pager.Current().ID)
+	}
+	if err := pager.Err(); err != nil || len(ids) == 0 {
+		if config.DebugLog != nil {
+			config.DebugLog.Printf("[Anthropic] Models API unavailable (%v), using built-in model list", err)
+		}
+		ids = anthropicFallbackModels
 	}
 
-	result := make([]ollama.ModelInfo, 0, len(models))
-	for _, m := range models {
-		modelStr := string(m)
+	result := make([]ollama.ModelInfo, 0, len(ids))
+	for _, id := range ids {
 		result = append(result, ollama.ModelInfo{
-			Name:         modelStr,
-			InternalName: modelStr,
+			Name:         id,
+			InternalName: id,
 			Size:         0,           // Anthropic doesn't provide size info
 			Provider:     "anthropic", // CRITICAL: Must match provider ID
 		})
 	}
 
 	return result, nil
+}
+
+// anthropicDefaultMaxOutput is used for models the Models API and the
+// fallback table don't know; every current Claude model accepts it
+const anthropicDefaultMaxOutput = 8192
+
+// maxOutputTokens returns the model's output limit for max_tokens: from the
+// Models API (cached), else the fallback table, else a safe default
+func (p *AnthropicProvider) maxOutputTokens(ctx context.Context, modelName string) int {
+	meta, _ := p.GetModelMetadata(ctx, modelName)
+	if meta.MaxOutput > 0 {
+		return meta.MaxOutput
+	}
+	return anthropicDefaultMaxOutput
 }
 
 // GetModel implements Provider.GetModel.
@@ -249,7 +286,8 @@ func (p *AnthropicProvider) GetModelMetadata(ctx context.Context, modelName stri
 
 	fallback := p.FallbackModelMetadata(modelName)
 
-	info, err := p.client.Models.Get(ctx, modelName, anthropic.ModelGetParams{})
+	// No retries: this is metadata (the fallback works), not worth delaying a request
+	info, err := p.client.Models.Get(ctx, modelName, anthropic.ModelGetParams{}, option.WithMaxRetries(0))
 	if err != nil {
 		return fallback, nil
 	}
@@ -279,7 +317,11 @@ func (p *AnthropicProvider) GetModelMetadata(ctx context.Context, modelName stri
 
 // FallbackModelMetadata returns metadata from the hardcoded table
 func (p *AnthropicProvider) FallbackModelMetadata(modelName string) model.ModelMetadata {
-	return toModelMetadata(GetFallbackMetadata(modelName, AnthropicFallbackMetadata), model.MetadataSourceFallback)
+	meta, ok := lookupFallbackMetadata(modelName, AnthropicFallbackMetadata)
+	if !ok {
+		meta.MaxOutput = anthropicDefaultMaxOutput // The generic default (2048) is too low for Claude
+	}
+	return toModelMetadata(meta, model.MetadataSourceFallback)
 }
 
 // convertToAnthropicMessages converts OTUI messages to Anthropic format.

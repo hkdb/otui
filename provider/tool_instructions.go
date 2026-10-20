@@ -4,14 +4,18 @@ import (
 	"strings"
 
 	mcptypes "github.com/mark3labs/mcp-go/mcp"
+
+	"otui/mcp"
 )
 
-// buildOpenRouterToolInstructions creates concise tool instructions for OpenRouter.
-// OpenRouter proxies many models, so instructions must work across diverse capabilities.
-func buildOpenRouterToolInstructions(tools []mcptypes.Tool) string {
+// buildToolInstructions creates the tool instructions sent to OpenAI,
+// OpenAI compatible, OpenRouter and Anthropic models: brief, direct
+// guidance to call tools instead of describing them. Tools are listed by
+// the API-safe names the model sees (plugin__tool).
+func buildToolInstructions(tools []mcptypes.Tool) string {
 	toolNames := []string{}
 	for _, tool := range tools {
-		toolNames = append(toolNames, tool.Name)
+		toolNames = append(toolNames, mcp.EncodeToolName(tool.Name))
 	}
 
 	return strings.Join([]string{

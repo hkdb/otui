@@ -831,16 +831,11 @@ func (a AppView) handleGlobalSearchUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
+	previous := a.globalSearchInput.Value()
 	a.globalSearchInput, cmd = a.globalSearchInput.Update(msg)
-	query := a.globalSearchInput.Value()
-	if query != "" && a.dataModel.SearchIndex != nil {
-		results, err := a.dataModel.SearchIndex.SearchAllSessions(query)
-		if err == nil {
-			a.globalSearchResults = results
-			a.selectedGlobalIdx = 0
-		}
-	} else {
-		a.globalSearchResults = []storage.SessionMessageMatch{}
+	if query := a.globalSearchInput.Value(); query != previous {
+		// Search once typing pauses, in the background
+		return a, tea.Batch(cmd, a.scheduleGlobalSearch(query))
 	}
 	return a, cmd
 }

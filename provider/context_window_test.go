@@ -273,3 +273,28 @@ func TestRawJSONInt(t *testing.T) {
 		}
 	}
 }
+
+func TestFallbackTablesForCurrentModels(t *testing.T) {
+	tests := []struct {
+		table    map[string]ModelMetadata
+		model    string
+		context  int
+		maxOuput int
+	}{
+		{OpenAIFallbackMetadata, "gpt-6-astra", 1050000, 128000},
+		{OpenAIFallbackMetadata, "gpt-5.5-mini", 1050000, 128000},
+		{OpenAIFallbackMetadata, "gpt-5-nano", 400000, 128000},
+		{OpenAIFallbackMetadata, "gpt-4.1-nano", 1047576, 32768},
+		{OpenAIFallbackMetadata, "gpt-4o-mini", 128000, 16384},
+		{OpenAIFallbackMetadata, "o3-pro", 200000, 100000},
+		{AnthropicFallbackMetadata, "claude-opus-5-5", 1000000, 128000},
+		{AnthropicFallbackMetadata, "claude-haiku-5-5", 1000000, 128000},
+		{AnthropicFallbackMetadata, "claude-sonnet-4-5", 200000, 8192},
+	}
+	for _, tt := range tests {
+		got := GetFallbackMetadata(tt.model, tt.table)
+		if got.ContextWindow != tt.context || got.MaxOutput != tt.maxOuput {
+			t.Errorf("%s: %d / %d, want %d / %d", tt.model, got.ContextWindow, got.MaxOutput, tt.context, tt.maxOuput)
+		}
+	}
+}

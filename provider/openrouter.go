@@ -98,7 +98,7 @@ func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model
 	if len(tools) > 0 && !shouldSkipToolInstructions(modelName) {
 		toolInstruction := model.Message{
 			Role:    "system",
-			Content: buildOpenRouterToolInstructions(tools),
+			Content: buildToolInstructions(tools),
 		}
 		messagesWithInstructions = append([]model.Message{toolInstruction}, messages...)
 	}

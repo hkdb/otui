@@ -1011,6 +1011,9 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case flashTickMsg, markdownRenderedMsg, modelsListMsg, sessionsListMsg:
 		return a.handleUIMessage(msg)
 
+	case globalSearchTickMsg, globalSearchResultsMsg:
+		return a.handleGlobalSearchMessage(msg)
+
 	case pluginSystemOperationMsg:
 		// Handle plugin system start/stop completion (from Settings toggle)
 		// IMPORTANT: This must be at top level because Settings modal closes before operation completes

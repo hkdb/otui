@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test (race detector)
+        run: go test -race ./...
+
+      # Only files changed by this push/PR: some existing files aren't gofmt'ed yet
+      - name: gofmt (changed files)
+        run: |
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$base" ] || ! git cat-file -e "$base" 2>/dev/null; then
+            echo "No base commit to compare with, skipping"
+            exit 0
+          fi
+          files=$(git diff --name-only --diff-filter=ACMR "$base" HEAD -- '*.go')
+          [ -z "$files" ] && exit 0
+          unformatted=$(gofmt -l $files)
+          if [ -n "$unformatted" ]; then
+            echo "Not gofmt'ed:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+  test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      # Same targets as the release workflow
+      - name: Build all release targets
+        run: |
+          for os in darwin freebsd linux windows; do
+            for arch in amd64 arm64; do
+              echo "== $os/$arch"
+              GOOS=$os GOARCH=$arch go build -o /dev/null . || exit 1
+            done
+          done
+
+      - name: Vet (Windows)
+        run: GOOS=windows go vet ./...

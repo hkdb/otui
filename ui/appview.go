@@ -184,6 +184,7 @@ type AppView struct {
 	showGlobalSearch      bool
 	globalSearchInput     textinput.Model
 	globalSearchResults   []storage.SessionMessageMatch
+	globalSearchGen       int // Latest query (results of older ones are dropped)
 	selectedGlobalIdx     int
 	globalSearchScrollIdx int
 
