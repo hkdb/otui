@@ -59,7 +59,7 @@ If it's still wrong, set it per model (using the model name shown in the header)
 "qwen3.6-27b" = 131072
 ```
 
-Of the popular open source models, what's relatively modest in size that seems to work best with this TUI is currently `qwen3.5:9b`. It's not only fairly accurate in general but also makes sound decision on when to use tools and when to directly respond based on its own knownledge.
+Of the popular open source models, what's relatively modest in size that seems to work best with this TUI is currently `qwen3.8:27b`. It's not only fairly accurate in general but also makes sound decision on when to use tools and when to directly respond based on its own knownledge.
 
 ## 🖥️ OS Support
 
