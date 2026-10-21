@@ -51,29 +51,19 @@ func (e *EncryptionManager) Initialize() error {
 		return nil
 
 	case EncryptionSSHKey:
-		// Security: Commented out to avoid logging passphrase length
-		// Uncomment for debugging passphrase-related issues
-		// if Debug && DebugLog != nil {
-		// 	DebugLog.Printf("[EncryptionManager] Initialize: Starting (keyPath=%s, passphrase len=%d)", e.sshKeyPath, len(e.passphrase))
-		// }
-
 		// First check if key is encrypted (parse only, no decrypt attempt)
 		encrypted, err := IsSSHKeyEncrypted(e.sshKeyPath)
 		if err != nil {
 			return fmt.Errorf("failed to check SSH key: %w", err)
 		}
 
-		if Debug && DebugLog != nil {
-			DebugLog.Printf("[EncryptionManager] Initialize: Key encrypted=%v", encrypted)
-		}
+		Debugf("[EncryptionManager] Initialize: Key encrypted=%v", encrypted)
 
 		var signer ssh.Signer
 
 		// If encrypted and no passphrase provided, return error immediately
 		if encrypted && e.passphrase == "" {
-			if Debug && DebugLog != nil {
-				DebugLog.Printf("[EncryptionManager] Initialize: ERROR - Key is encrypted but no passphrase provided")
-			}
+			Debugf("[EncryptionManager] Initialize: ERROR - Key is encrypted but no passphrase provided")
 			return fmt.Errorf("SSH key is encrypted - passphrase required")
 		}
 
@@ -86,6 +76,11 @@ func (e *EncryptionManager) Initialize() error {
 
 		if err != nil {
 			return fmt.Errorf("failed to load SSH key: %w", err)
+		}
+
+		// Only key types with deterministic signatures derive a stable key
+		if keyType := signer.PublicKey().Type(); !IsSupportedEncryptionKeyType(keyType) {
+			return fmt.Errorf("%w: %s (use an ed25519 key)", ErrUnsupportedKeyType, keyType)
 		}
 		e.signer = signer
 

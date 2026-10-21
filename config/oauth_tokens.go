@@ -126,7 +126,7 @@ func (s *FileTokenStore) SaveToken(ctx context.Context, token *transport.Token) 
 
 	// Write to file
 	tokenPath := s.getTokenPath()
-	if err := os.WriteFile(tokenPath, data, 0600); err != nil {
+	if err := WriteFileAtomic(tokenPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write token file: %w", err)
 	}
 

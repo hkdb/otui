@@ -43,3 +43,5 @@ Test image on test devices before tagging as latest and push.
 
 
 ### 5. Monitor Github Actions job to make sure all is well.
+
+The release job uploads the binaries, `SHA256SUMS` and a build provenance attestation for each binary. `dist/get.sh` refuses to install without a matching `SHA256SUMS` entry, so check the release has it.

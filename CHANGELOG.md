@@ -1,5 +1,81 @@
 # Changelog
 
+## [v0.09.00] - 2026-10-20
+
+** Features: **
+
+- Added "OpenAI Compatible" provider for llama.cpp, vLLM, LM Studio and any other OpenAI API compatible server (configurable base URL, optional API key) - [#2](https://github.com/hkdb/otui/issues/2)
+- Environment variable configuration now works with any provider: `OTUI_DATA_DIR`, `OTUI_PROVIDER`, `OTUI_MODEL`, `OTUI_BASE_URL`, `OTUI_API_KEY` (see README). `OTUI_OLLAMA_HOST`/`OTUI_OLLAMA_MODEL` still work but are deprecated
+
+** Maintenance & Bug Fixes: **
+
+- Scroll position is kept when a response completes if you scrolled up while it was streaming
+- Locked sessions can now be force opened (D) when the lock was left behind by a crash, including the last session on startup
+- Fixed MCP tool names being rejected by OpenAI, Anthropic and OpenAI compatible APIs (namespaced tool names are now encoded the same way for every provider)
+- Fixed parameterless MCP tools sending an invalid schema to OpenAI compatible APIs
+- Sessions are now locked when restored on startup or newly created
+- Fixed the "Custom Settings" setup wizard saving `require_approval = false` (MCP tools ran without asking), `enable_multi_step = false`, `max_iterations = 0` and zeroed compaction thresholds instead of the defaults. Affected profiles are repaired automatically on the next launch
+- Added "Tool Approval" to the Settings screen to turn tool approval prompts on/off
+- Fixed context window ("max:" in the header) falling back to 8192 for most models: it's now queried from the server (Ollama loaded context / num_ctx / trained length, llama.cpp, vLLM, LM Studio, OpenRouter, Anthropic) instead of guessed from the model name
+- Context window lookups no longer block the UI and use the session's own provider
+- Context usage % now updates when the model or its context window changes
+- Fixed crash on startup after entering the correct passphrase for a passphrase protected SSH key (also when switching to such a data directory in Settings)
+- Fixed the startup passphrase prompt repeating forever without explanation: a wrong passphrase now shows "Incorrect passphrase", and other credential errors (e.g. credentials encrypted with a different SSH key) show an error instead of prompting again
+- Fixed environment variable configuration being ignored: the setup wizard ran anyway and the variables had no effect once a config existed (broken since v0.02.00). The variables now take precedence over the saved configuration and are never written to disk; `OTUI_API_KEY` is not stored in credentials
+- Only ed25519 (and existing RSA) SSH keys are used for encryption; ECDSA/DSA broke saved credentials
+- Fixed saving settings and API keys with a passphrase protected SSH key
+- Fixed another running instance deleting the external editor draft
+- Fixed handling of multiple tool calls at once
+- Fixed tool calls being missed with some OpenAI compatible servers and OpenRouter models
+- Fixed Anthropic requests failing after a tool call
+- Tool calls and results are sent to models in their native format
+- Fixed a crash when saving an API key or plugin setting while `credentials.toml` was empty
+- Sessions, credentials, OAuth tokens and config files are now written atomically, so a crash or power loss while saving can no longer leave them truncated (which could make a session disappear). Saving also restores `0600` permissions on these files and keeps symlinked config files (e.g. from a dotfiles manager) as symlinks
+- Fixed hand edits to the generated `config.toml` being ignored: `require_approval`, `max_iterations`, `default_system_prompt`, `plugins_enabled`, `enable_multi_step`, `notify_on_complete` and `allowed_tools` were written under `[ollama]`. New files put them at the top level, and existing files with the old layout are read correctly without being rewritten
+- Container entrypoint passes the OTUI_* variables without exposing the API key in the process list
+- Fixed crashes when the terminal is small or resized very small (model selector, session manager, settings, code blocks, chat view); below 40×12 a "Terminal too small" message is shown instead
+- Model and session lists adapt to narrow terminals (names keep at least 10 columns, less important columns are dropped instead of wrapping)
+- Fixed long names with non-ASCII characters or emoji being cut in the middle of a character
+- Fixed a crash when compacting a session after cancelling a response with Esc
+- Fixed compaction hiding the wrong messages in sessions with tool calls (system messages were counted as conversation messages)
+- Compaction no longer re-summarizes already compacted history; a failed summary keeps the previous one instead of replacing it with a generic note
+- Fixed auto-compaction removing the wrong message (e.g. a pending tool permission prompt) when it finished
+- The compaction notice now shows more accurate context usage
+- Fixed remote SSE plugins disconnecting after being enabled
+- Fixed plugins freezing when logging heavily
+- Fixed plugin processes (and their child processes) left running after a failed start or disable
+- Fixed plugins installed with Go failing to start
+- Fixed plugin argument templates (labels with spaces, defaults, empty values)
+- Custom manual plugins now receive their arguments
+- Editing a custom plugin no longer removes its arguments or turns settings into environment variables
+- Automating docker plugins more - WIP
+- Esc now cancels the request, including pending tool calls
+- Fixed a cancelled response appearing under the next question
+- Esc denies a tool permission request
+- Block session switch during response until multi-session is implemented
+- Fixed a possible crash when model lists were refreshed at the same time
+- Fixed data races between background tasks and the UI
+- Responses now stream as they're generated, shown with an even typewriter effect
+- Removed the 120 second response limit; first token and idle timeouts are configurable in Settings
+- Partial responses are kept when a response fails
+- Fixed terminal escape codes in model output, tool arguments, session files or plugin data reaching the terminal (could spoof the tool permission prompt or write the clipboard)
+- Plugin IDs, packages and command paths from the registry are validated (uninstalling a plugin could delete files outside the plugins folder)
+- The plugin install warning and config screen show the command a plugin will install and run, with a warning for risky docker options
+- Imported sessions no longer enable plugins or pre-approve tools unless you choose to keep them
+- Plugins no longer receive OTUI's full environment (only basics like PATH and HOME, plus their own settings)
+- API keys and plugin settings are no longer written to the debug log
+- The SSH key passphrase is no longer visible in the process list while the key is created
+- Remote plugins no longer send OTUI's own settings (e.g. the server URL override) as HTTP headers; credentials over plain http:// are flagged
+- Implemented checksum during installation
+- Anthropic replies use the model's full output limit
+- Anthropic models are listed from the Models API
+- Updated OpenAI context window defaults
+- Faster global search
+- Added CI checks
+- Code cleanup
+
+---
+
 ## [v0.08.02] - 2026-04-13
 
 ** Feature: **

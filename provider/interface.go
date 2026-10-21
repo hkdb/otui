@@ -53,6 +53,9 @@ const (
 	ProviderTypeOpenRouter ProviderType = "openrouter"
 	ProviderTypeOpenAI     ProviderType = "openai"
 	ProviderTypeAnthropic  ProviderType = "anthropic"
+
+	// ProviderTypeOpenAICompatible is any server implementing the OpenAI API
+	ProviderTypeOpenAICompatible ProviderType = "openai-compatible"
 )
 
 // Config holds provider-specific configuration.

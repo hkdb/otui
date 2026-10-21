@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -95,25 +96,19 @@ func (a AppView) handleProviderSettingsInput(msg tea.KeyMsg) (tea.Model, tea.Cmd
 
 	case "enter", " ":
 		// Enter edit mode (or toggle for boolean fields)
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[ProviderSettings] Enter pressed, selectedIdx=%d", a.providerSettingsState.selectedFieldIdx)
-		}
+		config.Debugf("[ProviderSettings] Enter pressed, selectedIdx=%d", a.providerSettingsState.selectedFieldIdx)
 
 		providerID := a.providerSettingsState.selectedProviderID
 		currentFields := a.providerSettingsState.currentFieldsMap[providerID]
 		if a.providerSettingsState.selectedFieldIdx < len(currentFields) {
 			field := currentFields[a.providerSettingsState.selectedFieldIdx]
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[ProviderSettings] Field: label=%s, type=%d, value=%s", field.Label, field.Type, field.Value)
-				config.DebugLog.Printf("[ProviderSettings] ProviderFieldTypeEnabled=%d, match=%v", ProviderFieldTypeEnabled, field.Type == ProviderFieldTypeEnabled)
-			}
+			config.Debugf("[ProviderSettings] Field: label=%s, type=%d, value=%s", field.Label, field.Type, config.Redact(field.Label, field.Value))
+			config.Debugf("[ProviderSettings] ProviderFieldTypeEnabled=%d, match=%v", ProviderFieldTypeEnabled, field.Type == ProviderFieldTypeEnabled)
 
 			// Special handling: Toggle Enabled field in cache (don't save yet)
 			if field.Type == ProviderFieldTypeEnabled {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[ProviderSettings] TOGGLE ENABLED FIELD - current=%s", field.Value)
-				}
+				config.Debugf("[ProviderSettings] Toggling enabled field (current=%s)", field.Value)
 
 				// Determine new value
 				var newValue string
@@ -124,27 +119,17 @@ func (a AppView) handleProviderSettingsInput(msg tea.KeyMsg) (tea.Model, tea.Cmd
 					newValue = "true"
 				}
 
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[ProviderSettings] Toggle: %s -> %s (in cache only, wait for Alt+Enter)", field.Value, newValue)
-				}
+				config.Debugf("[ProviderSettings] Toggle: %s -> %s (in cache only, wait for Alt+Enter)", field.Value, newValue)
 
-				// Modify map directly (not copy!)
+				// Modify the cached field in place
 				a.providerSettingsState.currentFieldsMap[providerID][a.providerSettingsState.selectedFieldIdx].Value = newValue
-
-				// DEBUG: Verify map was actually updated
-				if config.DebugLog != nil {
-					verifyValue := a.providerSettingsState.currentFieldsMap[providerID][a.providerSettingsState.selectedFieldIdx].Value
-					config.DebugLog.Printf("[ProviderSettings] ✅ VERIFY: Map[%s][%d].Value is now: %s", providerID, a.providerSettingsState.selectedFieldIdx, verifyValue)
-				}
 
 				// Mark as changed but don't save yet
 				a.providerSettingsState.hasChanges = true
 				return a, nil
 			}
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[ProviderSettings] NOT enabled field type, entering edit mode")
-			}
+			config.Debugf("[ProviderSettings] NOT enabled field type, entering edit mode")
 
 			// Normal text edit mode for other fields
 			actualValue := a.getProviderFieldActualValue(field)
@@ -161,7 +146,15 @@ func (a AppView) handleProviderSettingsInput(msg tea.KeyMsg) (tea.Model, tea.Cmd
 		a.providerSettingsState.visible = false
 		a.providerSettingsState.hasChanges = false
 
-		// Save all providers' fields synchronously (Settings screen pattern)
+		// API keys go into the live (already unlocked) credential store here,
+		// in Update - a freshly loaded store couldn't decrypt passphrase
+		// protected credentials, and the store is shared with the UI
+		if err := config.SaveProviderAPIKeys(a.dataModel.Config.CredentialStore, a.dataModel.Config.DataDir(), a.editedProviderAPIKeys()); err != nil {
+			a.settingsSaveError = fmt.Sprintf("Failed to save API keys: %v", err)
+			return a, nil
+		}
+
+		// Save the remaining provider fields and reload config in the background
 		return a, a.saveAllProviderFieldsCmd()
 
 	case "esc":
@@ -191,7 +184,7 @@ func (a AppView) saveProviderField() (tea.Model, tea.Cmd) {
 
 	newValue := a.providerSettingsState.editInput.Value()
 
-	// Modify map directly (not copy!)
+	// Modify the cached field in place
 	a.providerSettingsState.currentFieldsMap[providerID][a.providerSettingsState.selectedFieldIdx].Value = newValue
 
 	// Exit edit mode
@@ -208,6 +201,8 @@ func (a AppView) getProviderFieldActualValue(field ProviderField) string {
 	switch field.Type {
 	case ProviderFieldTypeHost:
 		return a.dataModel.Config.OllamaHost
+	case ProviderFieldTypeBaseURL:
+		return field.Value
 	case ProviderFieldTypeAPIKey:
 		if a.dataModel.Config.CredentialStore != nil {
 			key := a.dataModel.Config.CredentialStore.Get(a.providerSettingsState.selectedProviderID)
@@ -227,79 +222,63 @@ type providerFieldSavedMsg struct {
 	cfg     *config.Config
 }
 
-// saveAllProviderFieldsCmd saves all providers' fields from cache (Settings screen pattern)
-func (a AppView) saveAllProviderFieldsCmd() tea.Cmd {
-	return func() tea.Msg {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[SaveCmd] ========== STARTING BATCH SAVE ==========")
-		}
-
-		// Loop through all providers and save their fields
-		for providerID, fields := range a.providerSettingsState.currentFieldsMap {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[SaveCmd] Processing provider: %s (has %d fields)", providerID, len(fields))
+// editedProviderAPIKeys returns the API keys entered in Provider Settings
+// (provider ID -> key). Masked or unset values weren't edited and are skipped.
+func (a AppView) editedProviderAPIKeys() map[string]string {
+	keys := make(map[string]string)
+	for providerID, fields := range a.providerSettingsState.currentFieldsMap {
+		for _, field := range fields {
+			if field.Type != ProviderFieldTypeAPIKey {
+				continue
 			}
+			if field.Value == "(not set)" || strings.Contains(field.Value, "***") {
+				continue
+			}
+			keys[providerID] = field.Value
+		}
+	}
+	return keys
+}
 
-			for i, field := range fields {
+// saveAllProviderFieldsCmd saves the providers' non-credential fields from
+// the cache and reloads config. API keys are saved before this runs (see
+// editedProviderAPIKeys).
+func (a AppView) saveAllProviderFieldsCmd() tea.Cmd {
+	// Captured here (in Update) - the goroutine must not read AppView state
+	dataDir := a.dataModel.Config.DataDir()
+	store := a.dataModel.Config.CredentialStore
+	fieldsMap := make(map[string][]ProviderField, len(a.providerSettingsState.currentFieldsMap))
+	for providerID, fields := range a.providerSettingsState.currentFieldsMap {
+		fieldsMap[providerID] = append([]ProviderField(nil), fields...)
+	}
+
+	return func() tea.Msg {
+		for providerID, fields := range fieldsMap {
+			for _, field := range fields {
 				var fieldName string
 				switch field.Type {
 				case ProviderFieldTypeHost:
 					fieldName = "host"
-				case ProviderFieldTypeAPIKey:
-					fieldName = "apikey"
+				case ProviderFieldTypeBaseURL:
+					fieldName = "base_url"
 				case ProviderFieldTypeEnabled:
 					fieldName = "enabled"
+				default:
+					continue // API keys were saved already
 				}
 
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[SaveCmd]   Field[%d]: %s (%s) = '%s'", i, field.Label, fieldName, field.Value)
-				}
+				config.Debugf("[SaveCmd] %s.%s = %q", providerID, fieldName, field.Value)
 
-				// Get actual value (unmask API keys if not edited)
-				actualValue := field.Value
-				if field.Type == ProviderFieldTypeAPIKey {
-					// If value looks masked, get actual value from config
-					if field.Value == "(not set)" || strings.Contains(field.Value, "***") {
-						if a.dataModel.Config.CredentialStore != nil {
-							actualValue = a.dataModel.Config.CredentialStore.Get(providerID)
-							if config.DebugLog != nil {
-								config.DebugLog.Printf("[SaveCmd]     API Key was masked, using actual value from config")
-							}
-						}
-					}
-					// Otherwise user edited it, use new value
-				}
-
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[SaveCmd]   💾 Calling config.UpdateProviderField(%s, %s, %s)", providerID, fieldName, actualValue)
-				}
-
-				// Save this field
-				err := config.UpdateProviderField(
-					a.dataModel.Config.DataDir(),
-					providerID,
-					fieldName,
-					actualValue,
-				)
-
-				if err != nil {
+				if err := config.UpdateProviderField(dataDir, providerID, fieldName, field.Value); err != nil {
 					return providerFieldsSavedMsg{success: false, err: err}
 				}
 			}
 		}
 
-		// All fields saved successfully - reload config
-		newCfg, err := config.Load()
+		// All fields saved - reload config, keeping the unlocked credential store
+		newCfg, err := config.Reload(store)
 		if err != nil {
 			return providerFieldsSavedMsg{success: false, err: err}
-		}
-
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[SaveCmd] ========== RETURNING providerFieldsSavedMsg ==========")
-			config.DebugLog.Printf("[SaveCmd] Reloaded config has %d providers", len(newCfg.Providers))
-			for _, p := range newCfg.Providers {
-				config.DebugLog.Printf("[SaveCmd]   Provider: %s, Enabled: %v", p.ID, p.Enabled)
-			}
 		}
 
 		return providerFieldsSavedMsg{success: true, cfg: newCfg}

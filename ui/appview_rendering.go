@@ -3,15 +3,19 @@ package ui
 import (
 	"fmt"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	markdown "github.com/MichaelMure/go-term-markdown"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 	gomarkdown "github.com/gomarkdown/markdown"
 	"github.com/gomarkdown/markdown/parser"
 
 	"otui/config"
+	"otui/safetext"
 )
 
 // Pre-compiled regex patterns for better performance
@@ -68,12 +72,12 @@ func (a *AppView) updateViewportContent(gotoBottom bool) {
 			renderedContent = fmt.Sprintf("%s %s", a.loadingSpinner.View(), msg.Content)
 		}
 
-		// Special handling for step message spinner (Phase 2)
+		// Special handling for step message spinner
 		if msg.Role == "system" && strings.HasPrefix(msg.Content, "🔧 ") && strings.HasSuffix(msg.Content, "...") {
 			renderedContent = fmt.Sprintf("%s %s", msg.Content, a.loadingSpinner.View())
 		}
 
-		// Special handling for "Analyzing results..." spinner (Phase 2)
+		// Special handling for "Analyzing results..." spinner
 		if msg.Role == "system" && msg.Content == "Analyzing results..." {
 			renderedContent = fmt.Sprintf("%s %s", a.loadingSpinner.View(), msg.Content)
 		}
@@ -89,62 +93,22 @@ func (a *AppView) updateViewportContent(gotoBottom bool) {
 		content.WriteString(fmt.Sprintf("%s%s %s\n%s\n\n", highlightPrefix, timestamp, role, renderedContent))
 	}
 
+	// Response text streamed so far (it becomes a message when complete)
+	if a.dataModel.Streaming && a.currentResp.Len() > 0 {
+		timestamp := DimStyle.Render(time.Now().Format("[15:04]"))
+		role := AssistantStyle.Render("Assistant")
+		// Wrapped to the viewport (the viewport cuts long lines off)
+		live := ansi.Wrap(a.currentResp.String()+"▋", max(a.viewport.Width-1, 1), "")
+		content.WriteString(fmt.Sprintf("%s %s\n%s\n\n", timestamp, role, live))
+	}
+
 	a.viewport.SetContent(content.String())
 	if gotoBottom {
 		a.viewport.GotoBottom()
-	}
-}
-
-func (a *AppView) updateStreamingMessage() {
-	if len(a.dataModel.Messages) == 0 {
-		return
-	}
-
-	var content strings.Builder
-
-	// Render all previous messages
-	for _, msg := range a.dataModel.Messages {
-		timestamp := DimStyle.Render(msg.Timestamp.Format("[15:04]"))
-
-		var roleStyle = DimStyle
-		var roleName string
-		switch msg.Role {
-		case "user":
-			roleStyle = UserStyle
-			roleName = "You"
-		case "assistant":
-			roleStyle = AssistantStyle
-			roleName = "Assistant"
-		default:
-			roleStyle = DimStyle
-			roleName = "System"
-		}
-
-		role := roleStyle.Render(roleName)
-
-		if msg.Role == "user" {
-			formattedUser := formatUserMessage("", timestamp, role, msg.Rendered)
-			content.WriteString(formattedUser)
-		} else {
-			content.WriteString(fmt.Sprintf("%s %s\n%s\n\n", timestamp, role, msg.Rendered))
-		}
-	}
-
-	// Add streaming message (assistant - flush left)
-	timestamp := DimStyle.Render(time.Now().Format("[15:04]"))
-	role := AssistantStyle.Render("Assistant")
-
-	// Show spinner while waiting for first chunk, then show text with cursor
-	streamContent := a.loadingSpinner.View()
-	if a.currentResp.String() != "" {
-		streamContent = a.currentResp.String() + "▋"
-	}
-
-	content.WriteString(fmt.Sprintf("%s %s\n%s\n\n", timestamp, role, streamContent))
-
-	a.viewport.SetContent(content.String())
-	if !a.userScrolledUp {
-		a.viewport.GotoBottom()
+		a.userScrolledUp = false
+	} else {
+		// Re-clamp the offset in case the content got shorter
+		a.viewport.SetYOffset(a.viewport.YOffset)
 	}
 }
 
@@ -235,7 +199,7 @@ func frameCodeBlocks(s string, width int) string {
 				lineLen := width - 4
 				leftLen := (lineLen - labelLen) / 2
 				rightLen := lineLen - labelLen - leftLen
-				border := darkGray + strings.Repeat("━", leftLen) + reset + label + darkGray + strings.Repeat("━", rightLen) + reset
+				border := darkGray + safeRepeat("━", leftLen) + reset + label + darkGray + safeRepeat("━", rightLen) + reset
 
 				result = append(result, border)
 				result = append(result, "") // Add blank line for top padding (inside border)
@@ -250,7 +214,7 @@ func frameCodeBlocks(s string, width int) string {
 				// End of code block - add padding, bottom border, and margin
 				result = append(result, codeBlockLines...)
 				result = append(result, "") // Add blank line for bottom padding (inside border)
-				border := darkGray + strings.Repeat("━", width-4) + reset
+				border := darkGray + safeRepeat("━", width-4) + reset
 				result = append(result, border)
 				result = append(result, "") // Add blank line for bottom margin (outside border)
 
@@ -265,7 +229,7 @@ func frameCodeBlocks(s string, width int) string {
 	if inCodeBlock && len(codeBlockLines) > 0 {
 		result = append(result, codeBlockLines...)
 		result = append(result, "") // Add blank line for bottom padding (inside border)
-		border := darkGray + strings.Repeat("━", width-4) + reset
+		border := darkGray + safeRepeat("━", width-4) + reset
 		result = append(result, border)
 		result = append(result, "") // Add blank line for bottom margin (outside border)
 	}
@@ -294,9 +258,7 @@ func stripCodeBlockPrefix(line string) string {
 func (a AppView) renderMarkdownAsync(messageIndex int, content string) tea.Cmd {
 	generation := a.sessionGeneration
 	return func() tea.Msg {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Starting async markdown render for message %d - length: %d chars", messageIndex, len(content))
-		}
+		config.Debugf("Starting async markdown render for message %d - length: %d chars", messageIndex, len(content))
 		startTime := time.Now()
 
 		// Preprocess: strip markdown link syntax [text](url) → url
@@ -317,9 +279,7 @@ func (a AppView) renderMarkdownAsync(messageIndex int, content string) tea.Cmd {
 		processed := postProcessMarkdown(string(rendered), a.width)
 
 		elapsed := time.Since(startTime)
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Markdown rendered and post-processed in %v", elapsed)
-		}
+		config.Debugf("Markdown rendered and post-processed in %v", elapsed)
 
 		return markdownRenderedMsg{
 			MessageIndex:      messageIndex,
@@ -346,7 +306,7 @@ func wordWrapWithIndent(text string, prefix string, maxWidth int) string {
 
 	var result strings.Builder
 	var currentLine strings.Builder
-	indent := strings.Repeat(" ", prefixLen)
+	indent := safeRepeat(" ", prefixLen)
 	isFirstLine := true
 
 	for _, word := range words {
@@ -398,6 +358,9 @@ func stripANSI(s string) string {
 }
 
 // buildPermissionContent creates the formatted permission request content
+// maxPurposeWidth limits the model-written purpose in permission prompts
+const maxPurposeWidth = 120
+
 func buildPermissionContent(toolName, purpose string, details map[string]string) string {
 	var content strings.Builder
 	maxWidth := 60 // Conservative width for wrapping
@@ -405,24 +368,31 @@ func buildPermissionContent(toolName, purpose string, details map[string]string)
 	// Title
 	content.WriteString("🔒 Permission Request\n\n")
 
+	// Everything below comes from the model or tool arguments: one line
+	// each, so it can't add lines that look like part of the prompt
+
 	// Tool name
-	toolLine := wordWrapWithIndent(toolName, "╰── Tool: ", maxWidth)
+	toolLine := wordWrapWithIndent(safetext.Line(toolName), "╰── Tool: ", maxWidth)
 	content.WriteString(toolLine)
 
 	// Purpose (with word wrapping)
-	if purpose != "" {
+	if purpose = truncateWidth(safetext.Line(purpose), maxPurposeWidth); purpose != "" {
 		purposeLine := wordWrapWithIndent(purpose, "╰── Purpose: ", maxWidth)
 		content.WriteString(purposeLine)
 	}
 
-	// Details (file paths, commands, etc.)
-	if len(details) > 0 {
-		for key, value := range details {
-			// Capitalize first letter of key
-			displayKey := strings.ToUpper(key[:1]) + key[1:]
-			detailLine := wordWrapWithIndent(value, "╰── "+displayKey+": ", maxWidth)
-			content.WriteString(detailLine)
-		}
+	// Details (file paths, commands, etc.), quoted: newlines show as \n
+	keys := make([]string, 0, len(details))
+	for key := range details {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		// Capitalize first letter of key
+		displayKey := strings.ToUpper(key[:1]) + key[1:]
+		value := strconv.Quote(safetext.Clean(details[key]))
+		detailLine := wordWrapWithIndent(value, "╰── "+displayKey+": ", maxWidth)
+		content.WriteString(detailLine)
 	}
 
 	// Action prompt
@@ -434,7 +404,7 @@ func buildPermissionContent(toolName, purpose string, details map[string]string)
 
 	content.WriteString(greenBold + "[y]" + reset + " Yes    ")
 	content.WriteString(blueBold + "[a]" + reset + " Always    ")
-	content.WriteString(redBold + "[n]" + reset + " No")
+	content.WriteString(redBold + "[n/Esc]" + reset + " No")
 
 	return content.String()
 }
@@ -460,7 +430,7 @@ func formatPermissionMessage(timestamp, content string) string {
 	return result.String()
 }
 
-// buildIterationSummary formats multi-step summary (Phase 2)
+// buildIterationSummary formats multi-step summary
 func buildIterationSummary(summary IterationSummaryMsg) string {
 	var b strings.Builder
 
@@ -479,15 +449,15 @@ func buildIterationSummary(summary IterationSummaryMsg) string {
 		if step.Success {
 			b.WriteString(fmt.Sprintf("╰─ Step %d: %s (%s)\n",
 				step.StepNumber,
-				step.Purpose,
+				safetext.Line(step.Purpose),
 				durationStr,
 			))
 		}
 		if !step.Success {
 			b.WriteString(fmt.Sprintf("╰─ Step %d: %s (failed: %s)\n",
 				step.StepNumber,
-				step.Purpose,
-				step.ErrorMsg,
+				safetext.Line(step.Purpose),
+				safetext.Line(step.ErrorMsg),
 			))
 		}
 	}

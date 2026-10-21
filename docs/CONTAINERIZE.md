@@ -21,6 +21,21 @@ docker run -ti --rm \
 ```
 *Note:* vim is actually neovim in this container.
 
+To skip the setup screens, configure the provider with environment variables (see the Environment Variables section of the `README.md`), e.g. for a llama.cpp server on the host:
+
+```
+docker run -ti --rm \
+                -e OTUI_EDITOR=nvim \
+                -e OTUI_DATA_DIR=/home/otui/.local/share/otui \
+                -e OTUI_PROVIDER=openai-compatible \
+                -e OTUI_BASE_URL=http://host.docker.internal:8080/v1 \
+                -e OTUI_MODEL=Qwen3.6-27B-Q4_K_M \
+                --add-host=host.docker.internal:host-gateway \
+                -v </path/to/profile/dir/on/host>:/home/otui/.local/share/otui \
+                ghcr.io/hkdb/otui:latest
+```
+`--add-host` makes `host.docker.internal` reach the host on Linux (Docker Desktop provides it already). Pass `-e OTUI_API_KEY=...` for cloud providers.
+
 You will notice that there are 3 volumes mounted so that your data persists. Config, Data (Profile), and SSH (to encrypt your API keys at rest). For more information, see the configuration section of the `README.md` at the [Github Repo](https://github.com/hkdb/otui).
 
 This command launches OTUI in a container. Once you quit OTUI, it will stop and remove the container from your system. The only thing left on the host are the volume directories on the host which you can delete if you don't want it on your system anymore or keep it there for the next time the container launch so you can start right where you left off.

@@ -35,9 +35,29 @@ An opinionated, "speed" and "usability" focused agentic TUI with a built-in MCP 
 - [OpenRouter](https://openrouter.com)
 - Anthropic
 - OpenAI
+- OpenAI Compatible (llama.cpp, vLLM, LM Studio, etc.)
 - More coming soon...
 
 Currently, only Ollama and OpenRouter are being tested more extensively.
+
+The `OpenAI Compatible` provider works with any server that implements the OpenAI chat completions API. Set its base URL (ex: `http://localhost:8080/v1` for llama.cpp's `llama-server`) in the welcome wizard or in `Settings` → `Provider Settings`. The API key is optional. For llama.cpp, start `llama-server` with `--jinja` to enable tool calling.
+
+#### 📏 Context Window
+
+The `max:` shown in the header is the context window the server actually runs the model with, which is what compaction is based on:
+
+- Ollama - the context of the loaded model (`/api/ps`), else the Modelfile's `num_ctx`, else the model's trained context length. OTUI doesn't set `num_ctx`, so Ollama uses its own default (`OLLAMA_CONTEXT_LENGTH`, or 4096 / VRAM based depending on version) - raise that on the Ollama side to use more of the model's context. The value updates after the model is loaded by the first response.
+- OpenAI Compatible - llama.cpp (`/props`, `/v1/models`), vLLM (`max_model_len`), LM Studio (loaded context) and Ollama's `/v1` endpoint are detected automatically.
+- OpenRouter - the context length of the default provider for the model.
+- Anthropic - `max_input_tokens` from the Models API.
+- OpenAI - built-in table (the API doesn't report it).
+
+If it's still wrong, set it per model (using the model name shown in the header) in your profile's `config.toml`:
+
+```toml
+[model_context_overrides]
+"qwen3.6-27b" = 131072
+```
 
 Of the popular open source models, what's relatively modest in size that seems to work best with this TUI is currently `qwen3.5:9b`. It's not only fairly accurate in general but also makes sound decision on when to use tools and when to directly respond based on its own knownledge.
 
@@ -76,6 +96,8 @@ otui
 For Windows, download the binary for the latest release:
 - [Windows (x64)](https://github.com/hkdb/otui/releases/latest/download/otui-windows-amd64.exe)
 - [Windows (arm)](https://github.com/hkdb/otui/releases/latest/download/otui-windows-arm64.exe)
+
+The installer checks the download against the release's `SHA256SUMS` before installing. To check a binary you downloaded yourself, compare it with [`SHA256SUMS`](https://github.com/hkdb/otui/releases/latest/download/SHA256SUMS), or verify where it was built with the [GitHub CLI](https://cli.github.com/): `gh attestation verify <file> --repo hkdb/otui`.
 
 ## 🐳 Containerized for Sandboxing or running Multiple Instances on the same host
 
@@ -120,7 +142,7 @@ OTUI was designed to be hopefully intuitive enough to any user that is already f
 
 At any point in time, users can press Alt+H to bring up the `help` screen to see what the keybindings are:
 
-![keybindings](docs/keybindings-v0.07.00.png)
+![keybindings](docs/keybindings-v0.09.00.png)
 
 For those of you who wish to customize your keyboard shortcuts, check out [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md). It's not likely that I will ever implement a UI for customization cause keyboard warriors that want to vear off from the defaults are more than likely well versed in editing text config files.
 
@@ -132,7 +154,7 @@ For those of you who wish to customize your keyboard shortcuts, check out [docs/
 - `Session Manager`  = Where users can manage sessions (Create, Edit, Search, Import, Export)
 - `Model Selector`   = Where users can select the LLM Model to use in the currently loaded session 
 - `Plugin Manager`  = Where users can manage MCP plugins (See the next section)
-- `Settings`         = Where users can set Data Directory, Default Model, Profile Wide System Prompt, Enable/Disable Plugins System and launch `Provider Settings` to configure providers.
+- `Settings`         = Where users can set Data Directory, Default Model, Profile Wide System Prompt, Enable/Disable Plugins System, Enable/Disable Tool Approval (ask before running MCP tools) and launch `Provider Settings` to configure providers.
 - `Help`             = Where users can see a cheat sheet of all the keybindings
 - `About`            = Where users can see information about OTUI and check the release version
 
@@ -167,26 +189,37 @@ To setup a additional new profiles after having setup the first profile already,
 
 A likely future feature is to be able to encrypt session data for better security and privacy which is especially applicable when using major cloud providers to sync.
 
-Last but not least all API keys are stored encrypted at rest with an ssh keypair **if the user chooses to enable it during setup**.
+Last but not least all API keys are stored encrypted at rest with an ssh keypair **if the user chooses to enable it during setup**. This requires an ed25519 key (OTUI can create one for you); RSA keys from existing setups also work, ECDSA/DSA keys are not supported.
 
 **Environment Variables:**
 
-OTUI falls back on environment variables for configuration (Ollama only) so that one can just set env var without using the TUI to setup:
+OTUI can be configured with environment variables instead of the setup screens, which is handy for running it in an OCI container:
+
+| Variable | |
+|---|---|
+| `OTUI_DATA_DIR` | Data directory (profile) - required |
+| `OTUI_PROVIDER` | `ollama`, `openai-compatible`, `openrouter`, `openai` or `anthropic` - required |
+| `OTUI_MODEL` | Default model - required |
+| `OTUI_BASE_URL` | Server URL - required for `ollama` and `openai-compatible` |
+| `OTUI_API_KEY` | API key - needed for `openrouter`, `openai` and `anthropic` unless already stored in the data directory |
 
 ```bash
-# Set your Ollama server URL (ex: http://localhost:11434)
-export OTUI_OLLAMA_HOST=http://your-ollama-server:11434
+# Ollama
+OTUI_DATA_DIR=~/.local/share/otui OTUI_PROVIDER=ollama \
+  OTUI_BASE_URL=http://localhost:11434 OTUI_MODEL=qwen3.5:9b otui
 
-# Set your preferred model (ex: llama3.2:latest)
-export OTUI_OLLAMA_MODEL=qwen2.5:latest
+# llama.cpp (or any other OpenAI compatible server)
+OTUI_DATA_DIR=~/.local/share/otui OTUI_PROVIDER=openai-compatible \
+  OTUI_BASE_URL=http://localhost:8080/v1 OTUI_MODEL=Qwen3.6-27B-Q4_K_M otui
 
-# Set your preferred data dir location (ex: ~/.local/share/otui)
-export OTUI_DATA_DIR=/path/to/your/data/dir
-
-# Run OTUI
-./otui
+# OpenRouter
+OTUI_DATA_DIR=~/.local/share/otui OTUI_PROVIDER=openrouter \
+  OTUI_MODEL=qwen/qwen3.8-27b OTUI_API_KEY=sk-or-... otui
 ```
-This can be useful if you wanted to run OTUI in an OCI container by just setting the environment variables on launch.
+
+When set, they take precedence over the saved configuration: the setup wizard is skipped, the data directory comes from `OTUI_DATA_DIR`, and the provider, model and endpoint become the defaults. Other settings in that data directory's `config.toml` (system prompt, plugins, other providers, etc.) still apply. Nothing from the environment is saved to disk (including `OTUI_API_KEY`), and the data directory can't be switched from Settings while `OTUI_DATA_DIR` is set.
+
+`OTUI_OLLAMA_HOST` and `OTUI_OLLAMA_MODEL` from earlier versions still work (as `OTUI_PROVIDER=ollama`) but are deprecated.
 
 #### 🤖 MCP Plugins Registry and Plugins System
 
@@ -269,7 +302,7 @@ rm -rf ~/.local/share/otui # or whatever data dir the user specified. This also 
 - A lot of OTUI was made possible with: [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 - Some of OTUI was originally inspired by: [LIT TUI](https://github.com/Positronic-AI/lit-tui)
 - Most of the project was vibe coded with [OpenCode](https://opencode.ai) + [Claude Sonnet 4.5](https://www.anthropic.com/claude/sonnet)
-- The project is currently switched to using Claud Code instead of OpenCode due to recent changes imposed by Anthropic.
+- The project is currently switched to using Claude Code instead of OpenCode due to recent changes imposed by Anthropic.
 
 ## 🦾 Support this Project
 

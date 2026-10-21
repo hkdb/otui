@@ -31,7 +31,7 @@ func (a *AppView) renderProviderSettings(width, height int) string {
 	// Separator
 	separator := lipgloss.NewStyle().
 		Foreground(dimColor).
-		Render(strings.Repeat("─", modalWidth))
+		Render(safeRepeat("─", modalWidth))
 
 	// Fields for current provider (from cache map)
 	fields := a.providerSettingsState.currentFieldsMap[a.providerSettingsState.selectedProviderID]
@@ -51,9 +51,9 @@ func (a *AppView) renderProviderSettings(width, height int) string {
 	content.WriteString(separator + "\n")
 	content.WriteString(tabBar + "\n")
 	content.WriteString(separator + "\n")
-	content.WriteString(strings.Repeat(" ", modalWidth) + "\n") // Top padding
+	content.WriteString(safeRepeat(" ", modalWidth) + "\n") // Top padding
 	content.WriteString(fieldList + "\n")
-	content.WriteString(strings.Repeat(" ", modalWidth) + "\n") // Bottom padding
+	content.WriteString(safeRepeat(" ", modalWidth) + "\n") // Bottom padding
 	content.WriteString(separator + "\n")
 	content.WriteString(footer)
 
@@ -127,7 +127,7 @@ func (a *AppView) renderProviderField(field ProviderField, selected bool, width 
 		if padding < 0 {
 			padding = 0
 		}
-		labelPadding := strings.Repeat(" ", padding)
+		labelPadding := safeRepeat(" ", padding)
 		inputBox := lipgloss.NewStyle().
 			Foreground(accentColor).
 			Bold(true).
@@ -140,14 +140,12 @@ func (a *AppView) renderProviderField(field ProviderField, selected bool, width 
 	label := fmt.Sprintf("%s%s", indicator, field.Label)
 	// Pad label to standard width for value alignment
 	if len(label) < maxLabelWidth {
-		label = label + strings.Repeat(" ", maxLabelWidth-len(label))
+		label = label + safeRepeat(" ", maxLabelWidth-len(label))
 	}
 
 	value := field.Value
 	maxValueWidth := width - maxLabelWidth - 4
-	if len(value) > maxValueWidth {
-		value = value[:maxValueWidth-3] + "..."
-	}
+	value = truncateWidth(value, maxValueWidth)
 
 	// Build line (label + value, no styling yet)
 	line := label + value

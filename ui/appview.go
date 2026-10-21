@@ -18,6 +18,7 @@ import (
 	appmodel "otui/model"
 	"otui/ollama"
 	"otui/provider"
+	"otui/safetext"
 	"otui/storage"
 )
 
@@ -36,14 +37,20 @@ type AppView struct {
 
 	// Streaming UI state
 	currentResp *strings.Builder // Pointer to avoid copy panic
+
+	// Typewriter (typewriter.go): streamed text not shown yet
+	typeBacklog string
+	typeCarry   float64 // Fraction of a character owed to the next tick
+	typing      bool    // A tick is scheduled
+	typeFinal   tea.Msg // Message ending the response, handled once the text is shown
 	showHelp    bool
 
 	// Typewriter effect fields
-	chunks     []string // Chunks to display with typewriter effect
-	chunkIndex int      // Current chunk being displayed
 
-	// Scroll-during-streaming state
-	userScrolledUp bool // User scrolled up during streaming; suppress auto-scroll
+	// Scroll position state
+	// User scrolled away from the bottom; suppresses auto-scroll until they
+	// return to the bottom or something forces a scroll (send, new session, etc.)
+	userScrolledUp bool
 
 	// Loading spinner (bubbles/spinner)
 	loadingSpinner spinner.Model
@@ -73,14 +80,15 @@ type AppView struct {
 	filteredSessionList  []storage.SessionMetadata
 	sessionExportMode    bool
 	sessionExportInput   textinput.Model
-	sessionExporting     bool
 	sessionExportSuccess string // Contains export path if successful, empty otherwise
 
 	// Import session state
-	sessionImportPicker     FilePickerState
-	sessionImportSuccess    *storage.Session
-	sessionImportCancelCtx  context.Context
-	sessionImportCancelFunc context.CancelFunc
+	sessionImportPicker  FilePickerState
+	sessionImportSuccess *storage.Session
+	// Permissions removed from the imported session (k keeps them)
+	sessionImportPermissions appmodel.ImportedPermissions
+	sessionImportCancelCtx   context.Context
+	sessionImportCancelFunc  context.CancelFunc
 
 	// Export state
 	exportingSession bool
@@ -137,6 +145,14 @@ type AppView struct {
 	acknowledgeModalMsg   string
 	acknowledgeModalType  ModalType
 
+	// Session locked modal (session is locked by another OTUI instance)
+	showSessionLockedModal   bool
+	lockedSessionID          string
+	lockedSessionPID         int
+	lockedSessionName        string
+	startupFallbackSessionID string // New session created on startup because the last session was locked
+	discardSessionOnSwitch   string // Empty session to delete once a force loaded session replaces it
+
 	// SSH passphrase modal for data dir switch (uses shared modal helper)
 	showPassphraseForDataDir bool
 	passphraseForDataDir     textinput.Model
@@ -167,6 +183,7 @@ type AppView struct {
 	showGlobalSearch      bool
 	globalSearchInput     textinput.Model
 	globalSearchResults   []storage.SessionMessageMatch
+	globalSearchGen       int // Latest query (results of older ones are dropped)
 	selectedGlobalIdx     int
 	globalSearchScrollIdx int
 
@@ -188,11 +205,11 @@ type AppView struct {
 	// Used for creating new data directories from Settings
 	RestartAfterQuit bool
 
-	// Tool execution state (Phase 6)
+	// Tool execution state
 	executingTool        string        // Plugin name currently executing (e.g., "mcp-searxng")
 	toolExecutionSpinner spinner.Model // Spinner for tool execution indicator
 
-	// Permission system state (Phase 1: Permission System)
+	// Permission system state
 	waitingForPermission    bool
 	pendingPermission       *appmodel.ToolPermissionRequestMsg
 	waitingForCompaction    bool
@@ -206,13 +223,9 @@ type AppView struct {
 	pluginOperationError     string // Error message if failed
 	pluginOperationSpinner   spinner.Model
 
-	// Multi-step iteration UI state (Phase 2)
-	iterationCount     int  // Current step number
-	maxIterations      int  // Max from config
-	pendingNextStep    bool // Continue after typewriter?
-	pendingToolCalls   []ToolCall
-	pendingToolContext []Message
-	pendingSummary     *IterationSummaryMsg // Summary to add after typewriter completes
+	// Multi-step iteration UI state
+	iterationCount int // Current step number
+	maxIterations  int // Max from config
 
 	// Session generation counter — incremented on session switch to invalidate stale async renders
 	sessionGeneration uint64
@@ -223,14 +236,19 @@ type AppView struct {
 // PluginSystemState is an alias to appmodel.PluginSystemState for backward compatibility
 type PluginSystemState = appmodel.PluginSystemState
 
-func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, lastSession *storage.Session, version, license string) AppView {
-	// Initialize MCP components (allow graceful degradation - Phase 4)
+// If lockedSessionID is set, the last session couldn't be restored because it
+// is locked by another instance, and the session locked modal is shown on start.
+func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, lastSession *storage.Session, lockedSessionID, version, license string) AppView {
+	// Never run without keybindings (the UI dereferences them everywhere)
+	if cfg.Keybindings == nil {
+		cfg.Keybindings = config.DefaultKeybindings()
+	}
+
+	// Initialize MCP components (allow graceful degradation)
 	registry, err := mcp.NewRegistry(cfg.DataDir())
 	if err != nil {
 		// Don't panic - plugins will be disabled
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[AppView] Plugin registry init failed: %v (plugins disabled)", err)
-		}
+		config.Debugf("[AppView] Plugin registry init failed: %v (plugins disabled)", err)
 		registry = nil
 	}
 
@@ -239,9 +257,7 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 		pluginStorage, err = storage.NewPluginStorage(cfg.DataDir())
 		if err != nil {
 			// Don't panic - plugins will be disabled
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[AppView] Plugin storage init failed: %v (plugins disabled)", err)
-			}
+			config.Debugf("[AppView] Plugin storage init failed: %v (plugins disabled)", err)
 			registry = nil
 			pluginStorage = nil
 		}
@@ -252,9 +268,7 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 		pluginsConfig, err = config.LoadPluginsConfig(cfg.DataDir())
 		if err != nil {
 			// Don't panic - plugins will be disabled
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[AppView] Plugins config load failed: %v (plugins disabled)", err)
-			}
+			config.Debugf("[AppView] Plugins config load failed: %v (plugins disabled)", err)
 			registry = nil
 			pluginStorage = nil
 			pluginsConfig = nil
@@ -317,7 +331,7 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 	globalSearchInput.Prompt = "Search all: "
 	globalSearchInput.CharLimit = 100
 
-	// Initialize passphrase input for data dir switch (reuses shared helper)
+	// Initialize passphrase input for data dir switch
 	passphraseForDataDir := NewPassphraseInput("Enter passphrase for SSH key")
 
 	// Create plugin state
@@ -330,8 +344,7 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 	// Create search index
 	searchIndex := storage.NewSearchIndex(sessionStorage)
 
-	// Initialize ALL providers (Ollama + cloud providers) via provider package
-	// Provider package owns provider lifecycle - zero business logic in UI
+	// Initialize all providers (Ollama + cloud providers)
 	allProviders := provider.InitializeProviders(cfg)
 
 	// Determine which provider to use for initialization
@@ -352,8 +365,7 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 		}
 	}
 
-	// Initialize the core data model with correct provider (session's or default)
-	// This fixes bug where non-default provider sessions would use wrong provider on restart
+	// Start with the last session's provider (or the default)
 	dataModel := appmodel.NewModel(cfg, initialProvider, sessionStorage, lastSession, pluginState, mcpManager, searchIndex, version, license)
 
 	// Set ALL providers on the model (multi-provider support)
@@ -363,12 +375,15 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 	if lastSession == nil {
 		newSession, _ := dataModel.CreateAndSaveNewSession("New Session", "", []string{})
 		dataModel.CurrentSession = newSession
+		if newSession != nil && sessionStorage != nil {
+			_ = sessionStorage.LockSession(newSession.ID)
+		}
 		if mcpManager != nil {
 			mcpManager.SetSession(newSession)
 		}
 	}
 
-	return AppView{
+	a := AppView{
 		dataModel:                    dataModel,
 		textarea:                     ta,
 		viewport:                     vp,
@@ -401,6 +416,16 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 			},
 		},
 	}
+
+	// Last session is locked by another instance - offer to force open it
+	if lockedSessionID != "" {
+		a.showSessionLocked(lockedSessionID, sessionStorage.GetSessionLockPID(lockedSessionID))
+		if dataModel.CurrentSession != nil {
+			a.startupFallbackSessionID = dataModel.CurrentSession.ID
+		}
+	}
+
+	return a
 }
 
 func (a AppView) Init() tea.Cmd {
@@ -409,7 +434,8 @@ func (a AppView) Init() tea.Cmd {
 
 	cmds := []tea.Cmd{
 		textarea.Blink,
-		a.dataModel.FetchAllModels(false), // Background fetch on startup, don't show selector
+		a.dataModel.FetchAllModels(false),     // Background fetch on startup, don't show selector
+		a.dataModel.RefreshModelMetadataCmd(), // Real context window of the session's model
 	}
 
 	// Start all enabled plugins asynchronously
@@ -420,9 +446,20 @@ func (a AppView) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// View renders the screen. Only color sequences reach the terminal: any
+// other control sequence in displayed text (model output, session files,
+// server errors) is removed.
 func (a AppView) View() string {
+	return safetext.SGROnly(a.view())
+}
+
+func (a AppView) view() string {
 	if !a.ready {
 		return "Loading OTUI..."
+	}
+
+	if terminalTooSmall(a.width, a.height) {
+		return renderTerminalTooSmall(a.width, a.height)
 	}
 
 	// Modal rendering order (top to bottom layers):
@@ -467,6 +504,11 @@ func (a AppView) View() string {
 			Title:   a.infoModalTitle,
 			Message: a.infoModalMsg,
 		}, a.width, a.height)
+	}
+
+	// Show session locked modal if active
+	if a.showSessionLockedModal {
+		return a.renderSessionLockedModal()
 	}
 
 	// Show acknowledge modal if active (warnings/errors requiring only acknowledgement)
@@ -672,7 +714,7 @@ func (a AppView) View() string {
 
 	title := otuiText + modelText + sessionText + pluginText
 
-	// Add tool execution indicator (Phase 6)
+	// Add tool execution indicator
 	if a.executingTool != "" {
 		toolIndicator := fmt.Sprintf(" | 🔧: %s %s", a.executingTool, a.toolExecutionSpinner.View())
 		title += TitleStyle.Render(toolIndicator)
@@ -710,7 +752,7 @@ func (a AppView) View() string {
 	if spacing < 1 {
 		spacing = 1
 	}
-	headerLine := title + strings.Repeat(" ", spacing) + contextIndicator
+	headerLine := title + safeRepeat(" ", spacing) + contextIndicator
 	title = headerLine
 
 	// Separator with bottom margin for header (empty line forces spacing)
@@ -781,15 +823,32 @@ func (a AppView) formatKeyDisplay(modifier, key string) string {
 	return mod + "+" + key
 }
 
-// setCurrentSession sets the current session and syncs it with the MCP manager
-// This ensures plugin isolation and prevents security holes from stale session references
+// setCurrentSession sets the current session and scopes the MCP manager to
+// it, so tools are only available for the plugins enabled in that session
 func (a *AppView) setCurrentSession(session *storage.Session) {
+	// Switching is blocked while a response is in progress; if a switch still
+	// happens, the old request must not reach the new session
+	a.cancelRequestOnSwitch()
+
 	a.dataModel.CurrentSession = session
+	// Lock the session so other OTUI instances can't open it at the same time
+	if session != nil && a.dataModel.SessionStorage != nil {
+		_ = a.dataModel.SessionStorage.LockSession(session.ID)
+	}
 	if a.dataModel.MCPManager != nil {
 		a.dataModel.MCPManager.SetSession(session)
 	}
 	// Reset system prompt tool warning flag when switching sessions
 	a.systemPromptToolWarningShown = false
+}
+
+// modalVisible reports whether a modal is drawn over the chat (see View)
+func (a *AppView) modalVisible() bool {
+	return a.pluginSystemState.Active || a.showPluginOperationModal || a.showPassphraseForDataDir ||
+		a.showInfoModal || a.showSessionLockedModal || a.showAcknowledgeModal || a.showHelp ||
+		a.showModelSelector || a.showSettings || a.showNewSessionModal || a.showEditSessionModal ||
+		a.showSessionManager || a.showPluginManager || a.showGlobalSearch || a.showMessageSearch ||
+		a.showAbout || a.showToolWarningModal || a.showSystemPromptToolWarning
 }
 
 func (a *AppView) closeAllModals() {
@@ -803,6 +862,7 @@ func (a *AppView) closeAllModals() {
 	a.showSettings = false
 	a.showAbout = false
 	a.showPluginManager = false
+	a.clearSessionLocked()
 
 	a.sessionRenameMode = false
 	a.sessionExportMode = false

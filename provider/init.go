@@ -38,13 +38,9 @@ func InitializeProviders(cfg *config.Config) map[string]model.Provider {
 	ollamaProvider := initializeOllama(cfg)
 	if ollamaProvider != nil {
 		providers["ollama"] = ollamaProvider
-		if config.Debug {
-			config.DebugLog.Printf("[Provider] Initialized Ollama provider")
-		}
+		config.Debugf("[Provider] Initialized Ollama provider")
 	} else {
-		if config.Debug {
-			config.DebugLog.Printf("[Provider] Ollama provider initialization failed (offline mode)")
-		}
+		config.Debugf("[Provider] Ollama provider initialization failed (offline mode)")
 	}
 
 	// Initialize cloud providers from config
@@ -53,11 +49,8 @@ func InitializeProviders(cfg *config.Config) map[string]model.Provider {
 			continue
 		}
 
-		// Get API key from credential store
-		apiKey := ""
-		if cfg.CredentialStore != nil {
-			apiKey = cfg.CredentialStore.Get(providerCfg.ID)
-		}
+		// Get API key (OTUI_API_KEY for the env provider, else credential store)
+		apiKey := cfg.APIKey(providerCfg.ID)
 
 		// Map provider ID to Type (handles openrouter→openai mapping)
 		providerType := MapProviderIDToType(providerCfg.ID)
@@ -72,16 +65,12 @@ func InitializeProviders(cfg *config.Config) map[string]model.Provider {
 
 		if err != nil {
 			// Log warning but don't fail - allow app to start
-			if config.Debug {
-				config.DebugLog.Printf("[Provider] Warning: failed to initialize provider %s: %v", providerCfg.ID, err)
-			}
+			config.Debugf("[Provider] Warning: failed to initialize provider %s: %v", providerCfg.ID, err)
 			continue
 		}
 
 		providers[providerCfg.ID] = p
-		if config.Debug {
-			config.DebugLog.Printf("[Provider] Initialized provider: %s (type: %s)", providerCfg.ID, providerType)
-		}
+		config.Debugf("[Provider] Initialized provider: %s (type: %s)", providerCfg.ID, providerType)
 	}
 
 	return providers
@@ -90,10 +79,7 @@ func InitializeProviders(cfg *config.Config) map[string]model.Provider {
 // initializeOllama creates the Ollama provider instance.
 // Returns nil if initialization fails (allows offline mode).
 func initializeOllama(cfg *config.Config) model.Provider {
-	apiKey := ""
-	if cfg.CredentialStore != nil {
-		apiKey = cfg.CredentialStore.Get("ollama")
-	}
+	apiKey := cfg.APIKey("ollama")
 
 	providerCfg := Config{
 		Type:    ProviderTypeOllama,
@@ -104,9 +90,7 @@ func initializeOllama(cfg *config.Config) model.Provider {
 
 	p, err := NewProvider(providerCfg)
 	if err != nil {
-		if config.Debug {
-			config.DebugLog.Printf("[Provider] Ollama provider creation failed: %v", err)
-		}
+		config.Debugf("[Provider] Ollama provider creation failed: %v", err)
 		return nil
 	}
 

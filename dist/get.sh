@@ -6,7 +6,7 @@
 
 set -e
 
-VER="v0.08.02"
+VER="v0.09.00"
 CYAN='\033[0;36m'
 GREEN='\033[1;32m'
 NC='\033[0m' 
@@ -60,10 +60,26 @@ else
 fi
 
 echo -e "✅️ Dependencies check...\n"
-CCHECK="$(whereis curl)"
-CL=${#CCHECK}
-if [[ $CL -lt 6 ]]; then
+if ! command -v curl >/dev/null 2>&1; then
   echo -e "\n❌️ curl is not installed on this system. Install it and run the install command again...\n"
+  exit 1
+fi
+
+# SHA-256 of a file (Linux: sha256sum, macOS: shasum, FreeBSD: sha256)
+# (type -P: programs only)
+file_sha256() {
+  if type -P sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif type -P shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif type -P sha256 >/dev/null 2>&1; then
+    sha256 -q "$1"
+  else
+    return 1
+  fi
+}
+if ! file_sha256 /dev/null >/dev/null 2>&1; then
+  echo -e "\n❌️ No SHA-256 tool found (sha256sum, shasum or sha256) to verify the download... Exiting...\n"
   exit 1
 fi
 
@@ -146,14 +162,48 @@ else
 fi
 
 echo -e "⏳️ Downloading otui binary...\n"
-curl -L -o $HOME/.local/bin/otui https://github.com/hkdb/otui/releases/download/$VER/otui-$USEROS-$CPUARCH
-if [[ $? -ne 0 ]] ; then
-    echo -e "\n❌️ Failed to download otui binary... Exiting...\n"
+
+# Release downloads (OTUI_DOWNLOAD_BASE overrides the location for testing)
+BINARY="otui-$USEROS-$CPUARCH"
+BASE="${OTUI_DOWNLOAD_BASE:-https://github.com/hkdb/otui/releases/download}"
+CURL_OPTS=(-fsSL --retry 3)
+if [[ -z "$OTUI_DOWNLOAD_BASE" ]]; then
+  CURL_OPTS+=(--proto '=https' --tlsv1.2)
+fi
+
+# Next to the install location, so the final mv is an atomic rename
+TMPDIR_OTUI="$(mktemp -d "$HOME/.local/bin/.otui-download.XXXXXX")"
+trap 'rm -rf "$TMPDIR_OTUI"' EXIT
+
+# -f: an HTTP error (404, rate limit...) fails instead of saving the error page
+if ! curl "${CURL_OPTS[@]}" -o "$TMPDIR_OTUI/$BINARY" "$BASE/$VER/$BINARY"; then
+    echo -e "\n❌️ Failed to download $BINARY ($VER)... Exiting...\n"
+    exit 1
+fi
+if ! curl "${CURL_OPTS[@]}" -o "$TMPDIR_OTUI/SHA256SUMS" "$BASE/$VER/SHA256SUMS"; then
+    echo -e "\n❌️ Failed to download the checksums (SHA256SUMS) to verify $BINARY... Exiting...\n"
     exit 1
 fi
 
-echo -e " Setting perms for otui binary...\n"
-chmod +x $HOME/.local/bin/otui
+echo -e "🔐️ Verifying checksum...\n"
+EXPECTED="$(awk -v f="$BINARY" '$2 == f || $2 == "*" f {print $1}' "$TMPDIR_OTUI/SHA256SUMS")"
+ACTUAL="$(file_sha256 "$TMPDIR_OTUI/$BINARY")"
+if [[ -z "$EXPECTED" ]]; then
+    echo -e "\n❌️ SHA256SUMS has no checksum for $BINARY... Exiting...\n"
+    exit 1
+fi
+if [[ "$EXPECTED" != "$ACTUAL" ]]; then
+    echo -e "\n❌️ Checksum mismatch for $BINARY: the download is corrupted or was tampered with. Nothing was installed... Exiting...\n"
+    exit 1
+fi
+
+echo -e " Installing otui binary...\n"
+chmod +x "$TMPDIR_OTUI/$BINARY"
+# Replace the binary in one step: an existing install is never left half-written
+if ! mv -f "$TMPDIR_OTUI/$BINARY" "$HOME/.local/bin/otui"; then
+    echo -e "\n❌️ Failed to install otui to $HOME/.local/bin... Exiting...\n"
+    exit 1
+fi
 
 echo -e "\n${GREEN}**************"
 echo -e " 💯️ COMPLETED"

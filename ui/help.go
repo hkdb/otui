@@ -52,6 +52,7 @@ func (a AppView) renderHelpModal(width, height int) string {
 		"• Enter         Send message",
 		fmt.Sprintf("• %-13s Copy last response", kb.DisplayActionKey("yank_last_response")),
 		fmt.Sprintf("• %-13s Copy conversation", kb.DisplayActionKey("yank_conversation")),
+		fmt.Sprintf("• %-13s Compact session", kb.DisplayActionKey("compact_session")),
 	)
 
 	tips := lipgloss.JoinVertical(

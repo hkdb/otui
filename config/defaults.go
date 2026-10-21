@@ -20,12 +20,14 @@ func DefaultUserConfig() *UserConfig {
 			CredentialStorage: string(SecurityPlainText),
 			SSHKeyPath:        "",
 		},
-		Providers:       []ProviderConfig{},
-		AllowedTools:    []string{},
-		RequireApproval: true, // Default to requiring approval for safety
-		MaxIterations:   10,   // Default max iterations per user message
-		EnableMultiStep:  true,  // Default to allowing multi-step execution
-		NotifyOnComplete: false, // No notification by default
+		Providers:         []ProviderConfig{},
+		AllowedTools:      []string{},
+		RequireApproval:   true,  // Default to requiring approval for safety
+		MaxIterations:     10,    // Default max iterations per user message
+		EnableMultiStep:   true,  // Default to allowing multi-step execution
+		NotifyOnComplete:  false, // No notification by default
+		FirstTokenTimeout: DefaultFirstTokenTimeout,
+		StreamIdleTimeout: DefaultStreamIdleTimeout,
 		Compaction: CompactionConfig{
 			AutoCompact:          false, // Manual compaction by default
 			AutoCompactThreshold: 0.75,  // Trigger at 75% context usage
@@ -62,10 +64,6 @@ default_model = "llama3.1:latest"
 # Last used provider (automatically updated when switching models)
 last_used_provider = "ollama"
 
-[ollama]
-# Ollama server URL
-host = "http://localhost:11434"
-
 # Default system prompt for new sessions (optional)
 default_system_prompt = ""
 
@@ -79,7 +77,7 @@ require_approval = true
 # Global whitelist of tools that don't require approval (e.g., ["filesystem.read_file"])
 # allowed_tools = []
 
-# Multi-step execution (Phase 2)
+# Multi-step execution
 enable_multi_step = true  # Allow LLM to execute multiple steps in sequence
 max_iterations = 10       # Maximum steps per user message
 
@@ -88,6 +86,20 @@ max_iterations = 10       # Maximum steps per user message
 # Works in native, Flatpak, and Docker containers
 # Configure your terminal emulator to show visual notifications on bell
 notify_on_complete = false
+
+# Response timeouts (seconds)
+# How long to wait for the first part of a response (the server may be
+# loading the model or processing a long prompt), and how long a response
+# may go silent before giving up. Esc cancels a response at any time.
+first_token_timeout = 600
+stream_idle_timeout = 180
+
+# Settings above this line must stay before the first [table] header,
+# otherwise TOML puts them in that table and they're ignored
+
+[ollama]
+# Ollama server URL
+host = "http://localhost:11434"
 
 # Context Window Management
 [compaction]
@@ -112,5 +124,13 @@ credential_storage = "plaintext"
 # name = "OpenRouter"
 # enabled = true
 # base_url = "https://openrouter.ai/api/v1"
+
+# Any OpenAI API compatible server (llama.cpp, vLLM, LM Studio, etc.)
+# The API key is optional and set in Settings -> Provider Settings
+# [[providers]]
+# id = "openai-compatible"
+# name = "OpenAI Compatible"
+# enabled = true
+# base_url = "http://localhost:8080/v1"
 `
 }

@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
@@ -49,7 +48,7 @@ func RenderPassphraseModal(
 	}
 
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	// Message text
 	msg1 := "The SSH key is encrypted with a passphrase."
@@ -59,11 +58,11 @@ func RenderPassphraseModal(
 	messageLines = append(messageLines, centerTextLine(msg1, modalWidth))
 	messageLines = append(messageLines, centerTextLine(msg2, modalWidth))
 	messageLines = append(messageLines, centerTextLine(msg3, modalWidth))
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	// Input field
 	messageLines = append(messageLines, centerTextLine(passphraseInput.View(), modalWidth))
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	// Error message if present
 	if errorMsg != "" {
@@ -73,7 +72,7 @@ func RenderPassphraseModal(
 			Bold(true).
 			Render(errLine)
 		messageLines = append(messageLines, centerTextLine(styledErr, modalWidth))
-		messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+		messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 	}
 
 	footer := "Enter Continue  |  Esc Cancel"
@@ -99,7 +98,7 @@ func centerTextLine(text string, width int) string {
 
 	leftPad := (width - textWidth) / 2
 	rightPad := width - textWidth - leftPad
-	return strings.Repeat(" ", leftPad) + text + strings.Repeat(" ", rightPad)
+	return safeRepeat(" ", leftPad) + text + safeRepeat(" ", rightPad)
 }
 
 // ===== VALIDATION =====
@@ -144,20 +143,14 @@ func LoadCredentialsWithPassphrase(cfg *config.Config, passphrase string) error 
 
 	// Try to load credentials (will fail if passphrase is wrong)
 	dataDir := cfg.DataDir()
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[modal_passphrase_helpers] LoadCredentialsWithPassphrase: Attempting to load credentials")
-	}
+	config.Debugf("[modal_passphrase_helpers] LoadCredentialsWithPassphrase: Attempting to load credentials")
 
 	if err := cfg.CredentialStore.Load(dataDir); err != nil {
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[modal_passphrase_helpers] LoadCredentialsWithPassphrase: Failed to load credentials: %v", err)
-		}
+		config.Debugf("[modal_passphrase_helpers] LoadCredentialsWithPassphrase: Failed to load credentials: %v", err)
 		return err
 	}
 
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[modal_passphrase_helpers] LoadCredentialsWithPassphrase: Successfully loaded credentials")
-	}
+	config.Debugf("[modal_passphrase_helpers] LoadCredentialsWithPassphrase: Successfully loaded credentials")
 
 	return nil
 }

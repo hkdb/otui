@@ -1,6 +1,8 @@
 package model
 
 import (
+	"context"
+	"sync"
 	"time"
 
 	"otui/config"
@@ -34,17 +36,30 @@ type Model struct {
 	NeedsInitialRender bool
 	Quitting           bool
 
-	// Multi-step iteration state (Phase 2)
+	// Multi-step iteration state
 	CurrentIteration int             // Current step number (0 = no iteration)
 	MaxIterations    int             // Max steps from config
 	IterationHistory []IterationStep // ALL steps (including non-tool steps)
 
+	// Current request (see request.go)
+	requestID     uint64
+	requestCtx    context.Context
+	requestCancel context.CancelFunc
+
 	// Context window tracking cache (to avoid recalculating every render frame)
+	// Guarded by usageMu since compaction Cmds read it off the Update loop
+	usageMu                sync.Mutex
+	usageCacheValid        bool
 	cachedUsagePercentage  float64
 	cachedMessageCount     int
 	cachedCompactionMarker int
-	cachedModelName        string
-	cachedModelMetadata    ModelMetadata
+	cachedContextWindow    int
+
+	// Model metadata (context window) fetched from providers, keyed by
+	// provider ID + model name. Written only from Update via
+	// SetModelMetadata; read from View and compaction Cmds.
+	metadataMu    sync.RWMutex
+	metadataCache map[string]ModelMetadata
 
 	// Application metadata
 	Version string
@@ -73,7 +88,7 @@ func NewModel(cfg *config.Config, providerClient Provider, sessionStorage *stora
 		needsRender = len(messages) > 0
 	}
 
-	// Initialize multi-step config (Phase 2)
+	// Initialize multi-step config
 	maxIter := cfg.MaxIterations
 	if maxIter == 0 {
 		maxIter = 10 // Default
@@ -107,10 +122,8 @@ func NewModel(cfg *config.Config, providerClient Provider, sessionStorage *stora
 	// Safe to call even if plugins disabled - GetTools() has guards
 	if mcpManager != nil && lastSession != nil {
 		_ = mcpManager.SetSession(lastSession)
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[Model] NewModel: Synced session '%s' with MCP Manager (EnabledPlugins: %v)",
-				lastSession.Name, lastSession.EnabledPlugins)
-		}
+		config.Debugf("[Model] NewModel: Synced session '%s' with MCP Manager (EnabledPlugins: %v)",
+			lastSession.Name, lastSession.EnabledPlugins)
 	}
 
 	return m

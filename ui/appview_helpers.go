@@ -15,6 +15,7 @@ import (
 	"otui/mcp"
 	"otui/ollama"
 	"otui/provider"
+	"otui/safetext"
 	"otui/storage"
 )
 
@@ -48,9 +49,7 @@ func (a *AppView) ensureMCPManager() error {
 		return nil
 	}
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[AppView] ensureMCPManager: Manager is nil, attempting to recreate")
-	}
+	config.Debugf("[AppView] ensureMCPManager: Manager is nil, attempting to recreate")
 
 	// Validate prerequisites exist
 	if a.dataModel.Plugins == nil {
@@ -66,9 +65,7 @@ func (a *AppView) ensureMCPManager() error {
 	// Create plugin storage (might have been destroyed with manager)
 	pluginStorage, err := storage.NewPluginStorage(a.dataModel.Config.DataDir())
 	if err != nil {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[AppView] ensureMCPManager: Failed to create plugin storage: %v", err)
-		}
+		config.Debugf("[AppView] ensureMCPManager: Failed to create plugin storage: %v", err)
 		return fmt.Errorf("failed to create plugin storage: %w", err)
 	}
 
@@ -81,9 +78,7 @@ func (a *AppView) ensureMCPManager() error {
 		a.dataModel.Config.DataDir(),
 	)
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[AppView] ensureMCPManager: Manager successfully recreated")
-	}
+	config.Debugf("[AppView] ensureMCPManager: Manager successfully recreated")
 
 	return nil
 }
@@ -97,7 +92,7 @@ func (a *AppView) ensureMCPManager() error {
 //
 // Returns: tea.Cmd to execute shutdown, or nil if no plugins running
 func (a *AppView) shutdownPluginSystemWithModal(callbackType string, callbackData interface{}) tea.Cmd {
-	// Check if any plugins actually running (use existing function)
+	// Check if any plugins are actually running
 	if a.dataModel.MCPManager == nil {
 		return nil
 	}
@@ -106,11 +101,9 @@ func (a *AppView) shutdownPluginSystemWithModal(callbackType string, callbackDat
 		return nil
 	}
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[UI] Initiating plugin shutdown with modal (callback: %s)", callbackType)
-	}
+	config.Debugf("[UI] Initiating plugin shutdown with modal (callback: %s)", callbackType)
 
-	// Show shutdown modal (existing pattern from settings.go:177-185)
+	// Show the shutdown modal
 	a.pluginSystemState = PluginSystemState{
 		Active:    true,
 		Operation: "stopping",
@@ -124,7 +117,7 @@ func (a *AppView) shutdownPluginSystemWithModal(callbackType string, callbackDat
 	a.pendingPluginOperation = callbackType
 	a.pendingPluginOperationData = callbackData
 
-	// Return shutdown command (reuse existing function)
+	// Return shutdown command
 	return tea.Batch(
 		a.pluginSystemState.Spinner.Tick,
 		stopPluginSystemCmd(a.dataModel.MCPManager),
@@ -140,17 +133,13 @@ func (a *AppView) shutdownPluginSystemWithModal(callbackType string, callbackDat
 // Returns: tea.Cmd to execute startup, or nil if manager doesn't exist
 func (a *AppView) startPluginSystemWithModal(session *storage.Session) tea.Cmd {
 	if a.dataModel.MCPManager == nil {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[UI] Cannot start plugins - no MCP manager")
-		}
+		config.Debugf("[UI] Cannot start plugins - no MCP manager")
 		return nil
 	}
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[UI] Starting plugin system with modal")
-	}
+	config.Debugf("[UI] Starting plugin system with modal")
 
-	// Show startup modal (existing pattern from settings.go:256-264)
+	// Show the startup modal
 	a.pluginSystemState = PluginSystemState{
 		Active:    true,
 		Operation: "starting",
@@ -161,50 +150,40 @@ func (a *AppView) startPluginSystemWithModal(session *storage.Session) tea.Cmd {
 	a.pluginSystemState.Spinner.Spinner = spinner.Dot
 	a.pluginSystemState.Spinner.Style = lipgloss.NewStyle().Foreground(successColor)
 
-	// Return startup command (reuse existing function)
+	// Return startup command
 	return tea.Batch(
 		a.pluginSystemState.Spinner.Tick,
 		startPluginSystemCmd(a.dataModel.MCPManager, session),
 	)
 }
 
-// switchDataDirectory orchestrates all 6 steps of data directory switching.
-// CRITICAL: Each step must complete BEFORE the next step (synchronous execution).
-// Rule #11: Follows user's explicit 6-step sequential requirement from day 1.
+// switchDataDirectory switches to another data directory. Running plugins
+// are stopped first, behind the shutdown modal, whose result then calls
+// completeDataDirSwitch. Each step finishes before the next starts.
 func (a *AppView) switchDataDirectory(newDataDir string) tea.Cmd {
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[UI] Starting data directory switch to: %s", newDataDir)
-	}
+	config.Debugf("[UI] Starting data directory switch to: %s", newDataDir)
 
-	// STEP 1: Shutdown plugins if running (async with animated modal)
+	// Stop running plugins first
 	if a.dataModel.MCPManager != nil {
 		activePlugins := a.dataModel.MCPManager.GetActivePluginNames()
 		if len(activePlugins) > 0 {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] STEP 1: Initiating async plugin shutdown with modal")
-			}
-
-			// Use existing async shutdown helper - will callback to complete steps 2-6
+			config.Debugf("[UI] Stopping plugins before the switch")
 			return a.shutdownPluginSystemWithModal("datadir_switch", newDataDir)
 		}
 	}
 
-	// No plugins running - proceed directly to steps 2-6
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[UI] STEP 1: No plugins running - proceeding with switch")
-	}
+	config.Debugf("[UI] No plugins running - switching now")
 	return a.completeDataDirSwitch(newDataDir)
 }
 
-// completeDataDirSwitch executes STEPS 2-6 after plugin shutdown (or immediately if no plugins).
-// Called either by switchDataDirectory() directly, or by pluginSystemOperationMsg handler.
+// completeDataDirSwitch switches the data directory once no plugins are
+// running, then reinitializes providers, the plugin system and UI state.
+// Called by switchDataDirectory or, after plugin shutdown, by the
+// pluginSystemOperationMsg handler.
 func (a *AppView) completeDataDirSwitch(newDataDir string) tea.Cmd {
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[UI] Completing data dir switch: STEPS 2-6")
-	}
+	config.Debugf("[UI] Completing data dir switch")
 
-	// STEP 2-3: Switch data directory (try without passphrase first)
-	// Model will load config from new data dir and may need passphrase
+	// Try without a passphrase first (the new data dir's credentials may need one)
 	if err := a.dataModel.ApplyDataDirSwitch(newDataDir, ""); err != nil {
 		// Check if SSH passphrase is required
 		if strings.Contains(err.Error(), "passphrase required") {
@@ -232,35 +211,22 @@ func (a *AppView) completeDataDirSwitch(newDataDir string) tea.Cmd {
 		return nil
 	}
 
-	// STEP 3c: Re-initialize providers with new config (shared helper)
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[UI] STEP 3c: Re-initializing providers")
-	}
+	// Reinitialize providers with the new config
+	config.Debugf("[UI] Reinitializing providers")
 	providerRefreshCmd := a.refreshProvidersAndModels()
 
-	// STEP 4: Re-create MCP manager if plugins enabled (use existing function)
 	if a.dataModel.Config.PluginsEnabled {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[UI] STEP 4: Recreating MCP manager")
-		}
+		config.Debugf("[UI] Recreating MCP manager")
 		if err := a.ensureMCPManager(); err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] STEP 4 failed: %v - continuing without plugins", err)
-			}
+			config.Debugf("[UI] Recreating MCP manager failed: %v - continuing without plugins", err)
 		}
 	}
 
-	// STEP 6: Refresh all UI components (use existing function)
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[UI] STEP 6: Refreshing UI components")
-	}
+	config.Debugf("[UI] Resetting UI state")
 	a.resetUIStateForDataDirSwitch()
 
-	// STEP 5: Start plugins if any enabled (use new helper)
 	if a.dataModel.Config.PluginsEnabled && a.dataModel.MCPManager != nil {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[UI] STEP 5: Starting enabled plugins")
-		}
+		config.Debugf("[UI] Starting enabled plugins")
 		return tea.Batch(
 			a.startPluginSystemWithModal(nil),
 			a.dataModel.FetchSessionList(),
@@ -268,9 +234,7 @@ func (a *AppView) completeDataDirSwitch(newDataDir string) tea.Cmd {
 		)
 	}
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[UI] STEP 5: No plugins to start")
-	}
+	config.Debugf("[UI] No plugins to start")
 	return tea.Batch(
 		a.dataModel.FetchSessionList(),
 		providerRefreshCmd,
@@ -280,8 +244,6 @@ func (a *AppView) completeDataDirSwitch(newDataDir string) tea.Cmd {
 // resetUIStateForDataDirSwitch clears all data-directory-dependent UI caches.
 // This ensures UI components fetch fresh data from the new data directory.
 // Does NOT touch model state (model/ owns that).
-//
-// STEP 6: Refresh all different UI components (per user's original requirements)
 func (a *AppView) resetUIStateForDataDirSwitch() {
 	// Close all modals (except plugin system modal if showing progress)
 	if a.pluginSystemState.Operation != "stopping" && a.pluginSystemState.Operation != "starting" {
@@ -336,9 +298,7 @@ func (a *AppView) resetUIStateForDataDirSwitch() {
 	a.updateViewportContent(true)
 	a.viewport.SetYOffset(0)
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[UI] STEP 6 complete: All UI state caches reset")
-	}
+	config.Debugf("[UI] UI state reset for the new data dir")
 }
 
 // removeLastNonPersistentSystemMessage removes the last system message if it's not persistent
@@ -357,8 +317,10 @@ func (a *AppView) removeLastNonPersistentSystemMessage() {
 	a.dataModel.Messages = a.dataModel.Messages[:lastIdx]
 }
 
-// createStepMessage creates a step message with spinner (Phase 2 multi-step)
+// createStepMessage creates a multi-step progress message with a spinner
 func (a *AppView) createStepMessage(purpose string, stepNum int) {
+	// The purpose is model-written: one line, limited length
+	purpose = truncateWidth(safetext.Line(purpose), maxPurposeWidth)
 	systemMsg := fmt.Sprintf("🔧 Step %d: %s...", stepNum, purpose)
 	a.dataModel.Messages = append(a.dataModel.Messages, Message{
 		Role:      "system",
@@ -366,7 +328,7 @@ func (a *AppView) createStepMessage(purpose string, stepNum int) {
 		Rendered:  systemMsg,
 		Timestamp: time.Now(),
 	})
-	a.updateViewportContent(true)
+	a.updateViewportContent(!a.userScrolledUp)
 }
 
 // completeStepMessage adds checkmark to last step message and makes it persistent
@@ -407,17 +369,17 @@ func (a *AppView) showAnalyzingResults() {
 		Rendered:  "Analyzing results...",
 		Timestamp: time.Now(),
 	})
-	a.updateViewportContent(true)
+	a.updateViewportContent(!a.userScrolledUp)
 }
 
-// startTypewriter initializes typewriter state and returns tick command
-func (a *AppView) startTypewriter(chunks []string) tea.Cmd {
-	a.chunks = chunks
-	a.chunkIndex = 0
-	a.currentResp.Reset()
-	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg {
-		return displayChunkTickMsg{}
-	})
+// staleRequest reports whether a message belongs to a request that was
+// cancelled or replaced by a newer one
+func (a *AppView) staleRequest(requestID uint64) bool {
+	if requestID != a.dataModel.RequestID() {
+		config.Debugf("Ignoring message of stale request %d (current %d)", requestID, a.dataModel.RequestID())
+		return true
+	}
+	return false
 }
 
 // getPluginShortName extracts plugin ID from tool name and gets short display name
@@ -449,26 +411,21 @@ func (a *AppView) startToolExecution(toolName string) {
 
 // refreshProvidersAndModels re-initializes all providers and fetches models.
 // Called after config changes (provider settings, data dir switch, etc.)
-// This is the SINGLE place where provider refresh logic lives.
-//
-// Rule #8: Shareable component - reused across settings changes and data dir switch
-// Rule #11: Reuses existing InitializeProviders() pattern from completeDataDirSwitch()
 func (a *AppView) refreshProvidersAndModels() tea.Cmd {
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[UI] ========== refreshProvidersAndModels CALLED ==========")
-		config.DebugLog.Printf("[UI] Config has %d providers:", len(a.dataModel.Config.Providers))
+	if config.DebugEnabled() {
+		config.Debugf("[UI] refreshProvidersAndModels: config has %d providers:", len(a.dataModel.Config.Providers))
 		for _, p := range a.dataModel.Config.Providers {
-			config.DebugLog.Printf("[UI]   Provider: %s, Enabled: %v", p.ID, p.Enabled)
+			config.Debugf("[UI]   Provider: %s, Enabled: %v", p.ID, p.Enabled)
 		}
 	}
 
 	// Re-initialize providers with current config
 	allProviders := provider.InitializeProviders(a.dataModel.Config)
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[UI] Initialized %d providers:", len(allProviders))
+	if config.DebugEnabled() {
+		config.Debugf("[UI] Initialized %d providers:", len(allProviders))
 		for id := range allProviders {
-			config.DebugLog.Printf("[UI]   Provider initialized: %s", id)
+			config.Debugf("[UI]   Provider initialized: %s", id)
 		}
 	}
 
@@ -480,9 +437,58 @@ func (a *AppView) refreshProvidersAndModels() tea.Cmd {
 
 	// Clear cache and fetch models from all enabled providers (background refresh)
 	// This ensures newly enabled providers' models are available when user opens selector
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[UI] Clearing model cache and fetching from all enabled providers")
-	}
+	config.Debugf("[UI] Clearing model cache and fetching from all enabled providers")
 	a.dataModel.ClearModelCache("")
-	return a.dataModel.FetchAllModels(false) // Background refresh, don't show selector
+
+	// Provider settings (e.g. base URL) affect context windows - refetch
+	a.dataModel.ClearModelMetadata()
+
+	return tea.Batch(
+		a.dataModel.FetchAllModels(false), // Background refresh, don't show selector
+		a.dataModel.RefreshModelMetadataCmd(),
+	)
+}
+
+// cancelRequest cancels the in-progress request (Esc): the provider call and
+// any tool calls are stopped, their results will be ignored, and the
+// response and tool step state is reset
+func (a *AppView) cancelRequest() {
+	a.dataModel.CancelRequest()
+	a.flushTypewriter() // Keep everything that arrived
+	a.dataModel.Streaming = false
+	a.userScrolledUp = false
+
+	a.executingTool = ""
+	a.iterationCount = 0
+	a.dataModel.ResetIterations()
+
+	// Tools approved "once" for this request
+	*a = a.cleanupTemporaryTools()
+}
+
+// blockedByActiveResponse shows a warning and returns true if a response is
+// in progress. Used before actions that switch sessions or data directories:
+// the response would otherwise end up in the other session.
+func (a *AppView) blockedByActiveResponse(action string) bool {
+	if !a.dataModel.Streaming {
+		return false
+	}
+	a.showAcknowledgeModal = true
+	a.acknowledgeModalTitle = "Response in Progress"
+	a.acknowledgeModalMsg = fmt.Sprintf("A response is in progress.\nWait for it to finish or cancel it with Esc before %s.", action)
+	a.acknowledgeModalType = ModalTypeWarning
+	return true
+}
+
+// cancelRequestOnSwitch cancels a request still in progress when the current
+// session is replaced, so its results can't end up in the new session
+func (a *AppView) cancelRequestOnSwitch() {
+	if !a.dataModel.Streaming && !a.waitingForPermission {
+		return
+	}
+	config.Debugf("[Session] Switching while a response is in progress - cancelling it")
+	a.cancelRequest()
+	a.currentResp.Reset()
+	a.waitingForPermission = false
+	a.pendingPermission = nil
 }

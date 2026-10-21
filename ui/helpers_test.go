@@ -122,6 +122,11 @@ func TestModelSupportsTools(t *testing.T) {
 			false,
 		},
 		{
+			"openai_compatible",
+			ollama.ModelInfo{Name: "qwen3-8b", Provider: "openai-compatible", InternalName: "qwen3-8b"},
+			true,
+		},
+		{
 			"openrouter_default_true",
 			ollama.ModelInfo{Name: "some-model", Provider: "openrouter", InternalName: "vendor/some-model"},
 			true,

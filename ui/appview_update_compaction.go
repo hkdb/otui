@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -30,14 +31,43 @@ func (a AppView) handleCompactionMessage(msg tea.Msg) (AppView, tea.Cmd) {
 	}
 }
 
+// compactingMessage is shown while a compaction runs
+const compactingMessage = "⏳ Compacting session..."
+
+// removeCompactingMessage removes the "Compacting..." notice, if present.
+// Auto-compaction doesn't show one, so nothing else may be removed here
+// (e.g. an iteration summary or a pending permission prompt).
+func (a AppView) removeCompactingMessage() AppView {
+	for i := len(a.dataModel.Messages) - 1; i >= 0; i-- {
+		msg := a.dataModel.Messages[i]
+		if msg.Role == "system" && !msg.Persistent && msg.Content == compactingMessage {
+			a.dataModel.Messages = append(a.dataModel.Messages[:i], a.dataModel.Messages[i+1:]...)
+			break
+		}
+	}
+	return a
+}
+
 // handleCompactionComplete handles compaction completion
 func (a AppView) handleCompactionComplete(msg appmodel.CompactionCompleteMsg) (AppView, tea.Cmd) {
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[ui] handleCompactionComplete: success=%v", msg.Success)
+	config.Debugf("[ui] handleCompactionComplete: success=%v", msg.Success)
+
+	// Store the result on the session (in Update, not in the Cmd goroutine)
+	err := a.dataModel.ApplyCompaction(msg)
+	if errors.Is(err, appmodel.ErrStaleCompaction) {
+		// Session switched or compacted further while the summary was generated
+		config.Debugf("[ui] Ignoring stale compaction result (session=%s marker=%d)", msg.SessionID, msg.Marker)
+		a = a.removeCompactingMessage()
+		a.updateViewportContent(!a.userScrolledUp)
+		return a, nil
+	}
+	if err != nil {
+		msg.Success = false
+		msg.Err = err
 	}
 
 	// Remove "Compacting..." message
-	a = a.removeLastSystemMessage()
+	a = a.removeCompactingMessage()
 
 	if !msg.Success {
 		// Show error message inline
@@ -47,7 +77,7 @@ func (a AppView) handleCompactionComplete(msg appmodel.CompactionCompleteMsg) (A
 			Rendered:  fmt.Sprintf("❌ Compaction failed: %v", msg.Err),
 			Timestamp: time.Now(),
 		})
-		a.updateViewportContent(true)
+		a.updateViewportContent(!a.userScrolledUp)
 		return a, nil
 	}
 
@@ -58,20 +88,19 @@ func (a AppView) handleCompactionComplete(msg appmodel.CompactionCompleteMsg) (A
 	}
 
 	wrappedSummary := wrapText(msg.Summary, maxWidth)
-	markerMsg := fmt.Sprintf("📦 Earlier Context Compacted\n\n%s\n\nContext reset to 0%%", strings.Join(wrappedSummary, "\n"))
+	markerMsg := fmt.Sprintf("📦 Earlier Context Compacted\n\n%s\n\nContext now at %.0f%%",
+		strings.Join(wrappedSummary, "\n"), a.dataModel.GetContextUsagePercentage()*100)
 
 	// Insert marker message - this stays permanently in history
 	a.dataModel.Messages = append(a.dataModel.Messages, appmodel.Message{
-		Role:      "system",
-		Content:   markerMsg,
-		Rendered:  markerMsg,
-		Timestamp: time.Now(),
+		Role:       "system",
+		Content:    markerMsg,
+		Rendered:   markerMsg,
+		Timestamp:  time.Now(),
 		Persistent: true, // Mark as persistent so it gets saved
 	})
 
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[ui] Session compacted successfully: %s", msg.Summary)
-	}
+	config.Debugf("[ui] Session compacted successfully: %s", msg.Summary)
 
 	// Add LLM summary as persistent system message for display
 	// (Actual LLM context injection happens via system prompt in SendToOllama)
@@ -84,7 +113,7 @@ func (a AppView) handleCompactionComplete(msg appmodel.CompactionCompleteMsg) (A
 			Persistent: true,
 		})
 
-		a.updateViewportContent(true)
+		a.updateViewportContent(!a.userScrolledUp)
 
 		// Trigger async markdown rendering for the summary message and save
 		summaryIdx := len(a.dataModel.Messages) - 1
@@ -94,7 +123,7 @@ func (a AppView) handleCompactionComplete(msg appmodel.CompactionCompleteMsg) (A
 		)
 	}
 
-	a.updateViewportContent(true)
+	a.updateViewportContent(!a.userScrolledUp)
 
 	// Save session after successful compaction
 	return a, a.dataModel.AutoSaveSession()
@@ -102,9 +131,7 @@ func (a AppView) handleCompactionComplete(msg appmodel.CompactionCompleteMsg) (A
 
 // handleCompactionRequest shows inline approval message (like tool permissions)
 func (a AppView) handleCompactionRequest(msg appmodel.CompactionRequestMsg) (AppView, tea.Cmd) {
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[ui] Compaction request: marker=%d, messages=%d", msg.MarkerIndex, msg.MessageCount)
-	}
+	config.Debugf("[ui] Compaction request: marker=%d, messages=%d", msg.MarkerIndex, msg.MessageCount)
 
 	// Build the approval message content
 	percentage := float64(msg.CurrentTokens) / float64(msg.ContextWindow) * 100
@@ -154,9 +181,7 @@ func (a AppView) handleCompactionRequest(msg appmodel.CompactionRequestMsg) (App
 
 // handleCompactionResponse processes user's Y/N response
 func (a AppView) handleCompactionResponse(msg appmodel.CompactionResponseMsg) (AppView, tea.Cmd) {
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[ui] Compaction response: approved=%v", msg.Approved)
-	}
+	config.Debugf("[ui] Compaction response: approved=%v", msg.Approved)
 
 	// Remove approval message from chat
 	a = a.removeLastSystemMessage()
@@ -167,9 +192,7 @@ func (a AppView) handleCompactionResponse(msg appmodel.CompactionResponseMsg) (A
 
 	// If denied, just return
 	if !msg.Approved {
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[ui] Compaction cancelled by user")
-		}
+		config.Debugf("[ui] Compaction cancelled by user")
 		a.updateViewportContent(false)
 		return a, nil
 	}
@@ -177,12 +200,12 @@ func (a AppView) handleCompactionResponse(msg appmodel.CompactionResponseMsg) (A
 	// Approved - show "Compacting..." message
 	a.dataModel.Messages = append(a.dataModel.Messages, appmodel.Message{
 		Role:      "system",
-		Content:   "⏳ Compacting session...",
-		Rendered:  "⏳ Compacting session...",
+		Content:   compactingMessage,
+		Rendered:  compactingMessage,
 		Timestamp: time.Now(),
 	})
 
-	a.updateViewportContent(true)
+	a.updateViewportContent(!a.userScrolledUp)
 
 	// Trigger compaction in background
 	return a, a.dataModel.CompactSessionMarkerCmd(msg.MarkerIndex)
@@ -190,12 +213,9 @@ func (a AppView) handleCompactionResponse(msg appmodel.CompactionResponseMsg) (A
 
 // handleTokenUsageUpdated handles token usage updates
 func (a AppView) handleTokenUsageUpdated(msg appmodel.TokenUsageUpdatedMsg) (AppView, tea.Cmd) {
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[ui] Token usage updated: %d active / %d total tokens",
-			msg.Usage.ActiveTokens, msg.Usage.TotalTokens)
-	}
+	config.Debugf("[ui] Token usage updated: %d active / %d total tokens",
+		msg.Usage.ActiveTokens, msg.Usage.TotalTokens)
 
 	// Token usage is already in session - just trigger a re-render
 	return a, nil
 }
-

@@ -241,98 +241,6 @@ func TestConvertPropertyValue(t *testing.T) {
 	}
 }
 
-func TestConvertOllamaToolCallToMCP(t *testing.T) {
-	tests := []struct {
-		name         string
-		input        api.ToolCall
-		expectedName string
-		expectedArgs map[string]any
-		expectError  bool
-	}{
-		{
-			name: "simple tool call",
-			input: api.ToolCall{
-				Function: api.ToolCallFunction{
-					Name: "get_weather",
-					Arguments: map[string]any{
-						"city": "San Francisco",
-					},
-				},
-			},
-			expectedName: "get_weather",
-			expectedArgs: map[string]any{
-				"city": "San Francisco",
-			},
-			expectError: false,
-		},
-		{
-			name: "tool call with multiple arguments",
-			input: api.ToolCall{
-				Function: api.ToolCallFunction{
-					Name: "calculate",
-					Arguments: map[string]any{
-						"operation": "add",
-						"a":         float64(5),
-						"b":         float64(3),
-					},
-				},
-			},
-			expectedName: "calculate",
-			expectedArgs: map[string]any{
-				"operation": "add",
-				"a":         float64(5),
-				"b":         float64(3),
-			},
-			expectError: false,
-		},
-		{
-			name: "tool call with empty arguments",
-			input: api.ToolCall{
-				Function: api.ToolCallFunction{
-					Name:      "ping",
-					Arguments: map[string]any{},
-				},
-			},
-			expectedName: "ping",
-			expectedArgs: map[string]any{},
-			expectError:  false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			name, args, err := ConvertOllamaToolCallToMCP(tt.input)
-
-			if tt.expectError && err == nil {
-				t.Error("expected error, got nil")
-			}
-			if !tt.expectError && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-
-			if name != tt.expectedName {
-				t.Errorf("expected name %q, got %q", tt.expectedName, name)
-			}
-
-			if len(args) != len(tt.expectedArgs) {
-				t.Errorf("expected %d arguments, got %d", len(tt.expectedArgs), len(args))
-			}
-
-			for key, expectedVal := range tt.expectedArgs {
-				actualVal, ok := args[key]
-				if !ok {
-					t.Errorf("missing argument %q", key)
-					continue
-				}
-				// Simple value comparison (works for strings and numbers)
-				if actualVal != expectedVal {
-					t.Errorf("argument %q: expected %v, got %v", key, expectedVal, actualVal)
-				}
-			}
-		})
-	}
-}
-
 // TestComplexSchemaConversion tests a realistic complex tool schema
 func TestComplexSchemaConversion(t *testing.T) {
 	mcpTool := mcptypes.Tool{
@@ -408,5 +316,61 @@ func TestComplexSchemaConversion(t *testing.T) {
 	}
 	if len(recursiveProp.Type) != 1 || recursiveProp.Type[0] != "boolean" {
 		t.Errorf("recursive type mismatch")
+	}
+}
+
+func TestEncodeDecodeToolName(t *testing.T) {
+	tests := []struct {
+		name    string
+		dotted  string
+		encoded string
+	}{
+		{"simple", "filesystem.read_file", "filesystem__read_file"},
+		{"hyphenated namespace", "server-filesystem.read_file", "server-filesystem__read_file"},
+		{"tool name with double underscore", "github.get__item", "github__get__item"},
+		{"tool name with dot", "web.fetch.url", "web__fetch.url"},
+		{"no namespace", "read_file", "read_file"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := EncodeToolName(tt.dotted); got != tt.encoded {
+				t.Errorf("EncodeToolName(%q) = %q, want %q", tt.dotted, got, tt.encoded)
+			}
+			if got := DecodeToolName(EncodeToolName(tt.dotted)); got != tt.dotted {
+				t.Errorf("DecodeToolName(EncodeToolName(%q)) = %q, want %q", tt.dotted, got, tt.dotted)
+			}
+		})
+	}
+
+	t.Run("decode leaves dotted names unchanged", func(t *testing.T) {
+		for _, name := range []string{"filesystem.read_file", "github.get__item"} {
+			if got := DecodeToolName(name); got != name {
+				t.Errorf("DecodeToolName(%q) = %q, want unchanged", name, got)
+			}
+		}
+	})
+}
+
+func TestConvertMCPToolsToOpenAIFormatNames(t *testing.T) {
+	tools := []mcptypes.Tool{
+		{Name: "filesystem.read_file", Description: "Read a file"},
+	}
+
+	result := ConvertMCPToolsToOpenAIFormat(tools)
+	if len(result) != 1 || result[0].OfFunction == nil {
+		t.Fatalf("expected 1 function tool, got %+v", result)
+	}
+
+	fn := result[0].OfFunction.Function
+	if fn.Name != "filesystem__read_file" {
+		t.Errorf("tool name = %q, want %q", fn.Name, "filesystem__read_file")
+	}
+	// Parameterless tools must still produce a valid object schema
+	if fn.Parameters["type"] != "object" {
+		t.Errorf("parameters type = %v, want %q", fn.Parameters["type"], "object")
+	}
+	if fn.Parameters["properties"] == nil {
+		t.Error("parameters properties should not be nil")
 	}
 }

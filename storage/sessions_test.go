@@ -1,6 +1,9 @@
 package storage
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -166,4 +169,83 @@ func TestSessionPlugins(t *testing.T) {
 			t.Error("expected empty slice")
 		}
 	})
+}
+
+func TestSessionLockPID(t *testing.T) {
+	ss, err := NewSessionStorage(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSessionStorage: %v", err)
+	}
+
+	t.Run("no lock", func(t *testing.T) {
+		if pid := ss.GetSessionLockPID("missing"); pid != 0 {
+			t.Errorf("GetSessionLockPID = %d, want 0", pid)
+		}
+	})
+
+	t.Run("own lock is not reported as locked", func(t *testing.T) {
+		if err := ss.LockSession("mine"); err != nil {
+			t.Fatalf("LockSession: %v", err)
+		}
+		if pid := ss.GetSessionLockPID("mine"); pid != os.Getpid() {
+			t.Errorf("GetSessionLockPID = %d, want %d", pid, os.Getpid())
+		}
+		locked, err := ss.CheckSessionLock("mine")
+		if err != nil || locked {
+			t.Errorf("CheckSessionLock = %v, %v; want false, nil", locked, err)
+		}
+	})
+
+	t.Run("other process lock and force unlock", func(t *testing.T) {
+		lockPath := filepath.Join(ss.sessionsDir, "theirs.lock")
+		if err := os.WriteFile(lockPath, []byte("1"), 0600); err != nil {
+			t.Fatalf("write lock: %v", err)
+		}
+		if pid := ss.GetSessionLockPID("theirs"); pid != 1 {
+			t.Errorf("GetSessionLockPID = %d, want 1", pid)
+		}
+		if runtime.GOOS != "windows" {
+			if locked, _ := ss.CheckSessionLock("theirs"); !locked {
+				t.Error("expected session locked by PID 1")
+			}
+		}
+		if err := ss.UnlockSession("theirs"); err != nil {
+			t.Fatalf("UnlockSession: %v", err)
+		}
+		if locked, _ := ss.CheckSessionLock("theirs"); locked {
+			t.Error("expected session unlocked after force delete")
+		}
+	})
+}
+
+func TestSessionSaveIsAtomic(t *testing.T) {
+	dataDir := t.TempDir()
+	ss, err := NewSessionStorage(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	session := &Session{ID: "s1", Name: "first", Messages: []Message{{Role: "user", Content: "hi"}}}
+	if err := ss.Save(session); err != nil {
+		t.Fatal(err)
+	}
+	session.Name = "renamed"
+	if err := ss.Save(session); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := ss.Load("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Name != "renamed" || len(loaded.Messages) != 1 {
+		t.Errorf("loaded %+v", loaded)
+	}
+
+	entries, _ := os.ReadDir(ss.sessionsDir)
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp-") {
+			t.Errorf("leftover temp file %s", e.Name())
+		}
+	}
 }

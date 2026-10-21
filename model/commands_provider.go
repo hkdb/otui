@@ -9,73 +9,58 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"otui/config"
 	"otui/ollama"
+	"otui/safetext"
 )
 
-// getModelsFromProvider fetches models with caching for cloud providers
-func (m *Model) getModelsFromProvider(providerID string, providerClient Provider) ([]ollama.ModelInfo, error) {
-	ctx := context.Background()
+// modelCacheTTL is how long cloud providers' model lists are cached
+const modelCacheTTL = time.Hour
 
-	// Use switch instead of if/else per Rule 14
-	switch providerID {
-	case "ollama":
-		// Ollama: always fetch fresh (local, fast, free)
-		models, err := providerClient.ListModels(ctx)
-		if err != nil {
-			return nil, err
-		}
+// getModelsFromProvider fetches a provider's models. Ollama models get their
+// provider info filled in. Runs in a Cmd: must not touch the Model.
+func getModelsFromProvider(providerID string, providerClient Provider) ([]ollama.ModelInfo, error) {
+	models, err := providerClient.ListModels(context.Background())
+	if err != nil {
+		return nil, err
+	}
 
-		// Ensure provider info is set (belt and suspenders)
+	if providerID == "ollama" {
+		// Ensure provider info is set
 		for i := range models {
 			models[i].Provider = "ollama"
 			if models[i].InternalName == "" {
 				models[i].InternalName = models[i].Name
 			}
 		}
-
-		return models, nil
-
-	default:
-		// Cloud providers: use cache if valid
-		if cached, ok := m.ModelCache[providerID]; ok {
-			if time.Now().Before(m.CacheExpiry[providerID]) {
-				if config.Debug {
-					config.DebugLog.Printf("[Model] Using cached models for provider %s", providerID)
-				}
-				return cached, nil
-			}
-		}
-
-		// Fetch from provider
-		models, err := providerClient.ListModels(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		// Cache for 1 hour
-		m.ModelCache[providerID] = models
-		m.CacheExpiry[providerID] = time.Now().Add(1 * time.Hour)
-
-		if config.Debug {
-			config.DebugLog.Printf("[Model] Fetched and cached %d models for provider %s", len(models), providerID)
-		}
-
-		return models, nil
 	}
+
+	return models, nil
 }
 
-// AggregateAllModels fetches and aggregates models from all enabled providers
-func (m *Model) AggregateAllModels() ([]ollama.ModelInfo, error) {
+// aggregateModels fetches the models of all providers, using cached lists
+// where given. Returns all models (sorted by name) and the lists that were
+// fetched, for the cache. Runs in a Cmd: must not touch the Model.
+func aggregateModels(providers map[string]Provider, cached map[string][]ollama.ModelInfo) ([]ollama.ModelInfo, map[string][]ollama.ModelInfo) {
 	var allModels []ollama.ModelInfo
+	fetched := make(map[string][]ollama.ModelInfo)
 
 	// Include models from all providers
-	for providerID, providerClient := range m.Providers {
-		models, err := m.getModelsFromProvider(providerID, providerClient)
-		if err != nil {
-			// Log but don't fail - allow showing models from other providers
-			if config.Debug {
-				config.DebugLog.Printf("Warning: failed to fetch models from %s: %v", providerID, err)
+	for providerID, providerClient := range providers {
+		models, ok := cached[providerID]
+		if ok {
+			config.Debugf("[Model] Using cached models for provider %s", providerID)
+		} else {
+			var err error
+			models, err = getModelsFromProvider(providerID, providerClient)
+			if err != nil {
+				// Log but don't fail - allow showing models from other providers
+				config.Debugf("Warning: failed to fetch models from %s: %v", providerID, err)
+				continue
 			}
-			continue
+			fetched[providerID] = models
+		}
+		// Model names come from the server and are shown in the selector
+		for i := range models {
+			models[i].Name = safetext.Line(models[i].Name)
 		}
 		allModels = append(allModels, models...)
 	}
@@ -85,19 +70,55 @@ func (m *Model) AggregateAllModels() ([]ollama.ModelInfo, error) {
 		return allModels[i].Name < allModels[j].Name
 	})
 
-	return allModels, nil
+	return allModels, fetched
 }
 
 // FetchAllModels retrieves models from all enabled providers
 // showSelector: whether to auto-show model selector after fetch (user-initiated vs background)
+//
+// Call from Update: the providers and valid cache entries are snapshotted
+// here; fetched lists come back in ModelsListMsg.Fetched for StoreModelCache.
 func (m *Model) FetchAllModels(showSelector bool) tea.Cmd {
+	providers := make(map[string]Provider, len(m.Providers))
+	cached := make(map[string][]ollama.ModelInfo)
+	now := time.Now()
+	for providerID, client := range m.Providers {
+		providers[providerID] = client
+		// Ollama: always fetch fresh (local, fast, free); cloud providers: use cache if valid
+		if providerID == "ollama" {
+			continue
+		}
+		if models, ok := m.ModelCache[providerID]; ok && now.Before(m.CacheExpiry[providerID]) {
+			cached[providerID] = models
+		}
+	}
+
 	return func() tea.Msg {
-		models, err := m.AggregateAllModels()
+		models, fetched := aggregateModels(providers, cached)
 		return ModelsListMsg{
 			Models:       models,
-			Err:          err,
+			Fetched:      fetched,
 			ShowSelector: showSelector,
 		}
+	}
+}
+
+// StoreModelCache caches model lists fetched by FetchAllModels (cloud
+// providers only - Ollama is always fetched fresh). Call from Update.
+func (m *Model) StoreModelCache(fetched map[string][]ollama.ModelInfo) {
+	if m.ModelCache == nil {
+		m.ModelCache = make(map[string][]ollama.ModelInfo)
+	}
+	if m.CacheExpiry == nil {
+		m.CacheExpiry = make(map[string]time.Time)
+	}
+	for providerID, models := range fetched {
+		if providerID == "ollama" {
+			continue
+		}
+		m.ModelCache[providerID] = models
+		m.CacheExpiry[providerID] = time.Now().Add(modelCacheTTL)
+		config.Debugf("[Model] Cached %d models for provider %s", len(models), providerID)
 	}
 }
 
@@ -107,18 +128,14 @@ func (m *Model) ClearModelCache(providerID string) {
 		// Clear all caches
 		m.ModelCache = make(map[string][]ollama.ModelInfo)
 		m.CacheExpiry = make(map[string]time.Time)
-		if config.Debug {
-			config.DebugLog.Printf("[Model] Cleared all model caches")
-		}
+		config.Debugf("[Model] Cleared all model caches")
 		return
 	}
 
 	// Clear specific provider cache
 	delete(m.ModelCache, providerID)
 	delete(m.CacheExpiry, providerID)
-	if config.Debug {
-		config.DebugLog.Printf("[Model] Cleared model cache for provider %s", providerID)
-	}
+	config.Debugf("[Model] Cleared model cache for provider %s", providerID)
 }
 
 // CanSendMessage checks if the current session's provider is enabled
@@ -145,7 +162,7 @@ func (m *Model) CanSendMessage() (bool, string) {
 }
 
 // SwitchModel switches the current session to use a different model and provider.
-// This is the business logic for model switching - updates session state and active provider.
+// It updates the session and the active provider.
 //
 // The method handles:
 //   - Updating session.Model with InternalName (full API name like "qwen/qwen3-coder:free")
@@ -158,7 +175,7 @@ func (m *Model) CanSendMessage() (bool, string) {
 // This encapsulates all business logic for model switching, ensuring session state
 // stays consistent with the active provider.
 func (m *Model) SwitchModel(modelInfo ollama.ModelInfo) tea.Cmd {
-	// Update session with InternalName and Provider (business logic)
+	// Update session with InternalName and Provider
 	if m.CurrentSession != nil {
 		m.CurrentSession.Model = modelInfo.InternalName
 		m.CurrentSession.Provider = modelInfo.Provider
@@ -169,35 +186,30 @@ func (m *Model) SwitchModel(modelInfo ollama.ModelInfo) tea.Cmd {
 	if m.Config.LastUsedProvider != modelInfo.Provider {
 		m.Config.LastUsedProvider = modelInfo.Provider
 
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[Model] Updated last_used_provider: %s", modelInfo.Provider)
-		}
+		config.Debugf("[Model] Updated last_used_provider: %s", modelInfo.Provider)
 
 		// Note: Config auto-save happens on app exit, no need to save immediately
 		// This prevents blocking the UI on every model switch
 	}
 
-	// Switch to the selected provider (business logic)
+	// Switch to the selected provider
 	provider, ok := m.Providers[modelInfo.Provider]
 	if !ok {
 		// Fallback: use current provider (should not happen in normal operation)
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[Model] WARNING: Provider '%s' not found for model '%s', using fallback",
-				modelInfo.Provider, modelInfo.Name)
-		}
+		config.Debugf("[Model] WARNING: Provider '%s' not found for model '%s', using fallback",
+			modelInfo.Provider, modelInfo.Name)
 		m.Provider.SetModel(modelInfo.InternalName)
-		return nil
+		return m.RefreshModelMetadataCmd()
 	}
 
 	m.Provider = provider
 	provider.SetModel(modelInfo.InternalName)
 
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[Model] Switched to model '%s' (provider: %s, internal: %s)",
-			modelInfo.Name, modelInfo.Provider, modelInfo.InternalName)
-	}
+	config.Debugf("[Model] Switched to model '%s' (provider: %s, internal: %s)",
+		modelInfo.Name, modelInfo.Provider, modelInfo.InternalName)
 
-	return nil
+	// Fetch the new model's real context window in the background
+	return m.RefreshModelMetadataCmd()
 }
 
 // SwitchToDefaultProvider switches the active provider to the configured default.
@@ -216,10 +228,8 @@ func (m *Model) SwitchToDefaultProvider() {
 	provider, ok := m.Providers[m.Config.DefaultProvider]
 	if !ok {
 		// Fallback: use current provider with config model
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[Model] WARNING: Default provider '%s' not found, using fallback",
-				m.Config.DefaultProvider)
-		}
+		config.Debugf("[Model] WARNING: Default provider '%s' not found, using fallback",
+			m.Config.DefaultProvider)
 		m.Provider.SetModel(m.Config.DefaultModel)
 		return
 	}
@@ -227,8 +237,6 @@ func (m *Model) SwitchToDefaultProvider() {
 	m.Provider = provider
 	m.Provider.SetModel(m.Config.DefaultModel)
 
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[Model] Switched to default provider '%s' with model '%s'",
-			m.Config.DefaultProvider, m.Config.DefaultModel)
-	}
+	config.Debugf("[Model] Switched to default provider '%s' with model '%s'",
+		m.Config.DefaultProvider, m.Config.DefaultModel)
 }

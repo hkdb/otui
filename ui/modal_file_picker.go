@@ -34,12 +34,14 @@ type FilePickerState struct {
 	CleaningUp bool
 	Spinner    spinner.Model
 	Success    *string
+	// Footer of the success screen ("" = "Press Enter to acknowledge")
+	SuccessFooter string
 }
 
 func NewFilePickerState(config FilePickerConfig) FilePickerState {
 	fp := filepicker.New()
 	fp.AllowedTypes = config.AllowedTypes
-	fp.Height = 10
+	fp.SetHeight(10)
 	fp.DirAllowed = true
 	fp.FileAllowed = true
 	fp.ShowPermissions = false
@@ -86,16 +88,12 @@ func (fps *FilePickerState) Reset() {
 	fps.Processing = false
 	fps.CleaningUp = false
 	fps.Success = nil
+	fps.SuccessFooter = ""
 }
 
 func RenderFilePickerModal(state FilePickerState, width, height int) string {
-	if otuiconfig.DebugLog != nil {
-		otuiconfig.DebugLog.Printf("RENDER: Success=%v, CleaningUp=%v, Processing=%v, Active=%v",
-			state.Success != nil, state.CleaningUp, state.Processing, state.Active)
-	}
-
 	if state.Success != nil {
-		return renderFilePickerSuccess(*state.Success, state.Config.Title, width, height)
+		return renderFilePickerSuccess(*state.Success, state.Config.Title, state.SuccessFooter, width, height)
 	}
 
 	if state.CleaningUp {
@@ -125,7 +123,7 @@ func renderFilePickerInput(picker filepicker.Model, title string, width, height 
 
 	// Build message lines with file picker content
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	pickerView := picker.View()
 	pickerLines := strings.Split(pickerView, "\n")
@@ -140,7 +138,7 @@ func renderFilePickerInput(picker filepicker.Model, title string, width, height 
 		messageLines = append(messageLines, styledLine)
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	// Format footer
 	footer := "j/k Navigate  h/l Back/Forward  Esc Cancel"
@@ -175,7 +173,7 @@ func renderFilePickerProcessing(sp spinner.Model, config FilePickerConfig, width
 
 	// Build message lines with spinner
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	processingLine := fmt.Sprintf("%s Processing...", sp.View())
 	styledProcessing := lipgloss.NewStyle().
@@ -186,7 +184,7 @@ func renderFilePickerProcessing(sp spinner.Model, config FilePickerConfig, width
 		Render(processingLine)
 
 	messageLines = append(messageLines, styledProcessing)
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	// Format footer
 	footer := "Press Esc to cancel"
@@ -218,7 +216,7 @@ func renderFilePickerCleanup(sp spinner.Model, width, height int) string {
 
 	// Build content with spacing
 	var contentLines []string
-	contentLines = append(contentLines, strings.Repeat(" ", modalWidth)) // Top padding
+	contentLines = append(contentLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	cleanupLine := fmt.Sprintf("%s Cleaning up...", sp.View())
 	styledCleanup := lipgloss.NewStyle().
@@ -229,7 +227,7 @@ func renderFilePickerCleanup(sp spinner.Model, width, height int) string {
 		Render(cleanupLine)
 
 	contentLines = append(contentLines, styledCleanup)
-	contentLines = append(contentLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	contentLines = append(contentLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	// Apply BorderTop and BorderBottom
 	content := lipgloss.NewStyle().
@@ -243,7 +241,7 @@ func renderFilePickerCleanup(sp spinner.Model, width, height int) string {
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
 }
 
-func renderFilePickerSuccess(path string, title string, width, height int) string {
+func renderFilePickerSuccess(path string, title string, footer string, width, height int) string {
 	// Guard clause: prevent rendering in tiny terminals
 	if width < 20 || height < 10 {
 		return "Terminal too small"
@@ -262,7 +260,7 @@ func renderFilePickerSuccess(path string, title string, width, height int) strin
 
 	// Build message lines with file path
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	wrappedMsg := wordWrap(path, modalWidth-4)
 	messageStyle := lipgloss.NewStyle().
@@ -275,10 +273,12 @@ func renderFilePickerSuccess(path string, title string, width, height int) strin
 		messageLines = append(messageLines, styledLine)
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	// Format footer
-	footer := "Press Enter to acknowledge"
+	if footer == "" {
+		footer = "Press Enter to acknowledge"
+	}
 
 	// Use RenderThreeSectionModal but we need successColor for title
 	// Since ModalTypeInfo uses accentColor, we'll need custom rendering for title
@@ -297,7 +297,7 @@ func renderFilePickerSuccess(path string, title string, width, height int) strin
 		leftPad = 0
 	}
 	rightPad := modalWidth - titleVisualWidth - leftPad
-	centeredTitle := strings.Repeat(" ", leftPad) + successTitle + strings.Repeat(" ", rightPad)
+	centeredTitle := safeRepeat(" ", leftPad) + successTitle + safeRepeat(" ", rightPad)
 
 	titleSection := lipgloss.NewStyle().
 		Bold(true).

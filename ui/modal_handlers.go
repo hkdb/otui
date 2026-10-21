@@ -26,12 +26,8 @@ func (a AppView) handleSessionManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 			isDeletingCurrentSession := a.dataModel.CurrentSession != nil && a.dataModel.CurrentSession.ID == sessionID
 
 			// Block deletion if current session is streaming
-			if isDeletingCurrentSession && a.dataModel.Streaming {
+			if isDeletingCurrentSession && a.blockedByActiveResponse("deleting this session") {
 				a.confirmDeleteSession = nil
-				a.showAcknowledgeModal = true
-				a.acknowledgeModalTitle = "Cannot Delete Session"
-				a.acknowledgeModalMsg = "Session has an active response.\nCancel the response before deleting."
-				a.acknowledgeModalType = ModalTypeWarning
 				return a, nil
 			}
 
@@ -112,6 +108,9 @@ func (a AppView) handleSessionManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 			list := a.getSessionList()
 			if a.selectedSessionIdx >= 0 && a.selectedSessionIdx < len(list) {
 				selectedSession := list[a.selectedSessionIdx]
+				if a.blockedByActiveResponse("switching sessions") {
+					return a, nil
+				}
 				a.showSessionManager = false
 				a.sessionFilterMode = false
 				return a, a.dataModel.LoadSession(selectedSession.ID)
@@ -186,10 +185,16 @@ func (a AppView) handleSessionManagerUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 		list := a.getSessionList()
 		if a.selectedSessionIdx >= 0 && a.selectedSessionIdx < len(list) {
 			selectedSession := list[a.selectedSessionIdx]
+			if a.blockedByActiveResponse("switching sessions") {
+				return a, nil
+			}
 			return a, a.dataModel.LoadSession(selectedSession.ID)
 		}
 		return a, nil
 	case "n":
+		if a.blockedByActiveResponse("creating a session") {
+			return a, nil
+		}
 		if a.newSessionNameInput.Width == 0 {
 			a.newSessionNameInput = textinput.New()
 			a.newSessionNameInput.Width = 60
@@ -460,13 +465,11 @@ func (a AppView) handleNewSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) 
 			sessionName := strings.TrimSpace(a.newSessionNameInput.Value())
 			systemPrompt := strings.TrimSpace(a.newSessionPromptInput.Value())
 
-			// Create and save new session (shared implementation - fixes bug where session wasn't saved)
+			// Create and save the new session
 			newSession, err := a.dataModel.CreateAndSaveNewSession(sessionName, systemPrompt, a.newSessionEnabledPlugins)
 			if err != nil {
 				// If session creation fails, show error but don't crash
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("Failed to create new Session: %v", err)
-				}
+				config.Debugf("Failed to create new Session: %v", err)
 				// Could show error modal here, but for now just close the modal
 				a.showNewSessionModal = false
 				a.newSessionNameInput.Blur()
@@ -488,7 +491,7 @@ func (a AppView) handleNewSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) 
 			a.newSessionEnabledPlugins = []string{}
 			a.textarea.Reset()
 			a.updateViewportContent(true)
-			return a, nil
+			return a, a.dataModel.RefreshModelMetadataCmd()
 		}
 
 	case "alt+enter":
@@ -500,9 +503,7 @@ func (a AppView) handleNewSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) 
 		newSession, err := a.dataModel.CreateAndSaveNewSession(sessionName, systemPrompt, a.newSessionEnabledPlugins)
 		if err != nil {
 			// If session creation fails, show error but don't crash
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Failed to create new Session: %v", err)
-			}
+			config.Debugf("Failed to create new Session: %v", err)
 			// Could show error modal here, but for now just close the modal
 			a.showNewSessionModal = false
 			a.newSessionNameInput.Blur()
@@ -524,7 +525,7 @@ func (a AppView) handleNewSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) 
 		a.newSessionEnabledPlugins = []string{}
 		a.textarea.Reset()
 		a.updateViewportContent(true)
-		return a, nil
+		return a, a.dataModel.RefreshModelMetadataCmd()
 	}
 
 	// Update focused input field with the key (for fields 0 and 1)
@@ -581,7 +582,7 @@ func (a AppView) handleModelSelectorUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 						a.showModelSelector = false
 						a.modelFilterMode = false
 					} else {
-						// No warning needed - proceed with switch (Phase 1.6: use SwitchModel)
+						// No warning needed - proceed with switch
 						a.showModelSelector = false
 						a.modelFilterMode = false
 						return a, a.dataModel.SwitchModel(selectedModelInfo)
@@ -673,7 +674,7 @@ func (a AppView) handleModelSelectorUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 				return a, nil
 			}
 
-			// Normal mode - update the client (Phase 1.6: use SwitchModel)
+			// Normal mode - update the client
 			a.showModelSelector = false
 			return a, a.dataModel.SwitchModel(selectedModelInfo)
 		}
@@ -815,6 +816,9 @@ func (a AppView) handleGlobalSearchUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 	case "enter":
 		if a.selectedGlobalIdx >= 0 && a.selectedGlobalIdx < len(a.globalSearchResults) {
 			selectedMatch := a.globalSearchResults[a.selectedGlobalIdx]
+			if a.blockedByActiveResponse("opening another session") {
+				return a, nil
+			}
 			a.showGlobalSearch = false
 			a.pendingScrollToMessageIdx = selectedMatch.MessageIndex
 			return a, a.dataModel.LoadSession(selectedMatch.SessionID)
@@ -823,16 +827,11 @@ func (a AppView) handleGlobalSearchUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
+	previous := a.globalSearchInput.Value()
 	a.globalSearchInput, cmd = a.globalSearchInput.Update(msg)
-	query := a.globalSearchInput.Value()
-	if query != "" && a.dataModel.SearchIndex != nil {
-		results, err := a.dataModel.SearchIndex.SearchAllSessions(query)
-		if err == nil {
-			a.globalSearchResults = results
-			a.selectedGlobalIdx = 0
-		}
-	} else {
-		a.globalSearchResults = []storage.SessionMessageMatch{}
+	if query := a.globalSearchInput.Value(); query != previous {
+		// Search once typing pauses, in the background
+		return a, tea.Batch(cmd, a.scheduleGlobalSearch(query))
 	}
 	return a, cmd
 }
@@ -840,11 +839,7 @@ func (a AppView) handleGlobalSearchUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 func (a AppView) handleEditSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 	kb := a.dataModel.Config.Keybindings
 
-	// Debug logging for keybinding matching
-	if config.Debug && config.DebugLog != nil {
-		compactKey := kb.GetActionKey("compact_session")
-		config.DebugLog.Printf("[EditSessionModal] Key pressed: %q, compact_session key: %q", msg.String(), compactKey)
-	}
+	config.Debugf("[EditSessionModal] Key pressed: %q, compact_session key: %q", msg.String(), kb.GetActionKey("compact_session"))
 
 	switch msg.String() {
 	case "esc":
@@ -1025,7 +1020,7 @@ func (a AppView) handleEditSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd)
 func (a AppView) handleToolWarningModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 	switch msg.String() {
 	case "enter", "y":
-		// User confirmed - proceed with model switch (Phase 1.6: use SwitchModel)
+		// User confirmed - proceed with model switch
 		// Find the model info from the list (uses helper for cross-provider matching)
 		_, modelInfo := FindModelByName(a.modelList, a.pendingModelSwitch)
 		if modelInfo == nil {
@@ -1068,14 +1063,10 @@ func (a AppView) handleSystemPromptToolWarningUpdate(msg tea.KeyMsg) (AppView, t
 
 			// Clear editor temp file (defense in depth)
 			if err := config.ClearEditorTempFile(); err != nil {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("Warning: failed to clear editor temp file: %v", err)
-				}
+				config.Debugf("Warning: failed to clear editor temp file: %v", err)
 			}
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("System prompt warning acknowledged - sending message: %s", userMsg)
-			}
+			config.Debugf("System prompt warning acknowledged - sending message: %s", userMsg)
 
 			// Add user message
 			a.dataModel.Messages = append(a.dataModel.Messages, Message{
@@ -1105,9 +1096,7 @@ func (a AppView) handleSystemPromptToolWarningUpdate(msg tea.KeyMsg) (AppView, t
 			a.dataModel.Streaming = true
 			a.updateViewportContent(true)
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Firing sendToOllama() Cmd")
-			}
+			config.Debugf("Firing sendToOllama() Cmd")
 
 			// Start streaming response, spinner animation, and render user message markdown
 			return a, tea.Batch(

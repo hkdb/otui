@@ -1,20 +1,23 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"otui/config"
+	"otui/mcp"
 	"otui/storage"
 	"otui/ui"
 )
 
 const (
-	Version = "v0.08.02"
+	Version = "v0.09.00"
 	License = "Apache-2.0"
 )
 
@@ -24,11 +27,21 @@ func buildCredentialErrorMessage(err error) string {
 
 	msg.WriteString("Failed to load credentials.\n\n")
 
-	if strings.Contains(err.Error(), "failed to decrypt") {
+	dataDir := credentialsDataDir()
+
+	if errors.Is(err, config.ErrUnsupportedKeyType) {
+		msg.WriteString("This SSH key type can't be used to encrypt credentials.\n")
+		msg.WriteString("OTUI needs an ed25519 key (RSA keys also work).\n\n")
+		msg.WriteString("To fix:\n")
+		msg.WriteString("1. Create a key: ssh-keygen -t ed25519 -f ~/.ssh/otui_ed25519\n")
+		msg.WriteString(fmt.Sprintf("2. Set ssh_key_path in %s\n", filepath.Join(dataDir, "config.toml")))
+		msg.WriteString(fmt.Sprintf("3. Delete %s\n", filepath.Join(dataDir, "credentials.enc")))
+		msg.WriteString("4. Restart OTUI and re-enter your API keys")
+	} else if strings.Contains(err.Error(), "failed to decrypt") {
 		msg.WriteString("The credentials file may be corrupted or encrypted\n")
 		msg.WriteString("with a different SSH key.\n\n")
 		msg.WriteString("To fix:\n")
-		msg.WriteString("1. Delete: ~/.local/share/otui/credentials.enc\n")
+		msg.WriteString(fmt.Sprintf("1. Delete: %s\n", filepath.Join(dataDir, "credentials.enc")))
 		msg.WriteString("2. Restart OTUI and re-enter your API keys")
 	} else {
 		msg.WriteString(fmt.Sprintf("Error: %v\n\n", err))
@@ -36,6 +49,20 @@ func buildCredentialErrorMessage(err error) string {
 	}
 
 	return msg.String()
+}
+
+// credentialsDataDir returns the data directory for error messages: the
+// OTUI_DATA_DIR/settings.toml one, or the default
+func credentialsDataDir() string {
+	if env, err := config.ReadEnvConfig(); err == nil && env != nil {
+		return config.ExpandPath(env.DataDir)
+	}
+	if config.SystemConfigExists() {
+		if systemCfg, err := config.LoadSystemConfig(); err == nil {
+			return config.ExpandPath(systemCfg.DataDirectory)
+		}
+	}
+	return config.GetDefaultDataDir()
 }
 
 // extractSSHKeyPath attempts to extract SSH key path from config
@@ -64,45 +91,39 @@ func extractSSHKeyPath() string {
 	return "~/.ssh/otui_ed25519"
 }
 
+// showConfigError shows a configuration error in a modal and returns when
+// the user dismisses it
+func showConfigError(msg string) {
+	p := tea.NewProgram(ui.NewErrorModal("Configuration Error", msg), tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	}
+}
+
 func main() {
 	// Initialize early debug logging (writes to cache dir)
 	config.InitEarlyDebugLog()
 
-	// Validate environment variables first
-	if config.HasAnyEnvVar() && !config.HasAllEnvVars() {
-		missingVar := config.GetMissingEnvVar()
-		errorMsg := fmt.Sprintf("Missing environment variable: %s\n\n"+
-			"When using environment variables, all 3 must be set:\n"+
-			"  • OTUI_OLLAMA_HOST\n"+
-			"  • OTUI_OLLAMA_MODEL\n"+
-			"  • OTUI_DATA_DIR\n\n"+
-			"Set the missing variable(s) before launching otui.",
-			missingVar)
-
-		errorModal := ui.NewErrorModal("Configuration Error", errorMsg)
-		p := tea.NewProgram(
-			errorModal,
-			tea.WithAltScreen(),
-		)
-
-		if _, err := p.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		}
-		os.Exit(0)
+	// Validate environment variables first (OTUI_* configure OTUI without
+	// the setup wizard, e.g. in containers)
+	envCfg, envErr := config.ReadEnvConfig()
+	if envErr != nil {
+		showConfigError(fmt.Sprintf("Invalid environment configuration:\n%v\n\n%s", envErr, config.EnvUsage))
+		os.Exit(1)
 	}
 
 	settingsPath := config.GetSettingsFilePath()
 	isFirstRun := !config.FileExists(settingsPath)
 
-	// Skip welcome wizard if all env vars are set
-	if config.HasAllEnvVars() {
+	// Skip welcome wizard if configured through environment variables
+	if envCfg != nil {
 		isFirstRun = false
 	}
 
 	// NEW: Also check if user config exists in data directory
 	// This handles the case where system config exists (data dir was set in Settings)
 	// but user config doesn't exist yet (new data dir needs to be created via wizard)
-	if !isFirstRun {
+	if !isFirstRun && envCfg == nil {
 		systemCfg, err := config.LoadSystemConfig()
 		if err == nil {
 			dataDir := config.ExpandPath(systemCfg.DataDirectory)
@@ -137,44 +158,46 @@ func main() {
 	// Try to load config
 	cfg, err := config.Load()
 
-	// Track whether or not the user input the right passphrase
-	pass := false
-
-	// If SSH key passphrase is required, prompt for it in a loop
-	for err != nil && strings.Contains(err.Error(), "passphrase required") {
+	// If SSH key passphrase is required, prompt for it until it's correct
+	promptErr := ""
+	needPassphrase := err != nil && strings.Contains(err.Error(), "passphrase required")
+	for needPassphrase {
 		keyPath := extractSSHKeyPath()
 
-		// Show passphrase modal
-		modal := ui.NewPassphraseModal(keyPath)
-		p := tea.NewProgram(modal, tea.WithAltScreen())
+		// Show passphrase modal (with the previous attempt's error, if any)
+		p := tea.NewProgram(ui.NewPassphraseModalWithError(keyPath, promptErr), tea.WithAltScreen())
 
-		finalModel, err := p.Run()
-		if err != nil {
-			fmt.Printf("Error running passphrase prompt: %v\n", err)
+		finalModel, runErr := p.Run()
+		if runErr != nil {
+			fmt.Printf("Error running passphrase prompt: %v\n", runErr)
 			os.Exit(1)
 		}
 
-		modal = finalModel.(ui.PassphraseModal)
-
-		if modal.IsCancelled() {
+		modal, ok := finalModel.(ui.PassphraseModal)
+		if !ok || modal.IsCancelled() {
 			fmt.Println("Passphrase prompt cancelled. Exiting.")
 			os.Exit(0)
 		}
 
-		passphrase := modal.GetPassphrase()
-
-		// Try to load config with passphrase using helper
-		perr := ui.LoadCredentialsWithPassphrase(cfg, passphrase)
-
-		// If no error (success) or different error, break out of loop
-		if perr == nil {
-			pass = true
-			break
+		// Try to load credentials with the passphrase
+		perr := ui.LoadCredentialsWithPassphrase(cfg, modal.GetPassphrase())
+		switch {
+		case perr == nil:
+			err = nil
+			needPassphrase = false
+		case config.IsIncorrectPassphrase(perr):
+			// Ask again
+			promptErr = ui.GetIncorrectPassphraseError()
+		default:
+			// Not a passphrase problem (e.g. credentials encrypted with a
+			// different key) - show it instead of prompting forever
+			err = fmt.Errorf("failed to load credentials: %w", perr)
+			needPassphrase = false
 		}
 	}
 
 	// Handle other config loading errors
-	if err != nil && pass == false {
+	if err != nil {
 		var errorMsg string
 
 		if strings.Contains(err.Error(), "failed to load credentials") {
@@ -183,32 +206,32 @@ func main() {
 			errorMsg = fmt.Sprintf("Failed to load config:\n\n%v", err)
 		}
 
-		errorModal := ui.NewErrorModal("Configuration Error", errorMsg)
-		p := tea.NewProgram(errorModal, tea.WithAltScreen())
-		if _, err := p.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		}
+		showConfigError(errorMsg)
+		os.Exit(1)
+	}
+
+	// A cloud provider configured through the environment needs an API key,
+	// either OTUI_API_KEY or one stored in the data directory
+	if cfg.Env != nil && cfg.Env.RequiresAPIKey() && cfg.APIKey(cfg.Env.Provider) == "" {
+		showConfigError(fmt.Sprintf("No API key for %s.\n\nSet OTUI_API_KEY, or store a key for %s\nin the data directory (%s).",
+			cfg.Env.Provider, cfg.Env.Provider, cfg.DataDir()))
 		os.Exit(1)
 	}
 
 	// Initialize debug logging after config is loaded
 	config.InitDebugLog(cfg.DataDir())
 
-	// Clean up old tmp dir in cache directory (crash recovery)
-	if err := config.CleanupTempDir(); err != nil && config.DebugLog != nil {
-		config.DebugLog.Printf("Warning: failed to cleanup old temp directory: %v", err)
-	}
-
-	// Create secure temp directory in cache (never synced to cloud)
-	if err := config.CreateTempDir(); err != nil {
+	// Create this instance's secure temp directory in cache (never synced to
+	// cloud) and remove ones left behind by crashed instances
+	if err := config.InitTempDir(); err != nil {
 		fmt.Printf("Failed to create secure temp directory: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Ensure cleanup on exit
 	defer func() {
-		if err := config.CleanupTempDir(); err != nil && config.DebugLog != nil {
-			config.DebugLog.Printf("Warning: failed to cleanup temp directory on exit: %v", err)
+		if err := config.CleanupTempDir(); err != nil {
+			config.Debugf("Warning: failed to cleanup temp directory on exit: %v", err)
 		}
 	}()
 
@@ -260,25 +283,41 @@ func main() {
 
 	// Load last session with lock check
 	var lastSession *storage.Session
+	var lockedSessionID string
 	if lastSessionID, err := sessionStorage.LoadCurrentSessionID(); err == nil {
 		// Check if session is locked by another instance
 		isLocked, lockErr := sessionStorage.CheckSessionLock(lastSessionID)
 		if lockErr == nil && !isLocked {
 			lastSession, _ = sessionStorage.Load(lastSessionID)
-			// Note: Lock will be acquired when setCurrentSession is called in UI
+			if lastSession != nil {
+				_ = sessionStorage.LockSession(lastSession.ID)
+			}
+		} else if lockErr == nil && isLocked {
+			// lastSession remains nil → NewAppView creates a new session and
+			// offers to force delete the stale lock
+			lockedSessionID = lastSessionID
 		}
-		// If locked: lastSession remains nil → NewModel will create new session
 	}
 
 	// Create AppView before defer so we can unlock the CURRENT data directory on exit
 	// (which may differ from initial data directory if user switched during session)
-	appView := ui.NewAppView(cfg, sessionStorage, lastSession, Version, License)
+	appView := ui.NewAppView(cfg, sessionStorage, lastSession, lockedSessionID, Version, License)
 
 	// Ensure cleanup on exit - uses appView method to unlock CURRENT data directory
 	defer func() {
-		if err := appView.UnlockCurrentDataDir(); err != nil && config.DebugLog != nil {
-			config.DebugLog.Printf("Warning: failed to unlock OTUI instance: %v", err)
+		if err := appView.UnlockCurrentDataDir(); err != nil {
+			config.Debugf("Warning: failed to unlock OTUI instance: %v", err)
 		}
+	}()
+
+	// Plugins run in their own process groups, so the terminal's SIGHUP
+	// doesn't reach them - stop them before exiting
+	hangup := make(chan os.Signal, 1)
+	signal.Notify(hangup, syscall.SIGHUP)
+	go func() {
+		<-hangup
+		mcp.TerminatePluginProcesses()
+		os.Exit(129)
 	}()
 
 	p := tea.NewProgram(
@@ -294,9 +333,7 @@ func main() {
 
 	// Check if we should restart OTUI (for creating new data directories)
 	if appView, ok := finalModel.(ui.AppView); ok && appView.RestartAfterQuit {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[main] RestartAfterQuit flag detected - restarting OTUI")
-		}
+		config.Debugf("[main] RestartAfterQuit flag detected - restarting OTUI")
 
 		binary, err := os.Executable()
 		if err != nil {

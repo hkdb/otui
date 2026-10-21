@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	mcptypes "github.com/mark3labs/mcp-go/mcp"
@@ -118,16 +119,6 @@ func convertPropertyValue(propValue any) api.ToolProperty {
 	return toolProp
 }
 
-// ConvertOllamaToolCallToMCP converts an Ollama tool call to MCP CallToolRequest format
-func ConvertOllamaToolCallToMCP(toolCall api.ToolCall) (string, map[string]any, error) {
-	toolName := toolCall.Function.Name
-
-	// Arguments is already a map[string]any in Ollama API
-	args := map[string]any(toolCall.Function.Arguments)
-
-	return toolName, args, nil
-}
-
 // ConvertMCPToolsToOpenAIFormat converts MCP tools to OpenAI/OpenRouter format.
 // This format is shared between OpenAI and OpenRouter since they use the same API.
 //
@@ -153,6 +144,9 @@ func ConvertOllamaToolCallToMCP(toolCall api.ToolCall) (string, map[string]any, 
 //	    "parameters": {...}
 //	  }
 //	}
+//
+// Tool names are encoded with EncodeToolName since OpenAI compatible APIs
+// only accept names matching ^[a-zA-Z0-9_-]{1,64}$.
 func ConvertMCPToolsToOpenAIFormat(mcpTools []mcptypes.Tool) []openai.ChatCompletionToolUnionParam {
 	if len(mcpTools) == 0 {
 		return nil
@@ -163,9 +157,19 @@ func ConvertMCPToolsToOpenAIFormat(mcpTools []mcptypes.Tool) []openai.ChatComple
 	for i, tool := range mcpTools {
 		// Convert MCP InputSchema to OpenAI FunctionParameters
 		// Both are JSON Schema format, just need to convert the struct to map
+		// Strict servers reject "type": "" and "properties": null, which
+		// parameterless MCP tools can produce
+		schemaType := tool.InputSchema.Type
+		if schemaType == "" {
+			schemaType = "object"
+		}
+		properties := tool.InputSchema.Properties
+		if properties == nil {
+			properties = map[string]any{}
+		}
 		params := openai.FunctionParameters{
-			"type":       tool.InputSchema.Type,
-			"properties": tool.InputSchema.Properties,
+			"type":       schemaType,
+			"properties": properties,
 		}
 
 		if len(tool.InputSchema.Required) > 0 {
@@ -179,7 +183,7 @@ func ConvertMCPToolsToOpenAIFormat(mcpTools []mcptypes.Tool) []openai.ChatComple
 		// Build the function tool
 		result[i] = openai.ChatCompletionFunctionTool(
 			openai.FunctionDefinitionParam{
-				Name:        tool.Name,
+				Name:        EncodeToolName(tool.Name),
 				Description: openai.String(tool.Description),
 				Parameters:  params,
 			},
@@ -205,6 +209,9 @@ func ConvertMCPToolsToOpenAIFormat(mcpTools []mcptypes.Tool) []openai.ChatComple
 //	}
 //
 // Anthropic Tool structure uses ToolUnionParam with input_schema
+//
+// Tool names are encoded with EncodeToolName since Anthropic doesn't allow
+// dots in tool names.
 func ConvertMCPToolsToAnthropicFormat(mcpTools []mcptypes.Tool) []anthropic.ToolUnionParam {
 	if len(mcpTools) == 0 {
 		return nil
@@ -231,7 +238,7 @@ func ConvertMCPToolsToAnthropicFormat(mcpTools []mcptypes.Tool) []anthropic.Tool
 		}
 
 		// Create ToolUnionParam using the helper function
-		result[i] = anthropic.ToolUnionParamOfTool(inputSchema, tool.Name)
+		result[i] = anthropic.ToolUnionParamOfTool(inputSchema, EncodeToolName(tool.Name))
 
 		// Set description if provided
 		if tool.Description != "" {
@@ -240,4 +247,32 @@ func ConvertMCPToolsToAnthropicFormat(mcpTools []mcptypes.Tool) []anthropic.Tool
 	}
 
 	return result
+}
+
+// toolNamespaceSeparator replaces the "." between plugin namespace and tool
+// name when sending tools to APIs that don't allow dots in tool names
+const toolNamespaceSeparator = "__"
+
+// EncodeToolName converts a namespaced tool name into an API safe name by
+// replacing the namespace dot with "__".
+// Example: "filesystem.read_file" → "filesystem__read_file"
+//
+// Only the first dot (the namespace separator) is replaced so DecodeToolName
+// can reverse it even when the tool name itself contains "__".
+func EncodeToolName(name string) string {
+	return strings.Replace(name, ".", toolNamespaceSeparator, 1)
+}
+
+// DecodeToolName reverses EncodeToolName.
+// Example: "filesystem__read_file" → "filesystem.read_file"
+//
+// Namespaces never contain dots (see parseToolName), so a name whose part
+// before the first "__" contains a dot is already in dotted form (e.g. a
+// leaked tool call echoing the system prompt) and is returned unchanged.
+func DecodeToolName(name string) string {
+	idx := strings.Index(name, toolNamespaceSeparator)
+	if idx < 0 || strings.Contains(name[:idx], ".") {
+		return name
+	}
+	return name[:idx] + "." + name[idx+len(toolNamespaceSeparator):]
 }

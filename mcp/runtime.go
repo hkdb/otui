@@ -31,6 +31,7 @@ func (rc *RuntimeChecker) DetectAll() {
 	rc.detectNPX()
 	rc.detectPython()
 	rc.detectGo()
+	rc.detectDocker()
 }
 
 func (rc *RuntimeChecker) CheckRuntime(name string) (*Runtime, error) {
@@ -45,6 +46,8 @@ func (rc *RuntimeChecker) CheckRuntime(name string) (*Runtime, error) {
 			rc.detectPython()
 		case "go":
 			rc.detectGo()
+		case "docker":
+			rc.detectDocker()
 		default:
 			return nil, fmt.Errorf("unknown runtime: %s", name)
 		}
@@ -233,4 +236,32 @@ func parseVersion(version string) [3]int {
 	}
 
 	return result
+}
+
+func (rc *RuntimeChecker) detectDocker() {
+	runtime := &Runtime{Name: "docker"}
+
+	path, err := exec.LookPath("docker")
+	if err != nil {
+		runtime.Error = "Docker not found"
+		rc.runtimes["docker"] = runtime
+		return
+	}
+
+	output, err := exec.Command("docker", "--version").Output()
+	if err != nil {
+		runtime.Error = "Failed to get Docker version"
+		rc.runtimes["docker"] = runtime
+		return
+	}
+
+	version := strings.TrimSpace(string(output))
+	if matches := regexp.MustCompile(`(\d+\.\d+(?:\.\d+)?)`).FindStringSubmatch(version); len(matches) > 1 {
+		version = matches[1]
+	}
+
+	runtime.Installed = true
+	runtime.Version = version
+	runtime.Path = path
+	rc.runtimes["docker"] = runtime
 }

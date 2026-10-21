@@ -6,8 +6,10 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"otui/mcp"
+	"otui/safetext"
 )
 
 // renderInstallModal renders the plugin installation progress modal
@@ -32,7 +34,7 @@ func (a *AppView) renderInstallModal() string {
 
 	// Build message section based on state
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
@@ -87,7 +89,7 @@ func (a *AppView) renderInstallModal() string {
 		}
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -156,11 +158,15 @@ func renderConfigModal(
 
 	// Message section
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
 		Align(lipgloss.Left)
+
+	// What the plugin will install and run (from the registry, which isn't
+	// signed), so it's visible before it's approved
+	messageLines = append(messageLines, renderCommandPreview(plugin, configFields, a.pluginManagerState.configModal.preInstallMode, modalWidth)...)
 
 	// For remote plugins, add explanatory header about env vars and auth
 	switch plugin.InstallType {
@@ -273,6 +279,9 @@ func renderConfigModal(
 		} else {
 			if commandValue == "" {
 				commandValue = "(not configured - plugin may not start)"
+				if plugin.InstallType == "docker" && plugin.Package != "" {
+					commandValue = "(default: docker run -i --rm ... " + plugin.Package + ")"
+				}
 			}
 			line = fmt.Sprintf("%sCommand:  %s", indicator, commandValue)
 		}
@@ -288,7 +297,7 @@ func renderConfigModal(
 			var hint string
 			switch plugin.InstallType {
 			case "docker":
-				hint = "Example: docker run -it container-name"
+				hint = "Optional - default: docker run -i --rm <image>"
 			case "manual":
 				hint = "Example: /path/to/executable --args"
 			default:
@@ -339,7 +348,7 @@ func renderConfigModal(
 			// Mask sensitive values
 			displayValue := envVar.Value
 			if isSensitiveKey(envVar.Key) && !isEditing {
-				displayValue = strings.Repeat("*", len(envVar.Value))
+				displayValue = safeRepeat("*", len(envVar.Value))
 				if displayValue == "" {
 					displayValue = "<not set>"
 				}
@@ -394,7 +403,7 @@ func renderConfigModal(
 	}
 
 	messageLines = append(messageLines, addStyle.Render(addLine))
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -462,7 +471,7 @@ func (a *AppView) renderAddCustomModal() string {
 		Render(title)
 
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	// Get current install type to conditionally show Command field
 	installType := a.pluginManagerState.addCustomModal.fields["install_type"].Value()
@@ -501,7 +510,7 @@ func (a *AppView) renderAddCustomModal() string {
 		hint := "(optional - command to start plugin)"
 		switch installType {
 		case "docker":
-			hint = "(optional - e.g., 'docker run -it container-name')"
+			hint = "(optional - e.g., 'docker run -i --rm image')"
 		case "manual":
 			hint = "(optional - e.g., '/path/to/executable --args')"
 		case "binary":
@@ -606,7 +615,7 @@ func (a *AppView) renderAddCustomModal() string {
 	}
 	messageLines = append(messageLines, argsStyle.Render(argsLine))
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -652,7 +661,7 @@ func (a *AppView) renderEnvEditModal() string {
 		Render("Configure Environment Variables")
 
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	// Render existing env vars
 	numEnvVars := len(a.pluginManagerState.addCustomModal.envVars)
@@ -713,7 +722,7 @@ func (a *AppView) renderEnvEditModal() string {
 	}
 
 	messageLines = append(messageLines, addStyle.Render(addLine))
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -761,7 +770,7 @@ func (a *AppView) renderArgsEditModal() string {
 		Render("Configure Arguments")
 
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	// Render existing args
 	numArgs := len(a.pluginManagerState.addCustomModal.args)
@@ -788,9 +797,16 @@ func (a *AppView) renderArgsEditModal() string {
 				valueStr = fmt.Sprintf("= %s", arg.Value)
 			case "value":
 				valueStr = fmt.Sprintf("= value (%s)", arg.Label)
+				if arg.Default != "" {
+					valueStr = fmt.Sprintf("= value (%s, default: %s)", arg.Label, arg.Default)
+				}
 			}
 
-			line := fmt.Sprintf("%s%s  %s", indicator, arg.Flag, valueStr)
+			flag := arg.Flag
+			if flag == "" {
+				flag = "(positional)"
+			}
+			line := fmt.Sprintf("%s%s  %s", indicator, flag, valueStr)
 
 			lineStyle := lipgloss.NewStyle().Width(modalWidth)
 			if isSelected {
@@ -822,7 +838,7 @@ func (a *AppView) renderArgsEditModal() string {
 	}
 
 	messageLines = append(messageLines, addStyle.Render(addLine))
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -868,7 +884,7 @@ func (a *AppView) renderArgEditForm() string {
 		Render("Add Argument")
 
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
@@ -950,7 +966,7 @@ func (a *AppView) renderArgEditForm() string {
 		messageLines = append(messageLines, labelStyle.Render(labelLine))
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -1034,7 +1050,11 @@ func (a *AppView) renderSecurityWarning() string {
 		}
 	}
 
+	// What will be installed and run (the decision is made here; the
+	// configure screen isn't shown for every plugin)
 	messageLines = append(messageLines, messageStyle.Render(""))
+	messageLines = append(messageLines, renderCommandPreview(plugin, previewConfig(plugin), true, modalWidth)...)
+
 	messageLines = append(messageLines, messageStyle.Render("Have you reviewed this plugin's source code?"))
 
 	footer := FormatFooter("y", "Install", "n", "Cancel")
@@ -1067,6 +1087,10 @@ func (a *AppView) renderRuntimeMissing() string {
 		titleText = "⚠️  Go Required"
 		runtimeName = "Go"
 		websiteURL = "https://go.dev"
+	case "docker":
+		titleText = "⚠️  Docker Required"
+		runtimeName = "Docker"
+		websiteURL = "https://docs.docker.com/get-docker/"
 	default:
 		return ""
 	}
@@ -1229,7 +1253,7 @@ func (a *AppView) renderUninstallModal() string {
 
 	// Build message section based on state
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
@@ -1276,7 +1300,7 @@ func (a *AppView) renderUninstallModal() string {
 		}
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -1427,4 +1451,61 @@ func (a *AppView) renderRegistryRefreshModal() string {
 	}
 
 	return ""
+}
+
+// renderCommandPreview shows a plugin's install and start commands, and
+// warnings about options that give it access to the host
+func renderCommandPreview(plugin *mcp.Plugin, configFields map[string]string, preInstall bool, modalWidth int) []string {
+	install, run, warnings := mcp.CommandPreview(plugin, configFields, "")
+
+	const labelWidth = 16
+	labelStyle := lipgloss.NewStyle().Foreground(dimColor)
+	valueStyle := lipgloss.NewStyle().Foreground(dimColor).Italic(true)
+
+	var lines []string
+	add := func(label, value string) {
+		wrapped := strings.Split(ansi.Wrap(safetext.Line(value), max(modalWidth-labelWidth, 10), ""), "\n")
+		for i, part := range wrapped {
+			prefix := safeRepeat(" ", labelWidth)
+			if i == 0 {
+				prefix = label + safeRepeat(" ", labelWidth-len(label))
+			}
+			lines = append(lines, labelStyle.Render(prefix)+valueStyle.Render(part))
+		}
+	}
+
+	if preInstall && install != "" {
+		add("Installs with:", install)
+	}
+	if target, ok := strings.CutPrefix(run, "Connects to: "); ok {
+		add("Connects to:", target)
+	} else if run != "" {
+		add("Will run:", run)
+	}
+	if len(warnings) > 0 {
+		warning := "⚠ This plugin " + strings.Join(warnings, ", ")
+		for _, part := range strings.Split(ansi.Wrap(safetext.Line(warning), modalWidth, ""), "\n") {
+			lines = append(lines, lipgloss.NewStyle().Foreground(warningColor).Render(part))
+		}
+	}
+	if len(lines) > 0 {
+		lines = append(lines, "")
+	}
+	return lines
+}
+
+// previewConfig is the config a command preview uses before anything is
+// filled in: defaults, and <Label> placeholders for arguments without one
+// (env vars without a value aren't passed, so they're left out)
+func previewConfig(plugin *mcp.Plugin) map[string]string {
+	cfg := make(map[string]string)
+	for _, field := range mcp.BuildFullConfigSchema(plugin) {
+		switch {
+		case field.DefaultValue != "":
+			cfg[field.Key] = field.DefaultValue
+		case strings.HasPrefix(field.Key, "ARG_"):
+			cfg[field.Key] = "<" + field.Label + ">"
+		}
+	}
+	return cfg
 }

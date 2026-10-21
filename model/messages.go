@@ -7,7 +7,7 @@ import (
 	"otui/storage"
 )
 
-// IterationStep records a single step in multi-step execution (Phase 2)
+// IterationStep records a single step in multi-step execution
 // Each step = one LLM response (may have 0+ tool calls)
 type IterationStep struct {
 	StepNumber int    // 1, 2, 3...
@@ -23,52 +23,67 @@ type IterationStep struct {
 	ShortName string // e.g., "read_dir"
 }
 
-// IterationSummaryMsg contains summary of all steps (Phase 2)
+// IterationSummaryMsg contains summary of all steps
 type IterationSummaryMsg struct {
 	Steps      []IterationStep
 	TotalSteps int
 	MaxReached bool // True if max iterations reached (warning)
 }
 
+// StreamChunkMsg carries new response text. Update shows it and calls
+// WaitForStream(Stream) for the next part.
 type StreamChunkMsg struct {
-	Chunk string
+	Chunk     string
+	RequestID uint64
+	Stream    *ChatStream
 }
 
+// StreamDoneMsg ends a response without tool calls
 type StreamDoneMsg struct {
 	FullResponse string
+	RequestID    uint64
+}
+
+// ToolResultsReadyMsg is sent when a step's tools have run and the model's
+// follow-up response starts streaming (read it with WaitForStream(Stream)).
+// The step ends with ToolExecutionCompleteMsg.
+type ToolResultsReadyMsg struct {
+	RequestID uint64
+	Stream    *ChatStream
 }
 
 type StreamErrorMsg struct {
-	Err error
+	Err       error
+	RequestID uint64
 }
 
-type StreamChunksCollectedMsg struct {
-	Chunks       []string
-	FullResponse string
-}
-
-type DisplayChunkTickMsg struct{}
-
-// Tool execution messages (Phase 6)
+// Tool execution messages
 type ToolCallsDetectedMsg struct {
 	ToolCalls       []ToolCall
 	InitialResponse string
 	ContextMessages []Message
+	RequestID       uint64
 }
 
 type ToolExecutionCompleteMsg struct {
-	Chunks           []string
 	FullResponse     string
-	IterationSummary IterationSummaryMsg // Phase 2
+	IterationSummary IterationSummaryMsg
 
-	// Phase 2: Multi-step continuation
-	HasMoreSteps  bool       // Continue iteration after typewriter?
-	NextToolCalls []ToolCall // Tools to execute in next step
-	NextContext   []Message  // Context for next iteration
+	// Multi-step continuation
+	HasMoreSteps        bool       // Continue with another step
+	NextToolCalls       []ToolCall // Tools to execute in next step
+	NextContext         []Message  // Context for next iteration
+	NextInitialResponse string     // LLM text that came with NextToolCalls
+
+	Step       *IterationStep // This step (multi-step enabled), added to the history by ApplyToolStep
+	MaxReached bool           // Stopped at max iterations with tool calls left
+
+	RequestID uint64
 }
 
 type ToolExecutionErrorMsg struct {
-	Err error
+	Err       error
+	RequestID uint64
 }
 
 type MarkdownRenderedMsg struct {
@@ -81,6 +96,9 @@ type ModelsListMsg struct {
 	Models       []ollama.ModelInfo
 	Err          error
 	ShowSelector bool // Whether to auto-show model selector (user-initiated vs background fetch)
+
+	// Model lists fetched by FetchAllModels, per provider (for StoreModelCache)
+	Fetched map[string][]ollama.ModelInfo
 }
 
 type SessionsListMsg struct {
@@ -108,9 +126,23 @@ type SessionExportedMsg struct {
 }
 
 type SessionImportedMsg struct {
-	Session   *storage.Session
-	Err       error
-	Cancelled bool
+	Session     *storage.Session
+	Err         error
+	Cancelled   bool
+	Permissions ImportedPermissions // Removed from the imported session (see ImportSessionCmd)
+}
+
+// ImportedPermissions are the plugins and pre-approved tools an imported
+// session file came with. They're removed on import; the user can keep them
+// (RestoreImportedPermissionsCmd).
+type ImportedPermissions struct {
+	EnabledPlugins []string
+	AllowedTools   []string
+}
+
+// Empty reports whether the session came without permissions
+func (p ImportedPermissions) Empty() bool {
+	return len(p.EnabledPlugins) == 0 && len(p.AllowedTools) == 0
 }
 
 type ExportCleanupDoneMsg struct{}
@@ -167,8 +199,11 @@ type SingleProviderModelsMsg struct {
 type ToolPermissionRequestMsg struct {
 	ToolName        string
 	Purpose         string
-	ToolCall        ToolCall
+	ToolCall        ToolCall   // The call that needs approval (shown to the user)
+	ToolCalls       []ToolCall // All calls of this step, re-run after approval
+	InitialResponse string     // Assistant text that came with the calls
 	ContextMessages []Message
+	RequestID       uint64
 }
 
 // ToolPermissionResponseMsg is sent when the user responds to a permission request
@@ -177,17 +212,20 @@ type ToolPermissionResponseMsg struct {
 	AlwaysAllow     bool   // User chose "Always Allow" for this tool
 	ToolName        string // Tool that was approved/denied
 	ToolCall        ToolCall
+	ToolCalls       []ToolCall // All calls of this step (see ToolPermissionRequestMsg)
+	InitialResponse string
 	ContextMessages []Message
+	RequestID       uint64
 }
 
 // CompactionRequestMsg is sent when compaction approval is needed
 type CompactionRequestMsg struct {
-	MarkerIndex       int
-	CurrentTokens     int
-	ContextWindow     int
-	MessageCount      int
-	UserMessageCount  int
-	AssistantCount    int
+	MarkerIndex      int
+	CurrentTokens    int
+	ContextWindow    int
+	MessageCount     int
+	UserMessageCount int
+	AssistantCount   int
 }
 
 // CompactionResponseMsg is sent when user responds to compaction request
@@ -202,6 +240,8 @@ type CompactionCompleteMsg struct {
 	Err        error
 	Summary    string // wrapped: "Compacted N messages... - Summary: ..."
 	LLMSummary string // raw LLM output (just the summary text)
+	SessionID  string // Session the compaction was computed for
+	Marker     int    // New compaction marker (user/assistant messages compacted)
 }
 
 // TokenUsageUpdatedMsg is sent when token usage is recalculated

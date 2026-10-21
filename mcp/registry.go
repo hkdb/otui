@@ -9,14 +9,19 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"otui/config"
+	"otui/safetext"
 )
 
 const registryURL = "https://raw.githubusercontent.com/hkdb/otui-registry/main/plugins.json"
 
 type Registry struct {
+	// Guards plugins and customPlugins: Refresh runs in a Cmd goroutine
+	// while the plugin manager reads the lists
+	mu            sync.RWMutex
 	plugins       []Plugin
 	customPlugins []Plugin
 	cacheDir      string
@@ -60,6 +65,9 @@ func NewRegistry(dataDir string) (*Registry, error) {
 }
 
 func (r *Registry) Load() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	cachedPath := filepath.Join(r.cacheDir, "plugin_registry.json")
 
 	if config.FileExists(cachedPath) {
@@ -67,7 +75,7 @@ func (r *Registry) Load() error {
 		if err == nil {
 			var cached []Plugin
 			if err := json.Unmarshal(data, &cached); err == nil {
-				r.plugins = cached
+				r.plugins = validPlugins(cached)
 			}
 		}
 	}
@@ -81,6 +89,7 @@ func (r *Registry) Load() error {
 		data, err := os.ReadFile(customPath)
 		if err == nil {
 			if err := json.Unmarshal(data, &r.customPlugins); err == nil {
+				r.customPlugins = validPlugins(r.customPlugins)
 				for i := range r.customPlugins {
 					r.customPlugins[i].Custom = true
 				}
@@ -99,8 +108,11 @@ func (r *Registry) Refresh() error {
 	if err != nil {
 		return fmt.Errorf("failed to fetch plugin registry: %w", err)
 	}
+	freshPlugins = validPlugins(freshPlugins)
 
+	r.mu.Lock()
 	r.plugins = freshPlugins
+	r.mu.Unlock()
 
 	cachedPath := filepath.Join(r.cacheDir, "plugin_registry.json")
 	data, err := json.MarshalIndent(freshPlugins, "", "  ")
@@ -108,7 +120,7 @@ func (r *Registry) Refresh() error {
 		return fmt.Errorf("failed to marshal plugins: %w", err)
 	}
 
-	if err := os.WriteFile(cachedPath, data, 0600); err != nil {
+	if err := config.WriteFileAtomic(cachedPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write cache: %w", err)
 	}
 
@@ -116,6 +128,9 @@ func (r *Registry) Refresh() error {
 }
 
 func (r *Registry) GetAll() []Plugin {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	// Build map of custom plugin IDs for fast lookup
 	customIDs := make(map[string]bool)
 	for _, cp := range r.customPlugins {
@@ -130,9 +145,7 @@ func (r *Registry) GetAll() []Plugin {
 	for _, rp := range r.plugins {
 		if customIDs[rp.ID] {
 			// Skip registry plugin - custom version takes precedence
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[Registry] Hiding registry plugin '%s' - custom version installed", rp.ID)
-			}
+			config.Debugf("[Registry] Hiding registry plugin '%s' - custom version installed", rp.ID)
 			continue
 		}
 		all = append(all, rp)
@@ -228,6 +241,13 @@ func (r *Registry) AddCustomPlugin(repoURL string) (*Plugin, []string, error) {
 		Custom:      true,
 	}
 
+	sanitizePlugin(plugin) // Built from GitHub API data
+	if err := ValidatePluginID(plugin.ID); err != nil {
+		return nil, nil, err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.customPlugins = append(r.customPlugins, *plugin)
 
 	if err := r.saveCustomPlugins(); err != nil {
@@ -242,9 +262,15 @@ func (r *Registry) AddCustomPluginDirect(plugin *Plugin) ([]string, error) {
 	if plugin == nil {
 		return nil, fmt.Errorf("plugin cannot be nil")
 	}
+	if err := validateCustomPlugin(plugin); err != nil {
+		return nil, err
+	}
 
 	// Ensure it's marked as custom
 	plugin.Custom = true
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	// Check for duplicate ID
 	for _, p := range r.customPlugins {
@@ -273,6 +299,9 @@ func (r *Registry) AddCustomPluginDirect(plugin *Plugin) ([]string, error) {
 }
 
 func (r *Registry) RemoveCustomPlugin(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	found := false
 
 	// Remove from r.customPlugins
@@ -299,13 +328,59 @@ func (r *Registry) RemoveCustomPlugin(id string) error {
 	return r.saveCustomPlugins()
 }
 
+// validateCustomPlugin checks a plugin from the custom plugin form
+func validateCustomPlugin(p *Plugin) error {
+	if err := ValidatePluginID(p.ID); err != nil {
+		return err
+	}
+	return ValidatePackage(p.InstallType, p.Package)
+}
+
+// validPlugins removes terminal control sequences from plugin text
+// (registry data is shown in the plugin manager) and drops plugins with an
+// invalid ID (used as a directory name)
+func validPlugins(plugins []Plugin) []Plugin {
+	valid := plugins[:0]
+	for _, p := range plugins {
+		sanitizePlugin(&p)
+		if err := ValidatePluginID(p.ID); err != nil {
+			config.Debugf("[Registry] Ignoring plugin: %v", err)
+			continue
+		}
+		valid = append(valid, p)
+	}
+	return valid
+}
+
+func sanitizePlugin(p *Plugin) {
+	for _, field := range []*string{
+		&p.ID, &p.Name, &p.Description, &p.Category, &p.License, &p.Repository, &p.Author,
+		&p.Language, &p.InstallType, &p.Package, &p.Command, &p.ServerURL, &p.AuthType,
+		&p.Transport, &p.Environment, &p.Args,
+	} {
+		*field = safetext.Line(*field)
+	}
+	for i := range p.Tags {
+		p.Tags[i] = safetext.Line(p.Tags[i])
+	}
+	for i := range p.RuntimeDeps {
+		p.RuntimeDeps[i] = safetext.Line(p.RuntimeDeps[i])
+	}
+	for i := range p.ConfigSchema {
+		f := &p.ConfigSchema[i]
+		f.Key, f.Label, f.Type = safetext.Line(f.Key), safetext.Line(f.Label), safetext.Line(f.Type)
+		f.DefaultValue, f.Description = safetext.Line(f.DefaultValue), safetext.Line(f.Description)
+	}
+}
+
+// saveCustomPlugins writes the custom plugins. Call with r.mu held.
 func (r *Registry) saveCustomPlugins() error {
 	customPath := filepath.Join(r.cacheDir, "custom_plugins.json")
 	data, err := json.MarshalIndent(r.customPlugins, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(customPath, data, 0600)
+	return config.WriteFileAtomic(customPath, data, 0600)
 }
 
 func fetchRegistry() ([]Plugin, error) {
@@ -333,14 +408,6 @@ func generatePluginID(name string) string {
 	id = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(id, "-")
 	id = strings.Trim(id, "-")
 	return id
-}
-
-func extractAuthor(repo string) string {
-	parts := strings.Split(strings.TrimPrefix(repo, "https://github.com/"), "/")
-	if len(parts) > 0 {
-		return parts[0]
-	}
-	return ""
 }
 
 func validateGitHubURL(url string) error {
@@ -491,8 +558,15 @@ func (r *Registry) UpdateCustomPlugin(pluginID string, updatedPlugin *Plugin) ([
 		return nil, fmt.Errorf("updated plugin cannot be nil")
 	}
 
+	if err := validateCustomPlugin(updatedPlugin); err != nil {
+		return nil, err
+	}
+
 	// Ensure it's marked as custom
 	updatedPlugin.Custom = true
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	// Find and update in customPlugins slice
 	found := false
@@ -518,7 +592,7 @@ func (r *Registry) UpdateCustomPlugin(pluginID string, updatedPlugin *Plugin) ([
 		return nil, fmt.Errorf("failed to save custom plugins: %w", err)
 	}
 
-	// Generate trust warnings (reuse existing logic)
+	// Generate trust warnings
 	trustWarnings := []string{}
 	if !updatedPlugin.Verified {
 		trustWarnings = append(trustWarnings, "⚠️  This plugin is not verified by the OTUI team")

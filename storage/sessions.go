@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"otui/config"
+	"otui/safetext"
 )
 
 // Message represents a chat message
@@ -49,6 +50,39 @@ type Session struct {
 	LLMSummary          string     `json:"llm_summary,omitempty"` // Raw LLM summary text for context injection
 	CompactionTimestamp time.Time  `json:"compaction_timestamp,omitempty"`
 	TokenUsage          TokenUsage `json:"token_usage,omitempty"`
+}
+
+// Sanitize removes terminal control sequences from the session's text, so a
+// crafted session file can't control the terminal when it's shown. Cached
+// renderings keep only colors.
+func (s *Session) Sanitize() {
+	s.Name = safetext.Line(s.Name)
+	s.Model = safetext.Line(s.Model)
+	s.Provider = safetext.Line(s.Provider)
+	s.SystemPrompt = safetext.Clean(s.SystemPrompt)
+	s.CompactedSummary = safetext.Clean(s.CompactedSummary)
+	s.LLMSummary = safetext.Clean(s.LLMSummary)
+	for i := range s.EnabledPlugins {
+		s.EnabledPlugins[i] = safetext.Line(s.EnabledPlugins[i])
+	}
+	for i := range s.AllowedTools {
+		s.AllowedTools[i] = safetext.Line(s.AllowedTools[i])
+	}
+	for i := range s.Messages {
+		s.Messages[i].Role = safetext.Line(s.Messages[i].Role)
+		s.Messages[i].Content = safetext.Clean(s.Messages[i].Content)
+		s.Messages[i].Rendered = safetext.SGROnly(s.Messages[i].Rendered)
+	}
+}
+
+// Clone returns a copy of the session that shares no slices with it, e.g.
+// to save it in the background while the original keeps changing
+func (s *Session) Clone() *Session {
+	c := *s
+	c.Messages = append([]Message(nil), s.Messages...)
+	c.EnabledPlugins = append([]string(nil), s.EnabledPlugins...)
+	c.AllowedTools = append([]string(nil), s.AllowedTools...)
+	return &c
 }
 
 // SessionMetadata is a lightweight version of Session for listing
@@ -103,8 +137,9 @@ func (s *SessionStorage) Save(session *Session) error {
 		return fmt.Errorf("failed to marshal session: %w", err)
 	}
 
-	// Use 0600 permissions - session files contain sensitive conversation history
-	if err := os.WriteFile(filepath, data, 0600); err != nil {
+	// Use 0600 permissions - session files contain sensitive conversation history.
+	// Written atomically so a crash mid-save can't truncate the session.
+	if err := config.WriteFileAtomic(filepath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write session file: %w", err)
 	}
 
@@ -131,9 +166,11 @@ func (s *SessionStorage) Load(id string) (*Session, error) {
 		session.Provider = "ollama"
 	}
 
-	// Debug: Log compaction state after load
-	if config.Debug && config.DebugLog != nil && session.CompactionMarker > 0 {
-		config.DebugLog.Printf("[storage] Loaded session with compaction: marker=%d, summary=%q",
+	// Session files can come from elsewhere (import, older versions)
+	session.Sanitize()
+
+	if session.CompactionMarker > 0 {
+		config.Debugf("[storage] Loaded session with compaction: marker=%d, summary=%q",
 			session.CompactionMarker, session.CompactedSummary)
 	}
 
@@ -167,9 +204,9 @@ func (s *SessionStorage) List() ([]SessionMetadata, error) {
 
 		sessions = append(sessions, SessionMetadata{
 			ID:             session.ID,
-			Name:           session.Name,
-			Model:          session.Model,
-			Provider:       session.Provider,
+			Name:           safetext.Line(session.Name),
+			Model:          safetext.Line(session.Model),
+			Provider:       safetext.Line(session.Provider),
 			CreatedAt:      session.CreatedAt,
 			UpdatedAt:      session.UpdatedAt,
 			MessageCount:   len(session.Messages),
@@ -202,7 +239,7 @@ func (s *SessionStorage) Delete(id string) error {
 // SaveCurrentSessionID saves the ID of the current session
 func (s *SessionStorage) SaveCurrentSessionID(id string) error {
 	filepath := filepath.Join(filepath.Dir(s.sessionsDir), "current_session.id")
-	return os.WriteFile(filepath, []byte(id), 0600)
+	return config.WriteFileAtomic(filepath, []byte(id), 0600)
 }
 
 // LoadCurrentSessionID loads the ID of the last active session
@@ -477,6 +514,11 @@ func (ss *SessionStorage) CheckSessionLock(sessionID string) (bool, error) {
 		return false, nil
 	}
 
+	// Our own lock (e.g. left behind when OTUI restarts itself in place)
+	if pid == os.Getpid() {
+		return false, nil
+	}
+
 	// Check if process with this PID is still running
 	// os.FindProcess() always succeeds on Unix, but we use it as a basic check
 	// For cross-platform compatibility, we trust FindProcess() without signaling
@@ -491,6 +533,21 @@ func (ss *SessionStorage) CheckSessionLock(sessionID string) (bool, error) {
 	// Note: On Unix this doesn't verify the process is truly alive,
 	// but it's cross-platform compatible and good enough for our use case
 	return true, nil
+}
+
+// GetSessionLockPID returns the PID recorded in a session's lock file,
+// or 0 if there is no lock file or it can't be parsed
+func (ss *SessionStorage) GetSessionLockPID(sessionID string) int {
+	data, err := os.ReadFile(filepath.Join(ss.sessionsDir, sessionID+".lock"))
+	if err != nil {
+		return 0
+	}
+
+	var pid int
+	if _, err := fmt.Sscanf(string(data), "%d", &pid); err != nil {
+		return 0
+	}
+	return pid
 }
 
 // LockOTUIInstance creates a global lock to ensure single-instance operation

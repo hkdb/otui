@@ -2,7 +2,6 @@ package model
 
 import (
 	"context"
-	"otui/config"
 	"otui/ollama"
 
 	mcptypes "github.com/mark3labs/mcp-go/mcp"
@@ -40,8 +39,15 @@ type Provider interface {
 	Ping(ctx context.Context) error
 
 	// GetModelMetadata returns metadata for a specific model (context window, etc.)
-	// Fetches from provider API if available, falls back to hardcoded defaults
+	// Queries the provider's API where possible (may do network I/O, so never
+	// call it from View/Update - use Model.RefreshModelMetadataCmd) and falls
+	// back to hardcoded defaults.
 	GetModelMetadata(ctx context.Context, modelName string) (ModelMetadata, error)
+
+	// FallbackModelMetadata returns metadata from hardcoded tables only.
+	// Must not do any I/O - it's used for rendering until the real
+	// metadata has been fetched.
+	FallbackModelMetadata(modelName string) ModelMetadata
 }
 
 // ModelMetadata contains metadata about a model's capabilities
@@ -49,32 +55,11 @@ type ModelMetadata struct {
 	ContextWindow int
 	MaxOutput     int
 	SupportsTools bool
+	Source        string // Where ContextWindow came from (for debug logs), e.g. "ollama:/api/ps", "fallback"
 }
+
+// MetadataSourceFallback marks metadata that came from hardcoded tables
+const MetadataSourceFallback = "fallback"
 
 // StreamCallback is called for each chunk of streamed response.
 type StreamCallback func(chunk string, toolCalls []ToolCall) error
-
-// ShouldBlockOnOllamaValidation returns true if Ollama validation errors should prevent saving settings.
-// This is business logic that determines when Ollama must be reachable vs when it's optional.
-//
-// Ollama validation should only block if:
-// 1. Ollama is the default provider (user intends to use it), AND
-// 2. Ollama is enabled in the provider list
-//
-// OpenRouter-only users should be able to save settings even when Ollama is unreachable.
-func ShouldBlockOnOllamaValidation(cfg *config.Config) bool {
-	// If Ollama is not the default provider, validation failure should not block
-	if cfg.DefaultProvider != "ollama" && cfg.DefaultProvider != "" {
-		return false
-	}
-
-	// Check if Ollama is explicitly disabled in providers list
-	for _, p := range cfg.Providers {
-		if p.ID == "ollama" && !p.Enabled {
-			return false
-		}
-	}
-
-	// Ollama is default or no default set - validation should block
-	return true
-}

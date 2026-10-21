@@ -52,6 +52,15 @@ func (i *Installer) InstallWithContext(ctx context.Context, plugin *Plugin, prog
 	default:
 	}
 
+	// Registry and custom plugin data is untrusted: it becomes paths and
+	// command arguments
+	if err := ValidatePluginID(plugin.ID); err != nil {
+		return err
+	}
+	if err := ValidatePackage(plugin.InstallType, plugin.Package); err != nil {
+		return err
+	}
+
 	if err := i.checkRuntimeDeps(plugin); err != nil {
 		return fmt.Errorf("runtime check failed: %w", err)
 	}
@@ -77,6 +86,8 @@ func (i *Installer) InstallWithContext(ctx context.Context, plugin *Plugin, prog
 		return i.installBinaryWithContext(ctx, plugin, progressCh)
 	case "remote":
 		return i.installRemoteWithContext(ctx, plugin, progressCh)
+	case "docker":
+		return i.installDockerWithContext(ctx, plugin, progressCh)
 	default:
 		// Treat all other install types (manual, docker, uvx, etc.) as manual installation
 		return i.installManualWithContext(ctx, plugin, progressCh)
@@ -108,9 +119,14 @@ func (i *Installer) UninstallWithContext(ctx context.Context, pluginID string, p
 		progressCh <- InstallProgress{Stage: "removing", Percent: 50, Message: "Removing files..."}
 	}
 
-	pluginDir := filepath.Join(i.pluginsDir, pluginID)
-	if err := os.RemoveAll(pluginDir); err != nil {
-		return fmt.Errorf("failed to remove plugin directory: %w", err)
+	// An invalid ID (e.g. "..") must not delete outside the plugins
+	// directory: only its records are removed
+	if pluginDir, err := i.pluginDir(pluginID); err == nil {
+		if err := os.RemoveAll(pluginDir); err != nil {
+			return fmt.Errorf("failed to remove plugin directory: %w", err)
+		}
+	} else {
+		config.Debugf("[MCP] Uninstall: not removing files of plugin with invalid ID %q", pluginID)
 	}
 
 	if progressCh != nil {
@@ -186,6 +202,15 @@ func (i *Installer) checkRuntimeDeps(plugin *Plugin) error {
 			}
 		}
 
+	case "docker":
+		// A custom docker plugin with its own startup command and no image
+		// is run as configured
+		if plugin.Package != "" {
+			if _, err := i.runtimeChecker.CheckRuntime("docker"); err != nil {
+				return fmt.Errorf("Docker is required: %w", err)
+			}
+		}
+
 	case "go":
 		if _, err := i.runtimeChecker.CheckRuntime("go"); err != nil {
 			return fmt.Errorf("Go is required: %w", err)
@@ -204,34 +229,16 @@ func (i *Installer) checkRuntimeDeps(plugin *Plugin) error {
 	return nil
 }
 
-func (i *Installer) installNPX(plugin *Plugin, progressCh chan<- InstallProgress) error {
-	pluginDir := filepath.Join(i.pluginsDir, plugin.ID)
-	if err := os.MkdirAll(pluginDir, 0700); err != nil {
-		return fmt.Errorf("failed to create plugin directory: %w", err)
-	}
-
-	if progressCh != nil {
-		progressCh <- InstallProgress{Stage: "installing", Percent: 30, Message: "Installing npm package..."}
-	}
-
-	cmd := exec.Command("npm", "install", plugin.Package)
-	cmd.Dir = pluginDir
-	if output, err := cmd.CombinedOutput(); err != nil {
-		os.RemoveAll(pluginDir)
-		return fmt.Errorf("npm install failed: %w\n%s", err, string(output))
-	}
-
-	if progressCh != nil {
-		progressCh <- InstallProgress{Stage: "saving", Percent: 70, Message: "Saving metadata..."}
-	}
-
+// recordInstall saves an installed plugin's metadata, disabled by default
+// (like every install), and reports completion
+func (i *Installer) recordInstall(plugin *Plugin, pluginDir, version, method, doneMessage string, progressCh chan<- InstallProgress) error {
 	now := time.Now()
 	installed := storage.InstalledPlugin{
 		ID:            plugin.ID,
 		Name:          plugin.Name,
-		Version:       plugin.Package,
+		Version:       version,
 		InstallPath:   pluginDir,
-		InstallMethod: "npx",
+		InstallMethod: method,
 		InstalledAt:   now,
 		UpdatedAt:     now,
 	}
@@ -248,188 +255,21 @@ func (i *Installer) installNPX(plugin *Plugin, progressCh chan<- InstallProgress
 	}
 
 	if progressCh != nil {
-		progressCh <- InstallProgress{Stage: "complete", Percent: 100, Message: "Installation complete"}
+		progressCh <- InstallProgress{Stage: "complete", Percent: 100, Message: doneMessage}
 	}
-
 	return nil
 }
 
-func (i *Installer) installPip(plugin *Plugin, progressCh chan<- InstallProgress) error {
-	pluginDir := filepath.Join(i.pluginsDir, plugin.ID)
-	venvPath := filepath.Join(pluginDir, "venv")
-
-	if err := os.MkdirAll(pluginDir, 0700); err != nil {
-		return fmt.Errorf("failed to create plugin directory: %w", err)
+// installFailed removes a partly installed plugin and describes the error
+func installFailed(ctx context.Context, pluginDir, what string, err error, output []byte) error {
+	os.RemoveAll(pluginDir)
+	if ctx.Err() != nil {
+		return fmt.Errorf("installation cancelled")
 	}
-
-	if progressCh != nil {
-		progressCh <- InstallProgress{Stage: "venv", Percent: 30, Message: "Creating virtual environment..."}
+	if len(output) > 0 {
+		return fmt.Errorf("%s failed: %w\n%s", what, err, string(output))
 	}
-
-	cmd := exec.Command("python3", "-m", "venv", venvPath)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("venv creation failed: %w", err)
-	}
-
-	if progressCh != nil {
-		progressCh <- InstallProgress{Stage: "pip", Percent: 60, Message: "Installing package..."}
-	}
-
-	pipPath := filepath.Join(venvPath, "bin", "pip")
-	cmd = exec.Command(pipPath, "install", plugin.Package)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("pip install failed: %w\n%s", err, string(output))
-	}
-
-	now := time.Now()
-	installed := storage.InstalledPlugin{
-		ID:            plugin.ID,
-		Name:          plugin.Name,
-		Version:       plugin.Package,
-		InstallPath:   pluginDir,
-		InstallMethod: "pip",
-		InstalledAt:   now,
-		UpdatedAt:     now,
-	}
-
-	if err := i.storage.Save(installed); err != nil {
-		return fmt.Errorf("failed to save plugin metadata: %w", err)
-	}
-
-	freshConfig, err := config.LoadPluginsConfig(i.dataDir)
-	if err == nil {
-		freshConfig.SetPluginEnabled(plugin.ID, false)
-		_ = config.SavePluginsConfig(i.dataDir, freshConfig)
-		i.pluginsConfig = freshConfig
-	}
-
-	if progressCh != nil {
-		progressCh <- InstallProgress{Stage: "complete", Percent: 100, Message: "Installation complete"}
-	}
-
-	return nil
-}
-
-func (i *Installer) installGo(plugin *Plugin, progressCh chan<- InstallProgress) error {
-	pluginDir := filepath.Join(i.pluginsDir, plugin.ID)
-	binPath := filepath.Join(pluginDir, "bin")
-
-	if err := os.MkdirAll(binPath, 0700); err != nil {
-		return fmt.Errorf("failed to create bin directory: %w", err)
-	}
-
-	if progressCh != nil {
-		progressCh <- InstallProgress{Stage: "building", Percent: 40, Message: "Building Go binary..."}
-	}
-
-	cmd := exec.Command("go", "install", plugin.Package)
-	cmd.Env = append(os.Environ(), "GOBIN="+binPath)
-
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("go install failed: %w\n%s", err, string(output))
-	}
-
-	now := time.Now()
-	installed := storage.InstalledPlugin{
-		ID:            plugin.ID,
-		Name:          plugin.Name,
-		Version:       plugin.Package,
-		InstallPath:   pluginDir,
-		InstallMethod: "go",
-		InstalledAt:   now,
-		UpdatedAt:     now,
-	}
-
-	if err := i.storage.Save(installed); err != nil {
-		return fmt.Errorf("failed to save plugin metadata: %w", err)
-	}
-
-	freshConfig, err := config.LoadPluginsConfig(i.dataDir)
-	if err == nil {
-		freshConfig.SetPluginEnabled(plugin.ID, false)
-		_ = config.SavePluginsConfig(i.dataDir, freshConfig)
-		i.pluginsConfig = freshConfig
-	}
-
-	if progressCh != nil {
-		progressCh <- InstallProgress{Stage: "complete", Percent: 100, Message: "Installation complete"}
-	}
-
-	return nil
-}
-
-func (i *Installer) installBinary(plugin *Plugin, progressCh chan<- InstallProgress) error {
-	pluginDir := filepath.Join(i.pluginsDir, plugin.ID)
-	binDir := filepath.Join(pluginDir, "bin")
-
-	if err := os.MkdirAll(binDir, 0700); err != nil {
-		return fmt.Errorf("failed to create bin directory: %w", err)
-	}
-
-	now := time.Now()
-	installed := storage.InstalledPlugin{
-		ID:            plugin.ID,
-		Name:          plugin.Name,
-		Version:       "binary",
-		InstallPath:   pluginDir,
-		InstallMethod: "binary",
-		InstalledAt:   now,
-		UpdatedAt:     now,
-	}
-
-	if err := i.storage.Save(installed); err != nil {
-		return fmt.Errorf("failed to save plugin metadata: %w", err)
-	}
-
-	freshConfig, err := config.LoadPluginsConfig(i.dataDir)
-	if err == nil {
-		freshConfig.SetPluginEnabled(plugin.ID, false)
-		_ = config.SavePluginsConfig(i.dataDir, freshConfig)
-		i.pluginsConfig = freshConfig
-	}
-
-	if progressCh != nil {
-		progressCh <- InstallProgress{Stage: "complete", Percent: 100, Message: "Ready for manual binary setup"}
-	}
-
-	return nil
-}
-
-func (i *Installer) installManual(plugin *Plugin, progressCh chan<- InstallProgress) error {
-	pluginDir := filepath.Join(i.pluginsDir, plugin.ID)
-	binDir := filepath.Join(pluginDir, "bin")
-
-	if err := os.MkdirAll(binDir, 0700); err != nil {
-		return fmt.Errorf("failed to create bin directory: %w", err)
-	}
-
-	now := time.Now()
-	installed := storage.InstalledPlugin{
-		ID:            plugin.ID,
-		Name:          plugin.Name,
-		Version:       "manual",
-		InstallPath:   pluginDir,
-		InstallMethod: "manual",
-		InstalledAt:   now,
-		UpdatedAt:     now,
-	}
-
-	if err := i.storage.Save(installed); err != nil {
-		return fmt.Errorf("failed to save plugin metadata: %w", err)
-	}
-
-	freshConfig, err := config.LoadPluginsConfig(i.dataDir)
-	if err == nil {
-		freshConfig.SetPluginEnabled(plugin.ID, false)
-		_ = config.SavePluginsConfig(i.dataDir, freshConfig)
-		i.pluginsConfig = freshConfig
-	}
-
-	if progressCh != nil {
-		progressCh <- InstallProgress{Stage: "complete", Percent: 100, Message: "Ready for manual setup"}
-	}
-
-	return nil
+	return fmt.Errorf("%s failed: %w", what, err)
 }
 
 func (i *Installer) GetRuntimeChecker() *RuntimeChecker {
@@ -437,13 +277,14 @@ func (i *Installer) GetRuntimeChecker() *RuntimeChecker {
 }
 
 func (i *Installer) installNPXWithContext(ctx context.Context, plugin *Plugin, progressCh chan<- InstallProgress) error {
-	select {
-	case <-ctx.Done():
+	if ctx.Err() != nil {
 		return fmt.Errorf("installation cancelled")
-	default:
 	}
 
-	pluginDir := filepath.Join(i.pluginsDir, plugin.ID)
+	pluginDir, err := i.pluginDir(plugin.ID)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(pluginDir, 0700); err != nil {
 		return fmt.Errorf("failed to create plugin directory: %w", err)
 	}
@@ -452,31 +293,34 @@ func (i *Installer) installNPXWithContext(ctx context.Context, plugin *Plugin, p
 		progressCh <- InstallProgress{Stage: "installing", Percent: 30, Message: "Installing npm package..."}
 	}
 
-	cmd := exec.CommandContext(ctx, "npm", "install", plugin.Package)
+	// "--": the package can't be read as an npm option
+	cmd := exec.CommandContext(ctx, "npm", "install", "--", plugin.Package)
 	cmd.Dir = pluginDir
 	if output, err := cmd.CombinedOutput(); err != nil {
-		os.RemoveAll(pluginDir)
-		if ctx.Err() != nil {
-			return fmt.Errorf("installation cancelled")
-		}
-		return fmt.Errorf("npm install failed: %w\n%s", err, string(output))
+		return installFailed(ctx, pluginDir, "npm install", err, output)
 	}
 
-	return i.installNPX(plugin, progressCh)
+	if progressCh != nil {
+		progressCh <- InstallProgress{Stage: "saving", Percent: 70, Message: "Saving metadata..."}
+	}
+	if err := i.recordInstall(plugin, pluginDir, plugin.Package, "npx", "Installation complete", progressCh); err != nil {
+		os.RemoveAll(pluginDir)
+		return err
+	}
+	return nil
 }
 
 func (i *Installer) installPipWithContext(ctx context.Context, plugin *Plugin, progressCh chan<- InstallProgress) error {
-	select {
-	case <-ctx.Done():
-		pluginDir := filepath.Join(i.pluginsDir, plugin.ID)
+	pluginDir, err := i.pluginDir(plugin.ID)
+	if err != nil {
+		return err
+	}
+	if ctx.Err() != nil {
 		os.RemoveAll(pluginDir)
 		return fmt.Errorf("installation cancelled")
-	default:
 	}
 
-	pluginDir := filepath.Join(i.pluginsDir, plugin.ID)
 	venvPath := filepath.Join(pluginDir, "venv")
-
 	if err := os.MkdirAll(pluginDir, 0700); err != nil {
 		return fmt.Errorf("failed to create plugin directory: %w", err)
 	}
@@ -485,71 +329,38 @@ func (i *Installer) installPipWithContext(ctx context.Context, plugin *Plugin, p
 		progressCh <- InstallProgress{Stage: "venv", Percent: 30, Message: "Creating virtual environment..."}
 	}
 
-	cmd := exec.CommandContext(ctx, "python3", "-m", "venv", venvPath)
-	if err := cmd.Run(); err != nil {
-		os.RemoveAll(pluginDir)
-		if ctx.Err() != nil {
-			return fmt.Errorf("installation cancelled")
-		}
-		return fmt.Errorf("venv creation failed: %w", err)
+	if err := exec.CommandContext(ctx, "python3", "-m", "venv", venvPath).Run(); err != nil {
+		return installFailed(ctx, pluginDir, "venv creation", err, nil)
 	}
 
 	if progressCh != nil {
 		progressCh <- InstallProgress{Stage: "pip", Percent: 60, Message: "Installing package..."}
 	}
 
+	// "--": the package can't be read as a pip option
 	pipPath := filepath.Join(venvPath, "bin", "pip")
-	cmd = exec.CommandContext(ctx, pipPath, "install", plugin.Package)
-	if output, err := cmd.CombinedOutput(); err != nil {
+	if output, err := exec.CommandContext(ctx, pipPath, "install", "--", plugin.Package).CombinedOutput(); err != nil {
+		return installFailed(ctx, pluginDir, "pip install", err, output)
+	}
+
+	if err := i.recordInstall(plugin, pluginDir, plugin.Package, "pip", "Installation complete", progressCh); err != nil {
 		os.RemoveAll(pluginDir)
-		if ctx.Err() != nil {
-			return fmt.Errorf("installation cancelled")
-		}
-		return fmt.Errorf("pip install failed: %w\n%s", err, string(output))
+		return err
 	}
-
-	now := time.Now()
-	installed := storage.InstalledPlugin{
-		ID:            plugin.ID,
-		Name:          plugin.Name,
-		Version:       plugin.Package,
-		InstallPath:   pluginDir,
-		InstallMethod: "pip",
-		InstalledAt:   now,
-		UpdatedAt:     now,
-	}
-
-	if err := i.storage.Save(installed); err != nil {
-		os.RemoveAll(pluginDir)
-		return fmt.Errorf("failed to save plugin metadata: %w", err)
-	}
-
-	freshConfig, err := config.LoadPluginsConfig(i.dataDir)
-	if err == nil {
-		freshConfig.SetPluginEnabled(plugin.ID, false)
-		_ = config.SavePluginsConfig(i.dataDir, freshConfig)
-		i.pluginsConfig = freshConfig
-	}
-
-	if progressCh != nil {
-		progressCh <- InstallProgress{Stage: "complete", Percent: 100, Message: "Installation complete"}
-	}
-
 	return nil
 }
 
 func (i *Installer) installGoWithContext(ctx context.Context, plugin *Plugin, progressCh chan<- InstallProgress) error {
-	select {
-	case <-ctx.Done():
-		pluginDir := filepath.Join(i.pluginsDir, plugin.ID)
+	pluginDir, err := i.pluginDir(plugin.ID)
+	if err != nil {
+		return err
+	}
+	if ctx.Err() != nil {
 		os.RemoveAll(pluginDir)
 		return fmt.Errorf("installation cancelled")
-	default:
 	}
 
-	pluginDir := filepath.Join(i.pluginsDir, plugin.ID)
 	binPath := filepath.Join(pluginDir, "bin")
-
 	if err := os.MkdirAll(binPath, 0700); err != nil {
 		return fmt.Errorf("failed to create bin directory: %w", err)
 	}
@@ -558,63 +369,80 @@ func (i *Installer) installGoWithContext(ctx context.Context, plugin *Plugin, pr
 		progressCh <- InstallProgress{Stage: "building", Percent: 40, Message: "Building Go binary..."}
 	}
 
-	cmd := exec.CommandContext(ctx, "go", "install", plugin.Package)
+	// "--": the package can't be read as a go flag (e.g. -toolexec)
+	cmd := exec.CommandContext(ctx, "go", "install", "--", plugin.Package)
 	cmd.Env = append(os.Environ(), "GOBIN="+binPath)
-
 	if output, err := cmd.CombinedOutput(); err != nil {
+		return installFailed(ctx, pluginDir, "go install", err, output)
+	}
+
+	if err := i.recordInstall(plugin, pluginDir, plugin.Package, "go", "Installation complete", progressCh); err != nil {
 		os.RemoveAll(pluginDir)
-		if ctx.Err() != nil {
-			return fmt.Errorf("installation cancelled")
-		}
-		return fmt.Errorf("go install failed: %w\n%s", err, string(output))
+		return err
 	}
-
-	now := time.Now()
-	installed := storage.InstalledPlugin{
-		ID:            plugin.ID,
-		Name:          plugin.Name,
-		Version:       plugin.Package,
-		InstallPath:   pluginDir,
-		InstallMethod: "go",
-		InstalledAt:   now,
-		UpdatedAt:     now,
-	}
-
-	if err := i.storage.Save(installed); err != nil {
-		os.RemoveAll(pluginDir)
-		return fmt.Errorf("failed to save plugin metadata: %w", err)
-	}
-
-	freshConfig, err := config.LoadPluginsConfig(i.dataDir)
-	if err == nil {
-		freshConfig.SetPluginEnabled(plugin.ID, false)
-		_ = config.SavePluginsConfig(i.dataDir, freshConfig)
-		i.pluginsConfig = freshConfig
-	}
-
-	if progressCh != nil {
-		progressCh <- InstallProgress{Stage: "complete", Percent: 100, Message: "Installation complete"}
-	}
-
 	return nil
 }
 
-func (i *Installer) installBinaryWithContext(ctx context.Context, plugin *Plugin, progressCh chan<- InstallProgress) error {
-	select {
-	case <-ctx.Done():
+// installDirOnly creates the plugin's directory (with bin/) and records the
+// install, for plugins set up by hand (binary, manual)
+func (i *Installer) installDirOnly(ctx context.Context, plugin *Plugin, version, doneMessage string, progressCh chan<- InstallProgress) error {
+	if ctx.Err() != nil {
 		return fmt.Errorf("installation cancelled")
-	default:
 	}
-	return i.installBinary(plugin, progressCh)
+
+	pluginDir, err := i.pluginDir(plugin.ID)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(pluginDir, "bin"), 0700); err != nil {
+		return fmt.Errorf("failed to create bin directory: %w", err)
+	}
+	return i.recordInstall(plugin, pluginDir, version, version, doneMessage, progressCh)
+}
+
+func (i *Installer) installBinaryWithContext(ctx context.Context, plugin *Plugin, progressCh chan<- InstallProgress) error {
+	return i.installDirOnly(ctx, plugin, "binary", "Ready for manual binary setup", progressCh)
+}
+
+// installDockerWithContext pulls a docker plugin's image. Images that can't
+// be pulled are accepted if they exist locally (e.g. built from the plugin's
+// repository).
+func (i *Installer) installDockerWithContext(ctx context.Context, plugin *Plugin, progressCh chan<- InstallProgress) error {
+	image := strings.TrimSpace(plugin.Package)
+	if image == "" {
+		// Custom plugin with its own startup command
+		return i.installManualWithContext(ctx, plugin, progressCh)
+	}
+
+	pluginDir, err := i.pluginDir(plugin.ID)
+	if err != nil {
+		return err
+	}
+
+	if progressCh != nil {
+		progressCh <- InstallProgress{Stage: "installing", Percent: 40, Message: fmt.Sprintf("Pulling %s...", image)}
+	}
+
+	// "--": the image can't be read as a docker option
+	pullOutput, pullErr := exec.CommandContext(ctx, "docker", "pull", "--", image).CombinedOutput()
+	if ctx.Err() != nil {
+		return fmt.Errorf("installation cancelled")
+	}
+	if pullErr != nil {
+		if err := exec.CommandContext(ctx, "docker", "image", "inspect", "--", image).Run(); err != nil {
+			return fmt.Errorf("docker pull %s failed: %w\n%s\nIf this image is built locally, build it first (see the plugin's README)",
+				image, pullErr, strings.TrimSpace(string(pullOutput)))
+		}
+	}
+
+	if err := os.MkdirAll(pluginDir, 0700); err != nil {
+		return fmt.Errorf("failed to create plugin directory: %w", err)
+	}
+	return i.recordInstall(plugin, pluginDir, image, "docker", "Installation complete", progressCh)
 }
 
 func (i *Installer) installManualWithContext(ctx context.Context, plugin *Plugin, progressCh chan<- InstallProgress) error {
-	select {
-	case <-ctx.Done():
-		return fmt.Errorf("installation cancelled")
-	default:
-	}
-	return i.installManual(plugin, progressCh)
+	return i.installDirOnly(ctx, plugin, "manual", "Ready for manual setup", progressCh)
 }
 
 func (i *Installer) installRemoteWithContext(ctx context.Context, plugin *Plugin, progressCh chan<- InstallProgress) error {

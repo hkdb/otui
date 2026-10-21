@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,7 +59,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	}
 
-	// Update tool execution spinner if executing tools (Phase 6)
+	// Update tool execution spinner if executing tools
 	if a.executingTool != "" {
 		a.toolExecutionSpinner, cmd = a.toolExecutionSpinner.Update(msg)
 		cmds = append(cmds, cmd)
@@ -112,13 +113,15 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.height = msg.Height
 
 		// Reserve space for title (1 line), separator (1 line), textarea (3 lines), and status bar (1 line)
-		viewportHeight := a.height - 6
-		a.viewport.Width = a.width
+		// Keep sizes positive: the viewport panics with a negative height
+		// in tiny terminals (View shows a "too small" message then)
+		viewportHeight := max(a.height-6, 1)
+		a.viewport.Width = max(a.width, 1)
 		a.viewport.Height = viewportHeight
-		a.textarea.SetWidth(a.width)
+		a.textarea.SetWidth(max(a.width, 1))
 
 		a.ready = true
-		a.updateViewportContent(true)
+		a.updateViewportContent(!a.userScrolledUp)
 
 		// Trigger initial rendering if needed (after we have width)
 		if a.dataModel.NeedsInitialRender {
@@ -143,15 +146,11 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// PRIORITY 0: Always-global shortcuts (quit, help toggle)
 		if msg.String() == kb.PrimaryKey("q") {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] Alt+Q pressed (location 1) - beginning quit sequence")
-			}
+			config.Debugf("[UI] Alt+Q pressed (location 1) - beginning quit sequence")
 
 			// If shutdown modal is already showing, force quit immediately (user pressed Alt+Q twice)
 			if a.pluginSystemState.Active {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] Alt+Q pressed while shutdown modal active - FORCE QUITTING")
-				}
+				config.Debugf("[UI] Alt+Q pressed while shutdown modal active - FORCE QUITTING")
 				if a.dataModel.CurrentSession != nil && a.dataModel.SessionStorage != nil {
 					_ = a.dataModel.SessionStorage.UnlockSession(a.dataModel.CurrentSession.ID)
 				}
@@ -160,9 +159,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// If plugins are enabled, show shutdown modal and attempt graceful shutdown
 			if a.dataModel.MCPManager != nil && a.dataModel.Config.PluginsEnabled {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] Alt+Q: Plugins enabled, showing shutdown modal")
-				}
+				config.Debugf("[UI] Alt+Q: Plugins enabled, showing shutdown modal")
 				a.dataModel.Quitting = true
 				a.pluginSystemState = PluginSystemState{
 					Active:    true,
@@ -179,17 +176,17 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			// No plugins or plugins disabled - quit immediately
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] Alt+Q: No plugins, quitting immediately")
-			}
+			config.Debugf("[UI] Alt+Q: No plugins, quitting immediately")
 			if a.dataModel.CurrentSession != nil && a.dataModel.SessionStorage != nil {
 				_ = a.dataModel.SessionStorage.UnlockSession(a.dataModel.CurrentSession.ID)
 			}
 			return a, tea.Quit
 		}
 
-		// PRIORITY 0.5: Permission system key handling (blocks all other keys when active)
-		if a.waitingForPermission && a.pendingPermission != nil {
+		// PRIORITY 0.5: Permission system key handling (blocks all other keys when active).
+		// The prompt is in the chat, so while a modal is open over it the
+		// modal gets the keys; the prompt is answered once it's closed.
+		if a.waitingForPermission && a.pendingPermission != nil && !a.modalVisible() {
 			switch msg.String() {
 			case "y":
 				// Yes - Approve once
@@ -198,7 +195,10 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					AlwaysAllow:     false,
 					ToolName:        a.pendingPermission.ToolName,
 					ToolCall:        a.pendingPermission.ToolCall,
+					ToolCalls:       a.pendingPermission.ToolCalls,
+					InitialResponse: a.pendingPermission.InitialResponse,
 					ContextMessages: a.pendingPermission.ContextMessages,
+					RequestID:       a.pendingPermission.RequestID,
 				}
 				return a.Update(response)
 
@@ -209,18 +209,24 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					AlwaysAllow:     true,
 					ToolName:        a.pendingPermission.ToolName,
 					ToolCall:        a.pendingPermission.ToolCall,
+					ToolCalls:       a.pendingPermission.ToolCalls,
+					InitialResponse: a.pendingPermission.InitialResponse,
 					ContextMessages: a.pendingPermission.ContextMessages,
+					RequestID:       a.pendingPermission.RequestID,
 				}
 				return a.Update(response)
 
-			case "n":
+			case "n", "esc":
 				// No - Deny
 				response := toolPermissionResponseMsg{
 					Approved:        false,
 					AlwaysAllow:     false,
 					ToolName:        a.pendingPermission.ToolName,
 					ToolCall:        a.pendingPermission.ToolCall,
+					ToolCalls:       a.pendingPermission.ToolCalls,
+					InitialResponse: a.pendingPermission.InitialResponse,
 					ContextMessages: a.pendingPermission.ContextMessages,
+					RequestID:       a.pendingPermission.RequestID,
 				}
 				return a.Update(response)
 
@@ -262,6 +268,9 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case kb.GetActionKey("new_session"):
+			if a.blockedByActiveResponse("creating a session") {
+				return a, nil
+			}
 			a.closeAllModals()
 
 			// Unlock current session before clearing
@@ -274,20 +283,18 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			newSession, err := a.dataModel.CreateAndSaveNewSession("New Session", "", []string{})
 			if err != nil {
 				// If session creation fails, show error but don't crash
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("Failed to create new Session: %v", err)
-				}
+				config.Debugf("Failed to create new Session: %v", err)
 				// Could show error modal here, but for now just return
 				return a, nil
 			}
 
 			// Clear UI and sync with MCP manager
 			a.dataModel.Messages = []Message{}
-			a.setCurrentSession(newSession) // Syncs MCP manager - fixes security hole!
+			a.setCurrentSession(newSession) // Also scopes the MCP manager to this session
 			a.dataModel.SessionDirty = false
 			a.textarea.Reset()
 			a.updateViewportContent(true)
-			return a, nil
+			return a, a.dataModel.RefreshModelMetadataCmd()
 
 		case kb.GetActionKey("session_manager"):
 			wasOpen := a.showSessionManager
@@ -448,6 +455,27 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						Type:         SettingTypeNotifyOnComplete,
 						Validation:   FieldValidationNone,
 					},
+					{
+						Label:        "Tool Approval",
+						Value:        boolToString(a.dataModel.Config.RequireApproval),
+						DefaultValue: "true",
+						Type:         SettingTypeRequireApproval,
+						Validation:   FieldValidationNone,
+					},
+					{
+						Label:        "First Token (s)",
+						Value:        strconv.Itoa(a.dataModel.Config.FirstTokenTimeoutSecs),
+						DefaultValue: strconv.Itoa(config.DefaultFirstTokenTimeout),
+						Type:         SettingTypeFirstTokenTimeout,
+						Validation:   FieldValidationNone,
+					},
+					{
+						Label:        "Stream Idle (s)",
+						Value:        strconv.Itoa(a.dataModel.Config.StreamIdleTimeoutSecs),
+						DefaultValue: strconv.Itoa(config.DefaultStreamIdleTimeout),
+						Type:         SettingTypeStreamIdleTimeout,
+						Validation:   FieldValidationNone,
+					},
 				}
 				a.selectedSettingIdx = 0
 				a.settingsEditMode = false
@@ -545,9 +573,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				AssistantCount:   assistantCount,
 			}
 
-			if config.Debug && config.DebugLog != nil {
-				config.DebugLog.Printf("[compaction] Manual compaction requested: marker=%d (total messages: %d)", markerIndex, messageCount)
-			}
+			config.Debugf("[compaction] Manual compaction requested: marker=%d (total messages: %d)", markerIndex, messageCount)
 
 			return a.Update(req)
 		}
@@ -576,9 +602,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				switch msg.String() {
 				case "y":
 					// Wait longer - try again with another 2 second timeout
-					if config.DebugLog != nil {
-						config.DebugLog.Printf("[UI] User chose to wait, trying shutdown again")
-					}
+					config.Debugf("[UI] User chose to wait, trying shutdown again")
 					a.pluginSystemState.Phase = "waiting"
 					a.pluginSystemState.UnresponsivePlugins = []string{}
 					a.pluginSystemState.ErrorMsg = "" // Clear previous error before retry
@@ -599,18 +623,14 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case "n":
 					if a.dataModel.Quitting {
 						// Quit immediately without waiting
-						if config.DebugLog != nil {
-							config.DebugLog.Printf("[UI] User chose to quit immediately, unlocking and quitting")
-						}
+						config.Debugf("[UI] User chose to quit immediately, unlocking and quitting")
 						if a.dataModel.CurrentSession != nil && a.dataModel.SessionStorage != nil {
 							_ = a.dataModel.SessionStorage.UnlockSession(a.dataModel.CurrentSession.ID)
 						}
 						return a, tea.Quit
 					} else {
 						// Settings toggle - force shutdown, clear modal
-						if config.DebugLog != nil {
-							config.DebugLog.Printf("[UI] User chose to force shutdown plugins")
-						}
+						config.Debugf("[UI] User chose to force shutdown plugins")
 						a.pluginSystemState = PluginSystemState{}
 						a.dataModel.MCPManager = nil
 						return a, nil
@@ -621,8 +641,12 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+		if a.showSessionLockedModal {
+			return a.handleSessionLockedModalUpdate(msg)
+		}
+
 		if a.showAcknowledgeModal {
-			if msg.String() == "enter" {
+			if msg.String() == "enter" || msg.String() == "esc" {
 				a.showAcknowledgeModal = false
 				return a, nil
 			}
@@ -637,9 +661,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.pluginOperationName = ""
 				a.pluginOperationError = ""
 
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] User cancelled plugin operation with ESC")
-				}
+				config.Debugf("[UI] User cancelled plugin operation with ESC")
 
 				return a, nil
 			}
@@ -716,25 +738,14 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// PRIORITY 4: Streaming cancellation (only if no modal open)
 		if msg.String() == "esc" && a.dataModel.Streaming {
-			a.dataModel.Streaming = false
-			a.userScrolledUp = false
-
-			partialResp := a.currentResp.String()
+			a.cancelRequest()
 
 			// Remove loading message (but not persistent step messages)
-			if len(a.dataModel.Messages) > 0 &&
-				a.dataModel.Messages[len(a.dataModel.Messages)-1].Role == "system" &&
-				!a.dataModel.Messages[len(a.dataModel.Messages)-1].Persistent {
-				a.dataModel.Messages = a.dataModel.Messages[:len(a.dataModel.Messages)-1]
-			}
+			a.removeLastNonPersistentSystemMessage()
 
-			if partialResp != "" {
-				a.dataModel.Messages = append(a.dataModel.Messages, Message{
-					Role:      "assistant",
-					Content:   partialResp + "\n\n⚠️ Response cancelled",
-					Rendered:  partialResp + "\n\n⚠️ Response cancelled",
-					Timestamp: time.Now(),
-				})
+			// Keep the text that arrived so far
+			if a.currentResp.Len() > 0 {
+				a.keepPartialResponse("⚠️ Response cancelled")
 			} else {
 				a.dataModel.Messages = append(a.dataModel.Messages, Message{
 					Role:      "system",
@@ -743,10 +754,6 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Timestamp: time.Now(),
 				})
 			}
-
-			a.chunks = nil
-			a.chunkIndex = 0
-			a.currentResp.Reset()
 
 			a.updateViewportContent(true)
 			return a, nil
@@ -776,14 +783,10 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// Clear editor temp file (defense in depth)
 				if err := config.ClearEditorTempFile(); err != nil {
-					if config.DebugLog != nil {
-						config.DebugLog.Printf("Warning: failed to clear editor temp file: %v", err)
-					}
+					config.Debugf("Warning: failed to clear editor temp file: %v", err)
 				}
 
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("Enter pressed - sending message: %s", userMsg)
-				}
+				config.Debugf("Enter pressed - sending message: %s", userMsg)
 
 				// Check if provider is enabled before sending
 				canSend, errMsg := a.dataModel.CanSendMessage()
@@ -828,9 +831,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.dataModel.Streaming = true
 				a.updateViewportContent(true)
 
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("Firing sendToOllama() Cmd")
-				}
+				config.Debugf("Firing sendToOllama() Cmd")
 
 				// Start streaming response, spinner animation, and render user message markdown
 				return a, tea.Batch(
@@ -845,15 +846,11 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case kb.GetActionKey("quit"):
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] Alt+Q pressed (location 2) - beginning quit sequence")
-			}
+			config.Debugf("[UI] Alt+Q pressed (location 2) - beginning quit sequence")
 
 			// If plugins are enabled, show shutdown modal and attempt graceful shutdown
 			if a.dataModel.MCPManager != nil && a.dataModel.Config.PluginsEnabled {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] Alt+Q: Plugins enabled, showing shutdown modal")
-				}
+				config.Debugf("[UI] Alt+Q: Plugins enabled, showing shutdown modal")
 				a.dataModel.Quitting = true
 				a.pluginSystemState = PluginSystemState{
 					Active:    true,
@@ -870,9 +867,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			// No plugins or plugins disabled - quit immediately
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] Alt+Q: No plugins, quitting immediately")
-			}
+			config.Debugf("[UI] Alt+Q: No plugins, quitting immediately")
 			if a.dataModel.CurrentSession != nil && a.dataModel.SessionStorage != nil {
 				_ = a.dataModel.SessionStorage.UnlockSession(a.dataModel.CurrentSession.ID)
 			}
@@ -926,52 +921,38 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case kb.GetActionKey("scroll_down"), kb.GetActionKey("scroll_down_arrow"):
-			a.viewport.LineDown(1)
-			if a.dataModel.Streaming && a.viewport.AtBottom() {
-				a.userScrolledUp = false
-			}
+			a.viewport.ScrollDown(1)
+			a.userScrolledUp = !a.viewport.AtBottom()
 			return a, nil
 
 		case kb.GetActionKey("scroll_up"), kb.GetActionKey("scroll_up_arrow"):
-			a.viewport.LineUp(1)
-			if a.dataModel.Streaming {
-				a.userScrolledUp = true
-			}
+			a.viewport.ScrollUp(1)
+			a.userScrolledUp = !a.viewport.AtBottom()
 			return a, nil
 
 		case kb.GetActionKey("half_page_down"), kb.GetActionKey("half_page_down_arrow"):
 			a.viewport.HalfPageDown()
-			if a.dataModel.Streaming && a.viewport.AtBottom() {
-				a.userScrolledUp = false
-			}
+			a.userScrolledUp = !a.viewport.AtBottom()
 			return a, nil
 
 		case kb.GetActionKey("half_page_up"), kb.GetActionKey("half_page_up_arrow"):
 			a.viewport.HalfPageUp()
-			if a.dataModel.Streaming {
-				a.userScrolledUp = true
-			}
+			a.userScrolledUp = !a.viewport.AtBottom()
 			return a, nil
 
 		case kb.GetActionKey("page_down"):
 			a.viewport.PageDown()
-			if a.dataModel.Streaming && a.viewport.AtBottom() {
-				a.userScrolledUp = false
-			}
+			a.userScrolledUp = !a.viewport.AtBottom()
 			return a, nil
 
 		case kb.GetActionKey("page_up"):
 			a.viewport.PageUp()
-			if a.dataModel.Streaming {
-				a.userScrolledUp = true
-			}
+			a.userScrolledUp = !a.viewport.AtBottom()
 			return a, nil
 
 		case kb.GetActionKey("scroll_to_top"):
 			a.viewport.GotoTop()
-			if a.dataModel.Streaming {
-				a.userScrolledUp = true
-			}
+			a.userScrolledUp = !a.viewport.AtBottom()
 			return a, nil
 
 		case kb.GetActionKey("scroll_to_bottom"):
@@ -981,12 +962,12 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	// Streaming messages → appview_update_streaming.go
-	case streamChunksCollectedMsg, displayChunkTickMsg, streamChunkMsg, streamDoneMsg, streamErrorMsg, notifyCompleteMsg:
+	case streamChunkMsg, typewriterTickMsg, streamDoneMsg, streamErrorMsg, notifyCompleteMsg:
 		return a.handleStreamingMessage(msg)
 
-	// Phase 6: Tool execution handlers
+	// Tool execution handlers
 	// Tool messages → appview_update_tools.go
-	case toolCallsDetectedMsg, toolExecutionCompleteMsg, toolExecutionErrorMsg,
+	case toolCallsDetectedMsg, toolResultsReadyMsg, toolExecutionCompleteMsg, toolExecutionErrorMsg,
 		toolPermissionRequestMsg, toolPermissionResponseMsg:
 		return a.handleToolMessage(msg)
 
@@ -998,19 +979,18 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case flashTickMsg, markdownRenderedMsg, modelsListMsg, sessionsListMsg:
 		return a.handleUIMessage(msg)
 
+	case globalSearchTickMsg, globalSearchResultsMsg:
+		return a.handleGlobalSearchMessage(msg)
+
 	case pluginSystemOperationMsg:
-		// Handle plugin system start/stop completion (from Settings toggle)
-		// IMPORTANT: This must be at top level because Settings modal closes before operation completes
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[UI] pluginSystemOperationMsg: operation=%s, success=%v", msg.operation, msg.success)
-		}
+		// Plugin system start/stop completion (from the Settings toggle). Handled
+		// here rather than in the settings handler, which is closed by now
+		config.Debugf("[UI] pluginSystemOperationMsg: operation=%s, success=%v", msg.operation, msg.success)
 
 		if msg.operation == "starting" {
 			if !msg.success {
 				// Startup failed - show error
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] Plugin startup FAILED: %v", msg.err)
-				}
+				config.Debugf("[UI] Plugin startup failed: %v", msg.err)
 				a.pluginSystemState.Phase = "error"
 				if msg.err != nil {
 					a.pluginSystemState.ErrorMsg = fmt.Sprintf("Failed to start plugins: %v", msg.err)
@@ -1021,14 +1001,10 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			// Success - reload config to reflect PluginsEnabled=true
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] Plugin startup SUCCESS - reloading config")
-			}
-			cfg, err := config.Load()
+			config.Debugf("[UI] Plugin startup succeeded - reloading config")
+			cfg, err := config.Reload(a.dataModel.Config.CredentialStore)
 			if err != nil {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] ERROR reloading config after plugin enable: %v", err)
-				}
+				config.Debugf("[UI] ERROR reloading config after plugin enable: %v", err)
 				a.pluginSystemState.Phase = "error"
 				a.pluginSystemState.ErrorMsg = fmt.Sprintf("Plugins started but failed to reload config: %v", err)
 				return a, nil
@@ -1038,18 +1014,14 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Dismiss modal
 			a.pluginSystemState = PluginSystemState{}
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] Plugins enabled successfully, config reloaded, modal dismissed")
-			}
+			config.Debugf("[UI] Plugins enabled successfully, config reloaded, modal dismissed")
 			return a, nil
 		}
 
 		if msg.operation == "stopping" {
-			// Handle failure first (early return pattern - RULE #15)
+			// Handle failure first
 			if !msg.success && len(msg.unresponsivePlugins) > 0 {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] Plugin shutdown UNRESPONSIVE: %v", msg.unresponsivePlugins)
-				}
+				config.Debugf("[UI] Plugin shutdown UNRESPONSIVE: %v", msg.unresponsivePlugins)
 
 				// Check if this was part of a callback operation
 				if a.pendingPluginOperation == "datadir_switch" {
@@ -1071,20 +1043,16 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 
-			// Success path (no else needed - RULE #15)
+			// Shutdown succeeded
 			a.pluginSystemState.Active = false
 
-			// STEP 2: Destroy manager (ALWAYS after successful shutdown - critical!)
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] Plugin shutdown SUCCESS - destroying manager")
-			}
+			// The manager is always dropped after a successful shutdown
+			config.Debugf("[UI] Plugin shutdown succeeded - destroying manager")
 			a.dataModel.MCPManager = nil
 
 			// Check if this is app quit
 			if a.dataModel.Quitting {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] Shutdown complete - quitting app")
-				}
+				config.Debugf("[UI] Shutdown complete - quitting app")
 				if a.dataModel.CurrentSession != nil && a.dataModel.SessionStorage != nil {
 					_ = a.dataModel.SessionStorage.UnlockSession(a.dataModel.CurrentSession.ID)
 				}
@@ -1094,27 +1062,20 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Check if this was part of a callback operation
 			if a.pendingPluginOperation == "datadir_switch" {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] STEP 1-2 complete: Shutdown + destroy - continuing with STEPS 3-6")
-				}
+				config.Debugf("[UI] Plugins stopped - continuing data dir switch")
 
 				newDataDir := a.pendingPluginOperationData.(string)
 				a.pendingPluginOperation = ""
 				a.pendingPluginOperationData = nil
 
-				// Continue with STEPS 3-6
 				return a, a.completeDataDirSwitch(newDataDir)
 			}
 
 			// Normal plugin shutdown (Settings toggle disable)
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] Plugin shutdown SUCCESS - reloading config")
-			}
-			cfg, err := config.Load()
+			config.Debugf("[UI] Plugin shutdown succeeded - reloading config")
+			cfg, err := config.Reload(a.dataModel.Config.CredentialStore)
 			if err != nil {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] ERROR reloading config: %v", err)
-				}
+				config.Debugf("[UI] ERROR reloading config: %v", err)
 			}
 			if err == nil {
 				a.dataModel.Config = cfg
@@ -1123,23 +1084,17 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Dismiss modal
 			a.pluginSystemState = PluginSystemState{}
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] Plugins disabled successfully, modal dismissed")
-			}
+			config.Debugf("[UI] Plugins disabled successfully, modal dismissed")
 			return a, nil
 		}
 
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[UI] pluginSystemOperationMsg: Unknown operation '%s'", msg.operation)
-		}
+		config.Debugf("[UI] pluginSystemOperationMsg: Unknown operation '%s'", msg.operation)
 		return a, nil
 
 	case pluginOperationCompleteMsg:
 		// If modal is closed, ignore the message (user cancelled with ESC)
 		if !a.showPluginOperationModal {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] Ignoring pluginOperationCompleteMsg - modal was cancelled")
-			}
+			config.Debugf("[UI] Ignoring pluginOperationCompleteMsg - modal was cancelled")
 			return a, nil
 		}
 
@@ -1149,23 +1104,17 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.pluginOperationPhase = "error"
 			a.pluginOperationError = msg.Err.Error()
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] pluginOperationCompleteMsg: ERROR for %s operation on plugin '%s': %v", msg.Operation, msg.PluginID, msg.Err)
-			}
+			config.Debugf("[UI] pluginOperationCompleteMsg: ERROR for %s operation on plugin '%s': %v", msg.Operation, msg.PluginID, msg.Err)
 		} else {
 			// Success - save config and close modal
 			if a.pluginManagerState.pluginState.Config != nil {
 				switch msg.Operation {
 				case "enable":
 					a.pluginManagerState.pluginState.Config.SetPluginEnabled(msg.PluginID, true)
-					if config.DebugLog != nil {
-						config.DebugLog.Printf("[UI] pluginOperationCompleteMsg: Plugin '%s' enabled successfully, saving config", msg.PluginID)
-					}
+					config.Debugf("[UI] pluginOperationCompleteMsg: Plugin '%s' enabled successfully, saving config", msg.PluginID)
 				case "disable":
 					a.pluginManagerState.pluginState.Config.SetPluginEnabled(msg.PluginID, false)
-					if config.DebugLog != nil {
-						config.DebugLog.Printf("[UI] pluginOperationCompleteMsg: Plugin '%s' disabled successfully, saving config", msg.PluginID)
-					}
+					config.Debugf("[UI] pluginOperationCompleteMsg: Plugin '%s' disabled successfully, saving config", msg.PluginID)
 				}
 				_ = config.SavePluginsConfig(a.dataModel.Config.DataDir(), a.pluginManagerState.pluginState.Config)
 			}
@@ -1190,9 +1139,7 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case registryRefreshCompleteMsg:
 		// If modal is closed, ignore the message (user cancelled with ESC)
 		if !a.pluginManagerState.registryRefresh.visible {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] Ignoring registryRefreshCompleteMsg - modal was closed")
-			}
+			config.Debugf("[UI] Ignoring registryRefreshCompleteMsg - modal was closed")
 			return a, nil
 		}
 
@@ -1202,16 +1149,12 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.pluginManagerState.registryRefresh.phase = "error"
 			a.pluginManagerState.registryRefresh.error = msg.Err.Error()
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] registryRefreshCompleteMsg: ERROR refreshing registry: %v", msg.Err)
-			}
+			config.Debugf("[UI] registryRefreshCompleteMsg: ERROR refreshing registry: %v", msg.Err)
 		} else {
 			// Success - show success message
 			a.pluginManagerState.registryRefresh.phase = "success"
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] registryRefreshCompleteMsg: Registry refreshed successfully")
-			}
+			config.Debugf("[UI] registryRefreshCompleteMsg: Registry refreshed successfully")
 
 			// Update filter results if filter is active
 			if a.showPluginManager && a.pluginManagerState.pluginState.Registry != nil && a.pluginManagerState.selection.filterMode {
@@ -1272,7 +1215,17 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Session messages → appview_update_sessions.go
 	case sessionLoadedMsg, sessionSavedMsg, sessionRenamedMsg, sessionExportedMsg,
 		sessionImportedMsg, exportCleanupDoneMsg:
-		return a.handleSessionMessage(msg)
+		updated, cmd := a.handleSessionMessage(msg)
+		// Fetch the loaded session model's real context window
+		if loaded, ok := msg.(sessionLoadedMsg); ok && loaded.Err == nil {
+			cmd = tea.Batch(cmd, updated.dataModel.RefreshModelMetadataCmd())
+		}
+		return updated, cmd
+
+	// Context window fetched from the session model's provider
+	case modelMetadataMsg:
+		a.dataModel.SetModelMetadata(msg)
+		return a, nil
 
 	// Data export messages → appview_update_ui.go
 	case dataExportedMsg, dataExportCleanupDoneMsg:
@@ -1334,21 +1287,10 @@ func (a AppView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Settings modal custom messages
 	case ollamaValidationMsg, dataDirectoryLoadedMsg, dataDirectoryNotFoundMsg, settingsSaveMsg, providerFieldSavedMsg, providerFieldsSavedMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[UI] ========== SETTINGS MESSAGE ROUTING ==========")
-			config.DebugLog.Printf("[UI] Message type: %T", msg)
-			config.DebugLog.Printf("[UI] a.showSettings = %v", a.showSettings)
-			config.DebugLog.Printf("[UI] a.providerSettingsState.visible = %v", a.providerSettingsState.visible)
-		}
 		if a.showSettings {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] Routing to handleSettingsInput()")
-			}
 			return a.handleSettingsInput(msg)
 		}
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[UI] ❌ NOT routing - a.showSettings is false!")
-		}
+		config.Debugf("[UI] Dropping %T: settings are closed", msg)
 		return a, nil
 
 	}

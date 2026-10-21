@@ -28,42 +28,34 @@ func (a AppView) handleUIMessage(msg tea.Msg) (AppView, tea.Cmd) {
 	case markdownRenderedMsg:
 		// Drop stale renders from a previous session
 		if msg.SessionGeneration != a.sessionGeneration {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Dropping stale markdownRenderedMsg (gen %d != %d) for message %d", msg.SessionGeneration, a.sessionGeneration, msg.MessageIndex)
-			}
+			config.Debugf("Dropping stale markdownRenderedMsg (gen %d != %d) for message %d", msg.SessionGeneration, a.sessionGeneration, msg.MessageIndex)
 			return a, nil
 		}
 
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("markdownRenderedMsg received for message %d", msg.MessageIndex)
-		}
+		config.Debugf("markdownRenderedMsg received for message %d", msg.MessageIndex)
 
 		if msg.MessageIndex >= 0 && msg.MessageIndex < len(a.dataModel.Messages) {
 			a.dataModel.Messages[msg.MessageIndex].Rendered = msg.Rendered
 
-			gotoBottom := a.highlightedMessageIdx < 0
+			// Keep the user's position if they scrolled up to read
+			gotoBottom := a.highlightedMessageIdx < 0 && !a.userScrolledUp
 			a.updateViewportContent(gotoBottom)
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Viewport updated with rendered markdown (gotoBottom=%v)", gotoBottom)
-			}
+			config.Debugf("Viewport updated with rendered markdown (gotoBottom=%v)", gotoBottom)
 		}
 		return a, nil
 
 	case modelsListMsg:
 		if msg.Err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Error fetching Models: %v", msg.Err)
-			}
+			config.Debugf("Error fetching Models: %v", msg.Err)
 			// Optionally show error to user
 			return a, nil
 		}
 
+		a.dataModel.StoreModelCache(msg.Fetched)
 		a.modelList = msg.Models
 		a.modelListCached = true
 
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Fetched %d models", len(msg.Models))
-		}
+		config.Debugf("Fetched %d models", len(msg.Models))
 
 		// Only auto-show selector if explicitly requested (user-initiated fetch)
 		// Background fetches (provider settings save, etc.) don't interrupt UX
@@ -81,9 +73,7 @@ func (a AppView) handleUIMessage(msg tea.Msg) (AppView, tea.Cmd) {
 
 	case sessionsListMsg:
 		if msg.Err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Error fetching Sessions: %v", msg.Err)
-			}
+			config.Debugf("Error fetching Sessions: %v", msg.Err)
 			return a, nil
 		}
 
@@ -100,23 +90,17 @@ func (a AppView) handleUIMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			}
 		}
 
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Fetched %d sessions", len(msg.Sessions))
-		}
+		config.Debugf("Fetched %d sessions", len(msg.Sessions))
 
 		// Check if we just deleted the current session
 		if a.dataModel.CurrentSession == nil {
 			if len(msg.Sessions) > 0 {
 				// Load the first session in the list
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("Current session deleted, loading first available Session: %s", msg.Sessions[0].ID)
-				}
+				config.Debugf("Current session deleted, loading first available Session: %s", msg.Sessions[0].ID)
 				return a, a.dataModel.LoadSession(msg.Sessions[0].ID)
 			}
 			// No sessions left - close modal and show empty state
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("No sessions left after deletion, showing empty state")
-			}
+			config.Debugf("No sessions left after deletion, showing empty state")
 			a.showSessionManager = false
 		}
 
@@ -165,9 +149,7 @@ func (a AppView) handleUIMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			a.dataExportCancelFunc = nil
 			a.dataExportMode = false
 			a.dataExportTargetPath = ""
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Data export error: %v", msg.Err)
-			}
+			config.Debugf("Data export error: %v", msg.Err)
 			return a, nil
 		}
 
@@ -177,9 +159,7 @@ func (a AppView) handleUIMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		a.dataExportCancelFunc = nil
 		a.dataExportSuccess = msg.Path
 		a.dataExportTargetPath = ""
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Data directory exported successfully to: %s", msg.Path)
-		}
+		config.Debugf("Data directory exported successfully to: %s", msg.Path)
 		return a, nil
 
 	case dataExportCleanupDoneMsg:

@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"otui/config"
+	appmodel "otui/model"
 )
 
 func (a AppView) handleSessionRenameMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -74,8 +75,12 @@ func (a AppView) handlePassphraseForDataDir(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Retry ApplyDataDirSwitch with passphrase
 			if err := a.dataModel.ApplyDataDirSwitch(a.passphraseRetryDataDir, passphrase); err != nil {
-				// Still failed - wrong passphrase or other error
-				a.passphraseError = GetIncorrectPassphraseError()
+				// Still failed - only call it a wrong passphrase if it was one
+				if config.IsIncorrectPassphrase(err) {
+					a.passphraseError = GetIncorrectPassphraseError()
+				} else {
+					a.passphraseError = err.Error()
+				}
 				a.passphraseForDataDir.SetValue("")
 				return a, textinput.Blink
 			}
@@ -93,8 +98,8 @@ func (a AppView) handlePassphraseForDataDir(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Step 4: Re-create MCP manager if plugins enabled
 			if a.dataModel.Config.PluginsEnabled {
-				if err := a.ensureMCPManager(); err != nil && config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] Failed to recreate MCP manager: %v", err)
+				if err := a.ensureMCPManager(); err != nil {
+					config.Debugf("[UI] Failed to recreate MCP manager: %v", err)
 				}
 			}
 
@@ -201,8 +206,20 @@ func (a AppView) handleSessionImportMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Handle success acknowledgment (Enter or ESC to dismiss)
 	if a.sessionImportPicker.Success != nil {
 		switch msg.String() {
-		case "enter", "esc":
+		case "k":
+			// Keep the permissions the imported file came with
+			if a.sessionImportPermissions.Empty() || a.sessionImportSuccess == nil {
+				return a, nil
+			}
+			cmd := a.dataModel.RestoreImportedPermissionsCmd(a.sessionImportSuccess.ID, a.sessionImportPermissions)
 			a.sessionImportSuccess = nil
+			a.sessionImportPermissions = appmodel.ImportedPermissions{}
+			a.sessionImportPicker.Reset()
+			return a, cmd
+		case "enter", "esc":
+			// Default: the permissions stay removed
+			a.sessionImportSuccess = nil
+			a.sessionImportPermissions = appmodel.ImportedPermissions{}
 			a.sessionImportPicker.Reset()
 			return a, nil
 		}
@@ -234,9 +251,7 @@ func (a AppView) handleSessionImportMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if info, err := os.Stat(a.sessionImportPicker.Picker.Path); err == nil && !info.IsDir() {
 			path := a.sessionImportPicker.Picker.Path
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("FILE SELECTED: %s", path)
-			}
+			config.Debugf("[Import] File selected: %s", path)
 
 			// Create cancellation context
 			ctx, cancel := context.WithCancel(context.Background())
@@ -246,9 +261,7 @@ func (a AppView) handleSessionImportMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Start import
 			a.sessionImportPicker.Processing = true
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("SET Processing = true, Active = %v", a.sessionImportPicker.Active)
-			}
+			config.Debugf("SET Processing = true, Active = %v", a.sessionImportPicker.Active)
 
 			return a, tea.Batch(
 				a.dataModel.ImportSessionCmd(ctx, path),

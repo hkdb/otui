@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -17,6 +16,7 @@ import (
 	"otui/config"
 	"otui/ollama"
 	"otui/provider"
+	"otui/safetext"
 )
 
 type wizardStep int
@@ -34,6 +34,7 @@ const (
 	stepConfigureProvider
 	stepOllamaURL
 	stepOllamaAPIKey
+	stepCompatURL
 	stepModelSelection
 	stepDataDirectory
 	stepComplete
@@ -84,10 +85,11 @@ type WelcomeModel struct {
 	defaultProvider string // Track which provider the selected model belongs to
 	dataDirectory   string
 
-	urlInput      textinput.Model
-	dirInput      textinput.Model
-	models        []string
-	selectedModel int
+	urlInput       textinput.Model
+	compatURLInput textinput.Model // Base URL for the OpenAI compatible provider
+	dirInput       textinput.Model
+	models         []string
+	selectedModel  int
 
 	// Existing profile directory picker
 	existingProfilePicker FilePickerState
@@ -133,11 +135,19 @@ var (
 			Padding(0, 1)
 )
 
+// apiKeyPlaceholder is the default placeholder for the wizard's API key input
+const apiKeyPlaceholder = "sk-ant-..."
+
 func NewWelcomeModel(kb *config.KeyBindingsConfig) WelcomeModel {
 	urlInput := textinput.New()
 	urlInput.Placeholder = "http://localhost:11434"
 	urlInput.Width = 50
 	urlInput.CharLimit = 200
+
+	compatURLInput := textinput.New()
+	compatURLInput.Placeholder = config.DefaultOpenAICompatibleBaseURL
+	compatURLInput.Width = 50
+	compatURLInput.CharLimit = 200
 
 	dirInput := textinput.New()
 	dirInput.Placeholder = "~/.local/share/otui"
@@ -145,7 +155,7 @@ func NewWelcomeModel(kb *config.KeyBindingsConfig) WelcomeModel {
 	dirInput.CharLimit = 200
 
 	apiKeyInput := textinput.New()
-	apiKeyInput.Placeholder = "sk-ant-..."
+	apiKeyInput.Placeholder = apiKeyPlaceholder
 	apiKeyInput.Width = 50
 	apiKeyInput.CharLimit = 300
 	apiKeyInput.EchoMode = textinput.EchoPassword
@@ -187,6 +197,7 @@ func NewWelcomeModel(kb *config.KeyBindingsConfig) WelcomeModel {
 		{ID: "ollama", Name: "Ollama (Local)", Enabled: false, BaseURL: "http://localhost:11434"},
 		{ID: "openrouter", Name: "OpenRouter", Enabled: false, BaseURL: "https://openrouter.ai/api/v1"},
 		{ID: "openai", Name: "OpenAI", Enabled: false, BaseURL: "https://api.openai.com/v1"},
+		{ID: "openai-compatible", Name: "OpenAI Compatible", Enabled: false, BaseURL: config.DefaultOpenAICompatibleBaseURL},
 		{ID: "anthropic", Name: "Anthropic", Enabled: false, BaseURL: "https://api.anthropic.com"},
 	}
 
@@ -227,6 +238,7 @@ func NewWelcomeModel(kb *config.KeyBindingsConfig) WelcomeModel {
 		defaultModel:          "llama3.2:latest",
 		dataDirectory:         initialDataDir,
 		urlInput:              urlInput,
+		compatURLInput:        compatURLInput,
 		dirInput:              dirInput,
 		apiKeyInput:           apiKeyInput,
 		passphraseInput:       passphraseInput,
@@ -300,28 +312,6 @@ func validateOllamaURL(url string) tea.Cmd {
 	}
 }
 
-func loadModels(url string) tea.Cmd {
-	return func() tea.Msg {
-		client, err := ollama.NewClient(url, "", "")
-		if err != nil {
-			return modelsLoadedMsg{models: nil, err: err}
-		}
-
-		ctx := context.Background()
-		modelInfos, err := client.ListModels(ctx)
-		if err != nil {
-			return modelsLoadedMsg{models: nil, err: err}
-		}
-
-		models := make([]string, len(modelInfos))
-		for i, info := range modelInfos {
-			models[i] = info.Name
-		}
-
-		return modelsLoadedMsg{models: models, err: nil}
-	}
-}
-
 func (m WelcomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
@@ -374,6 +364,8 @@ func (m WelcomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateOllamaURLScreen(msg)
 		case stepOllamaAPIKey:
 			return m.updateOllamaAPIKeyScreen(msg)
+		case stepCompatURL:
+			return m.updateCompatURLScreen(msg)
 		case stepModelSelection:
 			return m.updateModelSelectionScreen(msg)
 		case stepDataDirectory:
@@ -442,21 +434,7 @@ func (m WelcomeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				continue
 			}
 
-			m.currentProviderIdx = i
-			m.providers[i].Enabled = true
-
-			switch m.providers[i].ID {
-			case "ollama":
-				m.step = stepOllamaURL
-				m.urlInput.SetValue(m.ollamaHost)
-				m.urlInput.Focus()
-				return m, textinput.Blink
-			default:
-				m.step = stepConfigureProvider
-				m.apiKeyInput.SetValue("")
-				m.apiKeyInput.Focus()
-				return m, textinput.Blink
-			}
+			return m.enterProviderConfig(i)
 		}
 
 		// No more providers - fetch ALL models
@@ -648,6 +626,127 @@ func (m WelcomeModel) updateOllamaURLScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	return m, cmd
 }
 
+// enterProviderConfig makes provider i the current provider and moves to its
+// first configuration screen
+func (m WelcomeModel) enterProviderConfig(i int) (tea.Model, tea.Cmd) {
+	m.currentProviderIdx = i
+	m.providers[i].Enabled = true
+
+	switch m.providers[i].ID {
+	case "ollama":
+		m.step = stepOllamaURL
+		m.urlInput.SetValue(m.ollamaHost)
+		m.urlInput.Focus()
+		return m, textinput.Blink
+	case "openai-compatible":
+		m.step = stepCompatURL
+		m.compatURLInput.SetValue(m.providers[i].BaseURL)
+		m.compatURLInput.Focus()
+		return m, textinput.Blink
+	default:
+		m.step = stepConfigureProvider
+		m.apiKeyInput.Placeholder = apiKeyPlaceholder
+		m.apiKeyInput.SetValue("")
+		m.apiKeyInput.Focus()
+		return m, textinput.Blink
+	}
+}
+
+// ===== OpenAI Compatible URL Screen =====
+
+func (m WelcomeModel) updateCompatURLScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg.String() {
+	case m.getActionKey("welcome_quit"):
+		return m, tea.Quit
+
+	case "esc":
+		m.step = stepProviderSelection
+		m.err = ""
+		return m, nil
+
+	case "enter":
+		baseURL := strings.TrimSpace(m.compatURLInput.Value())
+		if baseURL == "" {
+			m.err = "URL cannot be empty"
+			return m, nil
+		}
+		if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+			m.err = "URL must start with http:// or https://"
+			return m, nil
+		}
+
+		m.providers[m.currentProviderIdx].BaseURL = baseURL
+		m.err = ""
+		m.step = stepConfigureProvider
+		m.apiKeyInput.Placeholder = "(optional)"
+		m.apiKeyInput.SetValue("")
+		m.apiKeyInput.Focus()
+		return m, textinput.Blink
+
+	case m.getActionKey("clear_input"):
+		m.compatURLInput.SetValue("")
+		return m, nil
+	}
+
+	m.compatURLInput, cmd = m.compatURLInput.Update(msg)
+	return m, cmd
+}
+
+func (m WelcomeModel) viewCompatURLScreen() string {
+	var sb strings.Builder
+
+	sb.WriteString("\n\n")
+	sb.WriteString(centerText(titleStyle.Render("OpenAI Compatible Server"), m.width))
+	sb.WriteString("\n\n\n")
+
+	sb.WriteString(centerText(featureStyle.Render("Enter the base URL of your OpenAI compatible server:"), m.width))
+	sb.WriteString("\n")
+	sb.WriteString(centerText(featureStyle.Render("(llama.cpp, vLLM, LM Studio, etc. - usually ends with /v1)"), m.width))
+	sb.WriteString("\n\n")
+
+	sb.WriteString(centerText(inputStyle.Render(m.compatURLInput.View()), m.width))
+	sb.WriteString("\n\n\n")
+
+	sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("%s+U Clear • Enter Continue • Esc Back • %s+Q Quit", m.primaryDisplay(), m.primaryDisplay())), m.width))
+
+	if m.err != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(centerText(errorStyle.Render(m.err), m.width))
+	}
+
+	return sb.String()
+}
+
+// buildUserConfig builds the profile config from the wizard's choices.
+// It starts from DefaultUserConfig so settings the wizard doesn't ask about
+// (tool approval, multi-step, compaction, etc.) keep their safe defaults.
+func (m WelcomeModel) buildUserConfig() *config.UserConfig {
+	// Build enabled providers list
+	var enabledProviders []config.ProviderConfig
+	for i, provider := range m.providers {
+		if m.providerCheckboxes[i] {
+			provider.Enabled = true
+			enabledProviders = append(enabledProviders, provider)
+		}
+	}
+
+	userCfg := config.DefaultUserConfig()
+	userCfg.DefaultProvider = m.defaultProvider  // Top-level provider field
+	userCfg.DefaultModel = m.defaultModel        // Top-level model field
+	userCfg.LastUsedProvider = m.defaultProvider // Initialize to default
+	userCfg.Ollama.Host = m.ollamaHost
+	userCfg.PluginsEnabled = false
+	userCfg.Security = config.SecurityConfig{
+		CredentialStorage: string(m.securityMethod),
+		SSHKeyPath:        m.sshKeyPath,
+	}
+	userCfg.Providers = enabledProviders
+
+	return userCfg
+}
+
 // advanceToNextProviderOrModels moves to the next enabled provider's config screen,
 // or to model selection if all providers are configured.
 func (m WelcomeModel) advanceToNextProviderOrModels() (tea.Model, tea.Cmd) {
@@ -656,21 +755,7 @@ func (m WelcomeModel) advanceToNextProviderOrModels() (tea.Model, tea.Cmd) {
 			continue
 		}
 
-		m.currentProviderIdx = i
-		m.providers[i].Enabled = true
-
-		switch m.providers[i].ID {
-		case "ollama":
-			m.step = stepOllamaURL
-			m.urlInput.SetValue(m.ollamaHost)
-			m.urlInput.Focus()
-			return m, textinput.Blink
-		default:
-			m.step = stepConfigureProvider
-			m.apiKeyInput.SetValue("")
-			m.apiKeyInput.Focus()
-			return m, textinput.Blink
-		}
+		return m.enterProviderConfig(i)
 	}
 
 	// No more providers - fetch ALL models
@@ -910,33 +995,7 @@ func (m WelcomeModel) updateDataDirectoryScreen(msg tea.KeyMsg) (tea.Model, tea.
 
 		dataDir := config.ExpandPath(m.dataDirectory)
 
-		// Build enabled providers list
-		var enabledProviders []config.ProviderConfig
-		for i, provider := range m.providers {
-			if m.providerCheckboxes[i] {
-				provider.Enabled = true
-				enabledProviders = append(enabledProviders, provider)
-			}
-		}
-
-		// Build security config
-		securityCfg := config.SecurityConfig{
-			CredentialStorage: string(m.securityMethod),
-			SSHKeyPath:        m.sshKeyPath,
-		}
-
-		userCfg := &config.UserConfig{
-			DefaultProvider:  m.defaultProvider, // Top-level provider field
-			DefaultModel:     m.defaultModel,    // Top-level model field
-			LastUsedProvider: m.defaultProvider, // Initialize to default
-			Ollama: config.OllamaConfig{
-				Host: m.ollamaHost,
-				// DefaultModel removed (migrated to top-level)
-			},
-			PluginsEnabled: false,
-			Security:       securityCfg,
-			Providers:      enabledProviders,
-		}
+		userCfg := m.buildUserConfig()
 
 		if err := config.SaveUserConfig(userCfg, dataDir); err != nil {
 			m.err = fmt.Sprintf("Failed to save user config: %v", err)
@@ -977,7 +1036,19 @@ func (m WelcomeModel) updateDataDirectoryScreen(msg tea.KeyMsg) (tea.Model, tea.
 	return m, cmd
 }
 
+// View renders the screen. Only color sequences reach the terminal: any
+// other control sequence in displayed text (model output, session files,
+// server errors) is removed.
 func (m WelcomeModel) View() string {
+	return safetext.SGROnly(m.view())
+}
+
+func (m WelcomeModel) view() string {
+	// Width/height are 0 until the first WindowSizeMsg
+	if m.width > 0 && terminalTooSmall(m.width, m.height) {
+		return renderTerminalTooSmall(m.width, m.height)
+	}
+
 	// Show existing profile picker if active (highest priority)
 	if m.existingProfilePicker.Active {
 		return RenderFilePickerModal(m.existingProfilePicker, m.width, m.height)
@@ -1008,6 +1079,8 @@ func (m WelcomeModel) View() string {
 		return m.viewOllamaURLScreen()
 	case stepOllamaAPIKey:
 		return m.viewOllamaAPIKeyScreen()
+	case stepCompatURL:
+		return m.viewCompatURLScreen()
 	case stepModelSelection:
 		return m.viewModelSelectionScreen()
 	case stepDataDirectory:
@@ -1253,7 +1326,7 @@ func centerText(text string, width int) string {
 	}
 
 	padding := (width - textWidth) / 2
-	return strings.Repeat(" ", padding) + text
+	return safeRepeat(" ", padding) + text
 }
 
 // ===== Security Method Screen =====
@@ -1358,7 +1431,7 @@ func (m WelcomeModel) updateSSHKeySourceScreen(msg tea.KeyMsg) (tea.Model, tea.C
 				return m, nil
 			}
 			if len(keys) == 0 {
-				m.err = "No SSH keys found. Please create one first."
+				m.err = "No ed25519 or RSA SSH keys found in ~/.ssh. Create an OTUI key instead."
 				return m, nil
 			}
 			m.availableKeys = keys
@@ -1820,22 +1893,7 @@ func (m WelcomeModel) updateProviderSelectionScreen(msg tea.KeyMsg) (tea.Model, 
 		// Move to configure first enabled provider
 		for i, checked := range m.providerCheckboxes {
 			if checked {
-				m.currentProviderIdx = i
-				m.providers[i].Enabled = true
-
-				// If Ollama, go to Ollama URL screen
-				if m.providers[i].ID == "ollama" {
-					m.step = stepOllamaURL
-					m.urlInput.SetValue(m.ollamaHost)
-					m.urlInput.Focus()
-					return m, textinput.Blink
-				}
-
-				// Otherwise configure provider (API key)
-				m.step = stepConfigureProvider
-				m.apiKeyInput.SetValue("")
-				m.apiKeyInput.Focus()
-				return m, textinput.Blink
+				return m.enterProviderConfig(i)
 			}
 		}
 
@@ -1896,14 +1954,21 @@ func (m WelcomeModel) updateConfigureProviderScreen(msg tea.KeyMsg) (tea.Model, 
 	case m.getActionKey("welcome_quit"):
 		return m, tea.Quit
 	case "esc":
-		m.step = stepProviderSelection
 		m.err = ""
+		// The compatible provider has its URL screen before this one
+		if m.providers[m.currentProviderIdx].ID == "openai-compatible" {
+			m.step = stepCompatURL
+			m.compatURLInput.Focus()
+			return m, textinput.Blink
+		}
+		m.step = stepProviderSelection
 		return m, nil
 	case "enter":
 		prov := m.providers[m.currentProviderIdx]
 		apiKey := m.apiKeyInput.Value()
 
-		if apiKey == "" {
+		// API key is optional for compatible servers (most local ones don't use one)
+		if apiKey == "" && prov.ID != "openai-compatible" {
 			m.err = "API key cannot be empty"
 			return m, nil
 		}
@@ -1911,7 +1976,7 @@ func (m WelcomeModel) updateConfigureProviderScreen(msg tea.KeyMsg) (tea.Model, 
 		// Store API key
 		m.providerApiKeys[prov.ID] = apiKey
 
-		// Ping provider to validate (business logic in provider package!)
+		// Ping provider to validate
 		m.loading = true
 		m.err = ""
 		return m, provider.PingProvider(prov.ID, prov.BaseURL, apiKey)
@@ -1929,7 +1994,13 @@ func (m WelcomeModel) viewConfigureProviderScreen() string {
 	sb.WriteString(centerText(titleStyle.Render(fmt.Sprintf("Configure %s", provider.Name)), m.width))
 	sb.WriteString("\n\n\n")
 
-	sb.WriteString(centerText(featureStyle.Render("Enter your API key:"), m.width))
+	if provider.ID == "openai-compatible" {
+		sb.WriteString(centerText(featureStyle.Render(fmt.Sprintf("Server: %s", provider.BaseURL)), m.width))
+		sb.WriteString("\n\n")
+		sb.WriteString(centerText(featureStyle.Render("Enter your API key (optional - leave empty if the server doesn't need one):"), m.width))
+	} else {
+		sb.WriteString(centerText(featureStyle.Render("Enter your API key:"), m.width))
+	}
 	sb.WriteString("\n\n")
 
 	sb.WriteString(centerText(inputStyle.Render(m.apiKeyInput.View()), m.width))

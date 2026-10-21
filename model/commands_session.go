@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,32 +43,76 @@ func (m *Model) LoadSession(sessionID string) tea.Cmd {
 	// Skip if reloading current session (no need to check our own lock)
 	if m.CurrentSession != nil && m.CurrentSession.ID == sessionID {
 		// Already loaded, just close session manager
+		session := m.CurrentSession
 		return func() tea.Msg {
 			return SessionLoadedMsg{
-				Session: m.CurrentSession,
+				Session: session,
 				Err:     nil,
 			}
 		}
 	}
 
-	storage := m.SessionStorage
+	return loadSessionCmd(m.SessionStorage, sessionID, false)
+}
+
+// ForceLoadSession deletes a session's lock file and loads it.
+// Used when the user confirms the lock is stale (e.g. left behind by a crash).
+func (m *Model) ForceLoadSession(sessionID string) tea.Cmd {
+	if m.SessionStorage == nil {
+		return nil
+	}
+	return loadSessionCmd(m.SessionStorage, sessionID, true)
+}
+
+// SessionLockedError is returned in SessionLoadedMsg when the session is
+// locked by another OTUI instance
+type SessionLockedError struct {
+	SessionID string
+	PID       int // PID recorded in the lock file (0 if unknown)
+}
+
+func (e *SessionLockedError) Error() string {
+	return "session_locked"
+}
+
+// AsSessionLockedError reports whether err is a SessionLockedError
+func AsSessionLockedError(err error) (*SessionLockedError, bool) {
+	var lockedErr *SessionLockedError
+	if errors.As(err, &lockedErr) {
+		return lockedErr, true
+	}
+	return nil, false
+}
+
+// loadSessionCmd loads a session and locks it. If force is true, an existing
+// lock file is deleted first instead of refusing to load.
+func loadSessionCmd(ss *storage.SessionStorage, sessionID string, force bool) tea.Cmd {
 	return func() tea.Msg {
+		if force {
+			if err := ss.UnlockSession(sessionID); err != nil {
+				return SessionLoadedMsg{Session: nil, Err: err}
+			}
+		}
+
 		// Check if session is locked by another OTUI instance
-		isLocked, err := storage.CheckSessionLock(sessionID)
+		isLocked, err := ss.CheckSessionLock(sessionID)
 		if err != nil {
 			return SessionLoadedMsg{Session: nil, Err: err}
 		}
 		if isLocked {
-			return SessionLoadedMsg{Session: nil, Err: fmt.Errorf("session_locked")}
+			return SessionLoadedMsg{Session: nil, Err: &SessionLockedError{
+				SessionID: sessionID,
+				PID:       ss.GetSessionLockPID(sessionID),
+			}}
 		}
 
-		session, err := storage.Load(sessionID)
+		session, err := ss.Load(sessionID)
 		if err != nil {
 			return SessionLoadedMsg{Session: nil, Err: err}
 		}
 
 		// Create lock file for this session
-		_ = storage.LockSession(sessionID)
+		_ = ss.LockSession(sessionID)
 
 		return SessionLoadedMsg{
 			Session: session,
@@ -102,7 +147,16 @@ func (m *Model) SaveCurrentSession() tea.Cmd {
 	// Note: CurrentSession.Provider is set by SwitchModel() and preserved here
 	// The entire session object (including Provider field) is saved to JSON storage
 
-	session := m.CurrentSession
+	// Fields Save would otherwise fill in, set on the live session now
+	if m.CurrentSession.ID == "" {
+		m.CurrentSession.ID = uuid.New().String()
+	}
+	if m.CurrentSession.CreatedAt.IsZero() {
+		m.CurrentSession.CreatedAt = m.CurrentSession.UpdatedAt
+	}
+
+	// Save a copy: the live session keeps changing while the Cmd runs
+	session := m.CurrentSession.Clone()
 	storage := m.SessionStorage
 
 	return func() tea.Msg {
@@ -147,7 +201,7 @@ func (m *Model) AutoSaveSession() tea.Cmd {
 		// Switch active provider to match session
 		m.SwitchToDefaultProvider()
 
-		// Sync with MCP manager (security fix)
+		// Scope the MCP manager to the new session
 		if m.MCPManager != nil {
 			m.MCPManager.SetSession(m.CurrentSession)
 		}
@@ -287,6 +341,9 @@ func (m *Model) ImportSessionCmd(ctx context.Context, filePath string) tea.Cmd {
 			return SessionImportedMsg{Err: fmt.Errorf("invalid session file: %w", err)}
 		}
 
+		// Imported files are untrusted: no terminal control sequences
+		session.Sanitize()
+
 		// Validate required fields
 		if session.Name == "" {
 			return SessionImportedMsg{Err: fmt.Errorf("invalid Session: missing name")}
@@ -294,6 +351,12 @@ func (m *Model) ImportSessionCmd(ctx context.Context, filePath string) tea.Cmd {
 		if len(session.Messages) == 0 {
 			return SessionImportedMsg{Err: fmt.Errorf("invalid Session: no messages")}
 		}
+
+		// A session file from elsewhere could pre-approve tools (they'd run
+		// without asking): saved without them, the user can keep them
+		permissions := ImportedPermissions{EnabledPlugins: session.EnabledPlugins, AllowedTools: session.AllowedTools}
+		session.EnabledPlugins = []string{}
+		session.AllowedTools = []string{}
 
 		// Generate new UUID and timestamps
 		session.ID = uuid.New().String()
@@ -312,7 +375,35 @@ func (m *Model) ImportSessionCmd(ctx context.Context, filePath string) tea.Cmd {
 			return SessionImportedMsg{Err: fmt.Errorf("failed to save Session: %w", err)}
 		}
 
-		return SessionImportedMsg{Session: &session}
+		return SessionImportedMsg{Session: &session, Permissions: permissions}
+	}
+}
+
+// RestoreImportedPermissionsCmd gives an imported session back the plugins
+// and pre-approved tools its file came with (the user chose to keep them)
+func (m *Model) RestoreImportedPermissionsCmd(sessionID string, permissions ImportedPermissions) tea.Cmd {
+	if m.SessionStorage == nil {
+		return nil
+	}
+	// Update the open session too (here, not in the Cmd: View reads it)
+	if m.CurrentSession != nil && m.CurrentSession.ID == sessionID {
+		m.CurrentSession.EnabledPlugins = append([]string(nil), permissions.EnabledPlugins...)
+		m.CurrentSession.AllowedTools = append([]string(nil), permissions.AllowedTools...)
+	}
+
+	sessionStorage := m.SessionStorage
+	return func() tea.Msg {
+		session, err := sessionStorage.Load(sessionID)
+		if err != nil {
+			return SessionsListMsg{Err: err}
+		}
+		session.EnabledPlugins = permissions.EnabledPlugins
+		session.AllowedTools = permissions.AllowedTools
+		if err := sessionStorage.Save(session); err != nil {
+			return SessionsListMsg{Err: err}
+		}
+		sessions, err := sessionStorage.List()
+		return SessionsListMsg{Sessions: sessions, Err: err}
 	}
 }
 
@@ -321,9 +412,7 @@ func (m *Model) CleanupPartialFileCmd(filePath string) tea.Cmd {
 	return func() tea.Msg {
 		// Delete the partial file
 		if err := os.Remove(filePath); err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Failed to cleanup partial file: %v", err)
-			}
+			config.Debugf("Failed to cleanup partial file: %v", err)
 		}
 		return ExportCleanupDoneMsg{}
 	}
@@ -334,29 +423,30 @@ func (m *Model) CleanupPartialDataExportCmd(filePath string) tea.Cmd {
 	return func() tea.Msg {
 		// Delete the partial data export file
 		if err := os.Remove(filePath); err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Failed to cleanup partial data export: %v", err)
-			}
+			config.Debugf("Failed to cleanup partial data export: %v", err)
 		}
 		return DataExportCleanupDoneMsg{}
 	}
 }
 
-// fileExists checks if a file exists
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
 // UpdateSessionPropertiesCmd updates session properties and refreshes the session list
 func (m *Model) UpdateSessionPropertiesCmd(sessionID, newName, newSystemPrompt string, enabledPlugins []string) tea.Cmd {
+	// Update in-memory current session if it's the one being edited (here,
+	// not in the Cmd: View reads it)
+	if m.CurrentSession != nil && m.CurrentSession.ID == sessionID {
+		m.CurrentSession.Name = newName
+		m.CurrentSession.SystemPrompt = newSystemPrompt
+		m.CurrentSession.EnabledPlugins = enabledPlugins
+	}
+
+	sessionStorage := m.SessionStorage
 	return func() tea.Msg {
-		if m.SessionStorage == nil {
+		if sessionStorage == nil {
 			return SessionsListMsg{Err: fmt.Errorf("session storage not initialized")}
 		}
 
 		// Load full session
-		session, err := m.SessionStorage.Load(sessionID)
+		session, err := sessionStorage.Load(sessionID)
 		if err != nil {
 			return SessionsListMsg{Err: err}
 		}
@@ -367,19 +457,12 @@ func (m *Model) UpdateSessionPropertiesCmd(sessionID, newName, newSystemPrompt s
 		session.EnabledPlugins = enabledPlugins
 
 		// Save back
-		if err := m.SessionStorage.Save(session); err != nil {
+		if err := sessionStorage.Save(session); err != nil {
 			return SessionsListMsg{Err: err}
 		}
 
-		// Update in-memory current session if it's the one being edited
-		if m.CurrentSession != nil && m.CurrentSession.ID == sessionID {
-			m.CurrentSession.Name = newName
-			m.CurrentSession.SystemPrompt = newSystemPrompt
-			m.CurrentSession.EnabledPlugins = enabledPlugins
-		}
-
 		// Refresh list
-		sessions, err := m.SessionStorage.List()
+		sessions, err := sessionStorage.List()
 		if err != nil {
 			return SessionsListMsg{Err: err}
 		}
@@ -430,14 +513,10 @@ func (m *Model) CreateAndSaveNewSession(name, systemPrompt string, enabledPlugin
 // This is pure business logic: destroys manager, updates storage, clears session.
 // Does NOT handle plugin shutdown/restart or provider re-initialization - that's UI orchestration.
 //
-// STEPS 2-3: Destroy MCP manager, switch data directory
-//
 // Note: Provider re-initialization must be done by UI layer due to import cycle
 // (provider package imports model, so model cannot import provider).
 func (m *Model) ApplyDataDirSwitch(newDataDir string, passphrase string) error {
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[Model] STEP 2-3: Applying data dir switch to %s", newDataDir)
-	}
+	config.Debugf("[Model] Applying data dir switch to %s", newDataDir)
 
 	// Validate new data directory first
 	newStorage, err := storage.NewSessionStorage(newDataDir)
@@ -455,15 +534,12 @@ func (m *Model) ApplyDataDirSwitch(newDataDir string, passphrase string) error {
 		return fmt.Errorf("failed to initialize plugin registry: %w", err)
 	}
 
-	// STEP 2: Destroy MCP Manager (business logic - manager tied to old data dir)
+	// The MCP manager belongs to the old data dir
 	if m.MCPManager != nil {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[Model] STEP 2: Destroying MCP manager")
-		}
+		config.Debugf("[Model] Destroying MCP manager")
 		m.MCPManager = nil
 	}
 
-	// STEP 3: Switch data directory (business logic - state transitions)
 	// Unlock current session from OLD data directory before switching
 	if m.CurrentSession != nil && m.SessionStorage != nil {
 		_ = m.SessionStorage.UnlockSession(m.CurrentSession.ID)
@@ -471,15 +547,11 @@ func (m *Model) ApplyDataDirSwitch(newDataDir string, passphrase string) error {
 
 	// Unlock OTUI instance from OLD data directory before switching
 	if m.SessionStorage != nil {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[Model] STEP 3a: Unlocking OTUI instance in old data dir")
-		}
+		config.Debugf("[Model] Unlocking OTUI instance in old data dir")
 		_ = m.SessionStorage.UnlockOTUIInstance()
 	}
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[Model] STEP 3b: Switching data directory")
-	}
+	config.Debugf("[Model] Switching data directory")
 
 	m.SessionStorage = newStorage
 	m.SearchIndex = storage.NewSearchIndex(newStorage)
@@ -488,9 +560,7 @@ func (m *Model) ApplyDataDirSwitch(newDataDir string, passphrase string) error {
 	if err := newStorage.LockOTUIInstance(); err != nil {
 		return fmt.Errorf("failed to lock new data directory: %w", err)
 	}
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[Model] STEP 3c: Locked OTUI instance in new data dir")
-	}
+	config.Debugf("[Model] Locked OTUI instance in new data dir")
 
 	// Update plugin components
 	m.Plugins.Registry = newRegistry
@@ -507,14 +577,10 @@ func (m *Model) ApplyDataDirSwitch(newDataDir string, passphrase string) error {
 	m.CacheExpiry = make(map[string]time.Time)
 
 	// Re-initialize debug log for new data directory
-	if config.Debug {
-		config.InitDebugLog(m.Config.DataDir())
-	}
+	config.InitDebugLog(m.Config.DataDir())
 
-	// Reload config from NEW data directory (business logic - config owns model state)
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[Model] STEP 3b: Reloading config from new data directory")
-	}
+	// Reload config from the new data directory
+	config.Debugf("[Model] Reloading config from new data directory")
 	cfg, err := config.Load()
 	if err != nil {
 		// If passphrase required and we DON'T have one yet, return error for UI to handle
@@ -538,9 +604,7 @@ func (m *Model) ApplyDataDirSwitch(newDataDir string, passphrase string) error {
 	}
 	m.Config = cfg
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[Model] STEP 2-3 complete: Data directory switch applied")
-	}
+	config.Debugf("[Model] Data directory switch applied")
 
 	return nil
 }

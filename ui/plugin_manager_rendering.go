@@ -148,11 +148,11 @@ func (a *AppView) renderPluginItem(plugin mcp.Plugin, selected bool, width int) 
 	statusWidth := 11
 	categoryWidth := 15
 
-	statusPadded := statusText + strings.Repeat(" ", statusWidth-runewidth.StringWidth(statusText))
+	statusPadded := statusText + safeRepeat(" ", statusWidth-runewidth.StringWidth(statusText))
 	statusStyled := lipgloss.NewStyle().Foreground(statusColor).Render(statusPadded)
 
-	descPadded := description + strings.Repeat(" ", descWidth-runewidth.StringWidth(description))
-	categoryPadded := category + strings.Repeat(" ", categoryWidth-runewidth.StringWidth(category))
+	descPadded := description + safeRepeat(" ", descWidth-runewidth.StringWidth(description))
+	categoryPadded := category + safeRepeat(" ", categoryWidth-runewidth.StringWidth(category))
 
 	if selected {
 		descPadded = lipgloss.NewStyle().Foreground(successColor).Bold(true).Render(descPadded)
@@ -310,7 +310,7 @@ func renderProgressBar(percent int, width int) string {
 		filled = width
 	}
 
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+	bar := safeRepeat("█", filled) + safeRepeat("░", width-filled)
 
 	percentStr := fmt.Sprintf("%d%%", percent)
 

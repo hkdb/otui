@@ -3,6 +3,8 @@ package ui
 import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+
+	"otui/safetext"
 )
 
 // PassphraseModal is a simple modal for prompting SSH key passphrase
@@ -24,6 +26,14 @@ func NewPassphraseModal(keyPath string) PassphraseModal {
 		keyPath: keyPath,
 		input:   input,
 	}
+}
+
+// NewPassphraseModalWithError creates a passphrase modal that shows errMsg,
+// e.g. when re-prompting after an incorrect passphrase
+func NewPassphraseModalWithError(keyPath, errMsg string) PassphraseModal {
+	m := NewPassphraseModal(keyPath)
+	m.err = errMsg
+	return m
 }
 
 func (m PassphraseModal) Init() tea.Cmd {
@@ -57,7 +67,14 @@ func (m PassphraseModal) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// View renders the screen. Only color sequences reach the terminal: any
+// other control sequence in displayed text (model output, session files,
+// server errors) is removed.
 func (m PassphraseModal) View() string {
+	return safetext.SGROnly(m.view())
+}
+
+func (m PassphraseModal) view() string {
 	return RenderPassphraseModal(
 		"SSH Key Passphrase Required",
 		m.keyPath,

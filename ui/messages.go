@@ -12,10 +12,9 @@ type ToolCall = model.ToolCall
 type streamChunkMsg = model.StreamChunkMsg
 type streamDoneMsg = model.StreamDoneMsg
 type streamErrorMsg = model.StreamErrorMsg
-type streamChunksCollectedMsg = model.StreamChunksCollectedMsg
-type displayChunkTickMsg = model.DisplayChunkTickMsg
 type toolCallsDetectedMsg = model.ToolCallsDetectedMsg
 type toolExecutionCompleteMsg = model.ToolExecutionCompleteMsg
+type toolResultsReadyMsg = model.ToolResultsReadyMsg
 type toolExecutionErrorMsg = model.ToolExecutionErrorMsg
 type toolPermissionRequestMsg = model.ToolPermissionRequestMsg
 type toolPermissionResponseMsg = model.ToolPermissionResponseMsg
@@ -23,6 +22,7 @@ type markdownRenderedMsg = model.MarkdownRenderedMsg
 type modelsListMsg = model.ModelsListMsg
 type sessionsListMsg = model.SessionsListMsg
 type sessionLoadedMsg = model.SessionLoadedMsg
+type modelMetadataMsg = model.ModelMetadataMsg
 type sessionSavedMsg = model.SessionSavedMsg
 type sessionRenamedMsg = model.SessionRenamedMsg
 type sessionExportedMsg = model.SessionExportedMsg
@@ -37,7 +37,7 @@ type registryRefreshCompleteMsg = model.RegistryRefreshCompleteMsg
 type editorContentMsg = model.EditorContentMsg
 type editorErrorMsg = model.EditorErrorMsg
 
-// Phase 2: Multi-step execution
+// Multi-step execution
 type IterationStep = model.IterationStep
 type IterationSummaryMsg = model.IterationSummaryMsg
 
@@ -61,6 +61,9 @@ const (
 	SettingTypeKeepPercentage
 	SettingTypeWarnAtPercentage
 	SettingTypeNotifyOnComplete
+	SettingTypeRequireApproval
+	SettingTypeFirstTokenTimeout
+	SettingTypeStreamIdleTimeout
 )
 
 type SettingFieldValidation int

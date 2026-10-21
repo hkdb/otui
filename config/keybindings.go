@@ -30,37 +30,37 @@ type actionDef struct {
 // Users can override any of these in the [actions] section of keybindings.toml
 var actionRegistry = map[string]actionDef{
 	// Main view - Modal toggles
-	"help":                  {"primary", "h"},
-	"new_session":           {"primary", "n"},
-	"session_manager":       {"primary", "s"},
-	"edit_session":          {"primary", "e"},
-	"model_selector":        {"primary", "m"},
-	"search_messages":       {"primary", "f"},    // Search current session
-	"search_all_sessions":   {"secondary", "f"},  // Search all sessions (global)
-	"plugin_manager":        {"primary", "p"},    // Plugin manager
-	"about":                 {"secondary", "a"},
-	"settings":              {"secondary", "s"},
+	"help":                {"primary", "h"},
+	"new_session":         {"primary", "n"},
+	"session_manager":     {"primary", "s"},
+	"edit_session":        {"primary", "e"},
+	"model_selector":      {"primary", "m"},
+	"search_messages":     {"primary", "f"},   // Search current session
+	"search_all_sessions": {"secondary", "f"}, // Search all sessions (global)
+	"plugin_manager":      {"primary", "p"},   // Plugin manager
+	"about":               {"secondary", "a"},
+	"settings":            {"secondary", "s"},
 
 	// Main view - Scrolling
-	"scroll_down":           {"primary", "j"},
-	"scroll_up":             {"primary", "k"},
-	"scroll_down_arrow":     {"primary", "down"},
-	"scroll_up_arrow":       {"primary", "up"},
-	"half_page_down":        {"secondary", "j"},
-	"half_page_up":          {"secondary", "k"},
-	"half_page_down_arrow":  {"secondary", "down"},
-	"half_page_up_arrow":    {"secondary", "up"},
-	"page_down":             {"primary", "pgdown"},
-	"page_up":               {"primary", "pgup"},
-	"scroll_to_top":         {"primary", "g"},
-	"scroll_to_bottom":      {"secondary", "g"},
+	"scroll_down":          {"primary", "j"},
+	"scroll_up":            {"primary", "k"},
+	"scroll_down_arrow":    {"primary", "down"},
+	"scroll_up_arrow":      {"primary", "up"},
+	"half_page_down":       {"secondary", "j"},
+	"half_page_up":         {"secondary", "k"},
+	"half_page_down_arrow": {"secondary", "down"},
+	"half_page_up_arrow":   {"secondary", "up"},
+	"page_down":            {"primary", "pgdown"},
+	"page_up":              {"primary", "pgup"},
+	"scroll_to_top":        {"primary", "g"},
+	"scroll_to_bottom":     {"secondary", "g"},
 
 	// Main view - Actions
-	"quit":                       {"primary", "q"},
-	"yank_last_response":         {"primary", "y"},
-	"yank_conversation":          {"primary", "c"},
-	"external_editor":            {"primary", "i"},
-	"compact_session":            {"secondary", "c"}, // Manual compact (Alt+Shift+C)
+	"quit":               {"primary", "q"},
+	"yank_last_response": {"primary", "y"},
+	"yank_conversation":  {"primary", "c"},
+	"external_editor":    {"primary", "i"},
+	"compact_session":    {"secondary", "c"}, // Manual compact (Alt+Shift+C)
 
 	// Model selector modal - normal mode (no modifier needed)
 	"model_selector_down":       {"none", "j"},
@@ -91,8 +91,8 @@ var actionRegistry = map[string]actionDef{
 	"plugin_up_arrow_filtered":   {"primary", "up"},
 
 	// Plugin manager modal - other actions (normal mode)
-	"plugin_install":  {"none", "i"},
-	"plugin_refresh":  {"primary", "r"},
+	"plugin_install": {"none", "i"},
+	"plugin_refresh": {"primary", "r"},
 
 	// Plugin manager modal - other actions (filter mode)
 	"plugin_install_filtered": {"primary", "i"},
@@ -352,9 +352,10 @@ func (kb *KeyBindingsConfig) DisplayActionKey(action string) string {
 // capitalizeKeybinding capitalizes a keybinding string for display
 // Converts uppercase letters to Shift+ format for clarity
 // Examples:
-//   "ctrl+shift+j" -> "Ctrl+Shift+J"
-//   "alt+D" -> "Alt+Shift+D" (uppercase D = Shift+D)
-//   "alt+j" -> "Alt+J"
+//
+//	"ctrl+shift+j" -> "Ctrl+Shift+J"
+//	"alt+D" -> "Alt+Shift+D" (uppercase D = Shift+D)
+//	"alt+j" -> "Alt+J"
 func capitalizeKeybinding(key string) string {
 	parts := strings.Split(key, "+")
 	var result []string

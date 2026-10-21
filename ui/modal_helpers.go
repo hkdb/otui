@@ -54,7 +54,7 @@ func RenderAcknowledgeModal(title, message string, modalType ModalType, width, h
 
 	// Message section (with top border)
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Empty line
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Empty line
 
 	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
@@ -65,7 +65,7 @@ func RenderAcknowledgeModal(title, message string, modalType ModalType, width, h
 		messageLines = append(messageLines, styledLine)
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Empty line
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Empty line
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -166,14 +166,14 @@ func renderUnresponsiveWarning(plugins []string, errorMsg string, width, height 
 
 	// Build message lines
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Empty line
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Empty line
 
 	msg := "These plugins are not responding to shutdown:"
 	messageLines = append(messageLines, lipgloss.NewStyle().
 		Width(modalWidth).
 		Align(lipgloss.Left).
 		Render(msg))
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	// Plugin list
 	for _, name := range plugins {
@@ -182,7 +182,7 @@ func renderUnresponsiveWarning(plugins []string, errorMsg string, width, height 
 			Align(lipgloss.Left).
 			Render("  • "+name))
 	}
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 
 	// Error reason (if any)
 	if errorMsg != "" {
@@ -194,7 +194,7 @@ func renderUnresponsiveWarning(plugins []string, errorMsg string, width, height 
 				Align(lipgloss.Left).
 				Render(line))
 		}
-		messageLines = append(messageLines, strings.Repeat(" ", modalWidth))
+		messageLines = append(messageLines, safeRepeat(" ", modalWidth))
 	}
 
 	// Use RenderThreeSectionModal for consistent borderless pattern
@@ -253,7 +253,7 @@ func RenderThreeSectionModal(title string, messageLines []string, footer string,
 	if rightPad < 0 {
 		rightPad = 0 // Safety check for very long titles
 	}
-	centeredTitle := strings.Repeat(" ", leftPad) + title + strings.Repeat(" ", rightPad)
+	centeredTitle := safeRepeat(" ", leftPad) + title + safeRepeat(" ", rightPad)
 
 	titleSection := lipgloss.NewStyle().
 		Bold(true).
@@ -262,14 +262,12 @@ func RenderThreeSectionModal(title string, messageLines []string, footer string,
 
 	// Message section (with top border and padding)
 	var contentLines []string
-	contentLines = append(contentLines, strings.Repeat(" ", modalWidth)) // Top padding
+	contentLines = append(contentLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	// Add message lines (already formatted by caller)
-	for _, line := range messageLines {
-		contentLines = append(contentLines, line)
-	}
+	contentLines = append(contentLines, messageLines...)
 
-	contentLines = append(contentLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	contentLines = append(contentLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -372,13 +370,13 @@ func buildSystemPromptToolWarningLines(a AppView, systemPrompt string, enabledPl
 	// Main warning text
 	mainWarning := "Custom system prompts can interfere with plugin tool calls in some models."
 	lines = append(lines, leftAlignedStyle.Render(mainWarning))
-	lines = append(lines, strings.Repeat(" ", modalWidth)) // Empty line
+	lines = append(lines, safeRepeat(" ", modalWidth)) // Empty line
 
 	// Show the system prompt
 	lines = append(lines, leftAlignedStyle.Render("Your system prompt:"))
 	quotedPrompt := "\"" + systemPrompt + "\""
 	lines = append(lines, leftAlignedStyle.Render(quotedPrompt))
-	lines = append(lines, strings.Repeat(" ", modalWidth)) // Empty line
+	lines = append(lines, safeRepeat(" ", modalWidth)) // Empty line
 
 	// Show enabled plugins
 	lines = append(lines, leftAlignedStyle.Render("Enabled plugins:"))
@@ -386,7 +384,7 @@ func buildSystemPromptToolWarningLines(a AppView, systemPrompt string, enabledPl
 		pluginLine := "  • " + plugin
 		lines = append(lines, leftAlignedStyle.Render(pluginLine))
 	}
-	lines = append(lines, strings.Repeat(" ", modalWidth)) // Empty line
+	lines = append(lines, safeRepeat(" ", modalWidth)) // Empty line
 
 	// Strong warning about consequences
 	warningStyle := lipgloss.NewStyle().
@@ -394,12 +392,12 @@ func buildSystemPromptToolWarningLines(a AppView, systemPrompt string, enabledPl
 		Align(lipgloss.Left).
 		Bold(true)
 	lines = append(lines, warningStyle.Render("Warning: This may break your session and make it unrecoverable."))
-	lines = append(lines, strings.Repeat(" ", modalWidth)) // Empty line
+	lines = append(lines, safeRepeat(" ", modalWidth)) // Empty line
 
 	// Recommendation
 	recommendation := fmt.Sprintf("Recommended: Remove the system prompt (%s) or disable plugins.", a.formatKeyDisplay("primary", "E"))
 	lines = append(lines, leftAlignedStyle.Render(recommendation))
-	lines = append(lines, strings.Repeat(" ", modalWidth)) // Empty line
+	lines = append(lines, safeRepeat(" ", modalWidth)) // Empty line
 
 	// Explanation
 	explanation := "This is a known limitation with Ollama and certain models."

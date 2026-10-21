@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type SystemConfig struct {
@@ -41,21 +42,23 @@ type CompactionConfig struct {
 }
 
 type UserConfig struct {
-	DefaultProvider        string           `toml:"default_provider,omitempty"`   // Which provider to use for new sessions
-	DefaultModel           string           `toml:"default_model,omitempty"`      // Default model (moved from Ollama)
-	LastUsedProvider       string           `toml:"last_used_provider,omitempty"` // Last provider user switched to
-	Ollama                 OllamaConfig     `toml:"ollama"`
-	DefaultSystemPrompt    string           `toml:"default_system_prompt,omitempty"`
-	PluginsEnabled         bool             `toml:"plugins_enabled"`
-	Security               SecurityConfig   `toml:"security"`
-	Providers              []ProviderConfig `toml:"providers,omitempty"`
-	AllowedTools           []string         `toml:"allowed_tools,omitempty"` // Global whitelist of tools that don't require approval
-	RequireApproval        bool             `toml:"require_approval"`        // Whether to ask for permission before executing tools
-	MaxIterations          int              `toml:"max_iterations"`          // Default: 10
-	EnableMultiStep        bool             `toml:"enable_multi_step"`       // Default: true
-	NotifyOnComplete       bool             `toml:"notify_on_complete"`      // Emit terminal bell when LLM response completes
-	Compaction             CompactionConfig `toml:"compaction,omitempty"`    // Context window management settings
-	ModelContextOverrides  map[string]int   `toml:"model_context_overrides,omitempty"` // Per-model context window overrides
+	DefaultProvider       string           `toml:"default_provider,omitempty"`   // Which provider to use for new sessions
+	DefaultModel          string           `toml:"default_model,omitempty"`      // Default model (moved from Ollama)
+	LastUsedProvider      string           `toml:"last_used_provider,omitempty"` // Last provider user switched to
+	Ollama                OllamaConfig     `toml:"ollama"`
+	DefaultSystemPrompt   string           `toml:"default_system_prompt,omitempty"`
+	PluginsEnabled        bool             `toml:"plugins_enabled"`
+	Security              SecurityConfig   `toml:"security"`
+	Providers             []ProviderConfig `toml:"providers,omitempty"`
+	AllowedTools          []string         `toml:"allowed_tools,omitempty"`           // Global whitelist of tools that don't require approval
+	RequireApproval       bool             `toml:"require_approval"`                  // Whether to ask for permission before executing tools
+	MaxIterations         int              `toml:"max_iterations"`                    // Default: 10
+	EnableMultiStep       bool             `toml:"enable_multi_step"`                 // Default: true
+	NotifyOnComplete      bool             `toml:"notify_on_complete"`                // Emit terminal bell when LLM response completes
+	FirstTokenTimeout     int              `toml:"first_token_timeout"`               // Seconds to wait for the first response chunk (0 = default)
+	StreamIdleTimeout     int              `toml:"stream_idle_timeout"`               // Seconds a response may go silent mid-stream (0 = default)
+	Compaction            CompactionConfig `toml:"compaction,omitempty"`              // Context window management settings
+	ModelContextOverrides map[string]int   `toml:"model_context_overrides,omitempty"` // Per-model context window overrides
 }
 
 type Config struct {
@@ -69,17 +72,19 @@ type Config struct {
 	Security              SecurityConfig
 	Providers             []ProviderConfig
 	CredentialStore       *CredentialStore
-	AllowedTools          []string // Global whitelist of tools that don't require approval
-	RequireApproval       bool     // Whether to ask for permission before executing tools
-	MaxIterations         int      // Max iterations per user message
-	EnableMultiStep       bool     // Allow LLM to execute multiple steps
-	NotifyOnComplete      bool     // Emit terminal bell when LLM response completes
+	AllowedTools          []string         // Global whitelist of tools that don't require approval
+	RequireApproval       bool             // Whether to ask for permission before executing tools
+	MaxIterations         int              // Max iterations per user message
+	EnableMultiStep       bool             // Allow LLM to execute multiple steps
+	NotifyOnComplete      bool             // Emit terminal bell when LLM response completes
+	FirstTokenTimeoutSecs int              // Seconds to wait for the first response chunk
+	StreamIdleTimeoutSecs int              // Seconds a response may go silent mid-stream
 	Compaction            CompactionConfig // Context window management settings
 	ModelContextOverrides map[string]int   // Per-model context window overrides
 	Keybindings           *KeyBindingsConfig
+	Env                   *EnvConfig // Set when configured through OTUI_* environment variables
 }
 
-var Debug = false
 var DebugLog *log.Logger
 
 func (c *Config) OllamaURL() string {
@@ -90,27 +95,147 @@ func (c *Config) Model() string {
 	return c.DefaultModel
 }
 
+// Response timeout defaults (seconds). The first chunk can take long: the
+// server may be loading the model or processing a long prompt.
+const (
+	DefaultFirstTokenTimeout = 600
+	DefaultStreamIdleTimeout = 180
+)
+
+// FirstTokenTimeout is how long to wait for the first chunk of a response
+func (c *Config) FirstTokenTimeout() time.Duration {
+	if c.FirstTokenTimeoutSecs <= 0 {
+		return DefaultFirstTokenTimeout * time.Second
+	}
+	return time.Duration(c.FirstTokenTimeoutSecs) * time.Second
+}
+
+// StreamIdleTimeout is how long a response may go without any chunk
+func (c *Config) StreamIdleTimeout() time.Duration {
+	if c.StreamIdleTimeoutSecs <= 0 {
+		return DefaultStreamIdleTimeout * time.Second
+	}
+	return time.Duration(c.StreamIdleTimeoutSecs) * time.Second
+}
+
 func (c *Config) DataDir() string {
 	return ExpandPath(c.DataDirectory)
 }
 
-func (c *Config) applyEnvOverrides() {
-	if host := os.Getenv("OTUI_OLLAMA_HOST"); host != "" {
-		c.OllamaHost = host
-		// Also update Providers[].BaseURL for Ollama
-		for i := range c.Providers {
-			if c.Providers[i].ID == "ollama" {
-				c.Providers[i].BaseURL = host
-				break
-			}
+// applyUserConfig copies the profile's config.toml settings and fills in
+// defaults and migrations
+func (c *Config) applyUserConfig(userCfg *UserConfig) {
+	c.OllamaHost = userCfg.Ollama.Host
+	c.DefaultModel = userCfg.DefaultModel // Read from top-level first
+	c.DefaultProvider = userCfg.DefaultProvider
+	c.LastUsedProvider = userCfg.LastUsedProvider
+	c.DefaultSystemPrompt = userCfg.DefaultSystemPrompt
+	c.PluginsEnabled = userCfg.PluginsEnabled
+	c.Security = userCfg.Security
+	c.Providers = userCfg.Providers
+	c.AllowedTools = userCfg.AllowedTools
+	c.RequireApproval = userCfg.RequireApproval
+	c.MaxIterations = userCfg.MaxIterations
+	c.EnableMultiStep = userCfg.EnableMultiStep
+	c.NotifyOnComplete = userCfg.NotifyOnComplete
+	c.FirstTokenTimeoutSecs = userCfg.FirstTokenTimeout
+	c.StreamIdleTimeoutSecs = userCfg.StreamIdleTimeout
+	c.Compaction = userCfg.Compaction
+	c.ModelContextOverrides = userCfg.ModelContextOverrides
+
+	// Set defaults for multi-step execution
+	if c.MaxIterations == 0 {
+		c.MaxIterations = 10
+	}
+
+	// Set defaults for response timeouts
+	if c.FirstTokenTimeoutSecs <= 0 {
+		c.FirstTokenTimeoutSecs = DefaultFirstTokenTimeout
+	}
+	if c.StreamIdleTimeoutSecs <= 0 {
+		c.StreamIdleTimeoutSecs = DefaultStreamIdleTimeout
+	}
+
+	// Set defaults for compaction if not specified
+	if c.Compaction.AutoCompactThreshold == 0 {
+		c.Compaction.AutoCompactThreshold = 0.75
+	}
+	if c.Compaction.KeepPercentage == 0 {
+		c.Compaction.KeepPercentage = 0.50
+	}
+	if c.Compaction.WarnAtPercentage == 0 {
+		c.Compaction.WarnAtPercentage = 0.85
+	}
+
+	// MIGRATION: Move Ollama.DefaultModel to top-level if needed
+	if c.DefaultModel == "" && userCfg.Ollama.DefaultModel != "" {
+		c.DefaultModel = userCfg.Ollama.DefaultModel
+		Debugf("[Config] Migrated default_model from [ollama] to top-level: %s", c.DefaultModel)
+	}
+
+	// Set default provider if not specified
+	if c.DefaultProvider == "" {
+		// Infer from enabled providers or default to "ollama"
+		if len(c.Providers) > 0 && c.Providers[0].Enabled {
+			c.DefaultProvider = c.Providers[0].ID
+		}
+		if c.DefaultProvider == "" {
+			c.DefaultProvider = "ollama"
+		}
+		Debugf("[Config] Set default_provider to: %s", c.DefaultProvider)
+	}
+
+	// Set last_used_provider if not specified (same as default)
+	if c.LastUsedProvider == "" {
+		c.LastUsedProvider = c.DefaultProvider
+	}
+}
+
+// applyEnvConfig makes the env provider/model/endpoint the defaults.
+// Only changes the in-memory config.
+func (c *Config) applyEnvConfig(env *EnvConfig) {
+	c.DataDirectory = env.DataDir
+	c.DefaultProvider = env.Provider
+	c.LastUsedProvider = env.Provider
+	c.DefaultModel = env.Model
+
+	if env.Provider == "ollama" {
+		c.OllamaHost = env.BaseURL
+	}
+
+	// Copy so the profile's provider list isn't shared with UserConfig
+	providers := append([]ProviderConfig(nil), c.Providers...)
+	found := false
+	for i := range providers {
+		if providers[i].ID == env.Provider {
+			providers[i].Enabled = true
+			providers[i].BaseURL = env.BaseURL
+			found = true
+			break
 		}
 	}
-	if model := os.Getenv("OTUI_OLLAMA_MODEL"); model != "" {
-		c.DefaultModel = model
+	if !found {
+		providers = append(providers, ProviderConfig{
+			ID:      env.Provider,
+			Name:    getProviderDisplayName(env.Provider),
+			Enabled: true,
+			BaseURL: env.BaseURL,
+		})
 	}
-	if dataDir := os.Getenv("OTUI_DATA_DIR"); dataDir != "" {
-		c.DataDirectory = dataDir
+	c.Providers = providers
+}
+
+// APIKey returns the API key for a provider: OTUI_API_KEY for the env
+// provider if set, otherwise the stored credential. The env key is never
+// put into the CredentialStore, so it can't end up on disk.
+func (c *Config) APIKey(providerID string) string {
+	if c.Env != nil && c.Env.Provider == providerID && c.Env.APIKey != "" {
+		return c.Env.APIKey
 	}
+	if c.CredentialStore == nil {
+		return ""
+	}
+	return c.CredentialStore.Get(providerID)
 }
 
 func CheckDebug() bool {
@@ -123,7 +248,6 @@ func InitEarlyDebugLog() {
 		return
 	}
 
-	Debug = true
 	cacheDir := GetCacheDir()
 
 	// Ensure cache dir exists
@@ -142,8 +266,8 @@ func InitEarlyDebugLog() {
 	}
 
 	DebugLog = log.New(f, "", log.Ldate|log.Ltime|log.Lmicroseconds|log.Lshortfile)
-	DebugLog.Printf("=== Early debug logging started (OTUI_DEBUG=%s) ===", os.Getenv("OTUI_DEBUG"))
-	DebugLog.Printf("Init log path: %s", logPath)
+	Debugf("=== Early debug logging started (OTUI_DEBUG=%s) ===", os.Getenv("OTUI_DEBUG"))
+	Debugf("Init log path: %s", logPath)
 }
 
 func InitDebugLog(dataDir string) {
@@ -152,11 +276,8 @@ func InitDebugLog(dataDir string) {
 	}
 
 	// Log transition if early debug was active
-	if DebugLog != nil {
-		DebugLog.Printf("=== Switching from init debug log to main debug log ===")
-	}
+	Debugf("=== Switching from init debug log to main debug log ===")
 
-	Debug = true
 	logPath := filepath.Join(dataDir, "debug.log")
 
 	// Create debug log with secure permissions (0600 - may contain sensitive debug info)
@@ -167,186 +288,84 @@ func InitDebugLog(dataDir string) {
 	}
 
 	DebugLog = log.New(f, "", log.Ldate|log.Ltime|log.Lmicroseconds|log.Lshortfile)
-	DebugLog.Printf("=== Main debug logging started (OTUI_DEBUG=%s) ===", os.Getenv("OTUI_DEBUG"))
-	DebugLog.Printf("Log path: %s", logPath)
+	Debugf("=== Main debug logging started (OTUI_DEBUG=%s) ===", os.Getenv("OTUI_DEBUG"))
+	Debugf("Log path: %s", logPath)
 }
 
-func HasAllEnvVars() bool {
-	return os.Getenv("OTUI_OLLAMA_HOST") != "" &&
-		os.Getenv("OTUI_OLLAMA_MODEL") != "" &&
-		os.Getenv("OTUI_DATA_DIR") != ""
-}
-
-func HasAnyEnvVar() bool {
-	return os.Getenv("OTUI_OLLAMA_HOST") != "" ||
-		os.Getenv("OTUI_OLLAMA_MODEL") != "" ||
-		os.Getenv("OTUI_DATA_DIR") != ""
-}
-
-func GetMissingEnvVar() string {
-	if os.Getenv("OTUI_OLLAMA_HOST") == "" {
-		return "OTUI_OLLAMA_HOST"
-	}
-	if os.Getenv("OTUI_OLLAMA_MODEL") == "" {
-		return "OTUI_OLLAMA_MODEL"
-	}
-	if os.Getenv("OTUI_DATA_DIR") == "" {
-		return "OTUI_DATA_DIR"
-	}
-	return ""
-}
-
+// Load loads the configuration including credentials. Used at startup and
+// when switching to another data directory. For credentials protected by a
+// passphrase it returns the config together with a "passphrase required"
+// error so the caller can retry with the passphrase.
 func Load() (*Config, error) {
+	cfg, err := loadConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	// Initialize CredentialStore
+	credMethod := SecurityMethod(cfg.Security.CredentialStorage)
+	cfg.CredentialStore = NewCredentialStore(credMethod, cfg.Security.SSHKeyPath)
+
+	// Load credentials
+	if err := cfg.CredentialStore.Load(cfg.DataDir()); err != nil {
+		// If error is due to missing passphrase, return partial config so caller can retry with passphrase
+		if strings.Contains(err.Error(), "passphrase required") {
+			return cfg, fmt.Errorf("failed to load credentials: %w", err)
+		}
+		// For other errors, return nil
+		return nil, fmt.Errorf("failed to load credentials: %w", err)
+	}
+
+	return cfg, nil
+}
+
+// Reload re-reads the configuration files while the app is running, keeping
+// the already unlocked credential store (so no passphrase is needed and the
+// store stays shared with providers and plugins).
+func Reload(store *CredentialStore) (*Config, error) {
+	cfg, err := loadConfig()
+	if err != nil {
+		return nil, err
+	}
+	cfg.CredentialStore = store
+	return cfg, nil
+}
+
+// loadConfig loads everything except credentials
+func loadConfig() (*Config, error) {
 	cfg := &Config{
 		DataDirectory: "~/.local/share/otui",
 		OllamaHost:    "http://localhost:11434",
 		DefaultModel:  "llama3.1:latest",
 	}
 
-	settingsPath := GetSettingsFilePath()
-	settingsExist := FileExists(settingsPath)
+	// Environment variables (e.g. in containers) override the profile
+	env, err := ReadEnvConfig()
+	if err != nil {
+		return nil, err
+	}
+	cfg.Env = env
 
-	if settingsExist {
-		systemCfg, err := LoadSystemConfig()
-		if err != nil {
-			return nil, fmt.Errorf("failed to load system config: %w", err)
-		}
-		cfg.DataDirectory = systemCfg.DataDirectory
-
-		dataDir := cfg.DataDir()
-		userCfg, err := LoadUserConfig(dataDir)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load user config: %w", err)
-		}
-		cfg.OllamaHost = userCfg.Ollama.Host
-		cfg.DefaultModel = userCfg.DefaultModel         // Read from top-level first
-		cfg.DefaultProvider = userCfg.DefaultProvider   // NEW
-		cfg.LastUsedProvider = userCfg.LastUsedProvider // NEW
-		cfg.DefaultSystemPrompt = userCfg.DefaultSystemPrompt
-		cfg.PluginsEnabled = userCfg.PluginsEnabled
-		cfg.Security = userCfg.Security
-		cfg.Providers = userCfg.Providers
-		cfg.AllowedTools = userCfg.AllowedTools
-		cfg.RequireApproval = userCfg.RequireApproval
-		cfg.MaxIterations = userCfg.MaxIterations
-		cfg.EnableMultiStep = userCfg.EnableMultiStep
-		cfg.NotifyOnComplete = userCfg.NotifyOnComplete
-		cfg.Compaction = userCfg.Compaction
-		cfg.ModelContextOverrides = userCfg.ModelContextOverrides
-
-		// Set defaults for multi-step execution (Phase 2)
-		if cfg.MaxIterations == 0 {
-			cfg.MaxIterations = 10
-		}
-
-		// Set defaults for compaction if not specified
-		if cfg.Compaction.AutoCompactThreshold == 0 {
-			cfg.Compaction.AutoCompactThreshold = 0.75
-		}
-		if cfg.Compaction.KeepPercentage == 0 {
-			cfg.Compaction.KeepPercentage = 0.50
-		}
-		if cfg.Compaction.WarnAtPercentage == 0 {
-			cfg.Compaction.WarnAtPercentage = 0.85
-		}
-
-		// MIGRATION: Move Ollama.DefaultModel to top-level if needed
-		if cfg.DefaultModel == "" && userCfg.Ollama.DefaultModel != "" {
-			cfg.DefaultModel = userCfg.Ollama.DefaultModel
-			if Debug && DebugLog != nil {
-				DebugLog.Printf("[Config] Migrated default_model from [ollama] to top-level: %s", cfg.DefaultModel)
-			}
-		}
-
-		// Set default provider if not specified
-		if cfg.DefaultProvider == "" {
-			// Infer from enabled providers or default to "ollama"
-			if len(cfg.Providers) > 0 && cfg.Providers[0].Enabled {
-				cfg.DefaultProvider = cfg.Providers[0].ID
-			}
-			if cfg.DefaultProvider == "" {
-				cfg.DefaultProvider = "ollama"
-			}
-			if Debug && DebugLog != nil {
-				DebugLog.Printf("[Config] Set default_provider to: %s", cfg.DefaultProvider)
-			}
-		}
-
-		// Set last_used_provider if not specified (same as default)
-		if cfg.LastUsedProvider == "" {
-			cfg.LastUsedProvider = cfg.DefaultProvider
-		}
-	} else if HasAllEnvVars() {
-		cfg.applyEnvOverrides()
+	// Data directory: OTUI_DATA_DIR, else settings.toml (created if missing)
+	if env != nil {
+		cfg.DataDirectory = env.DataDir
 	} else {
 		systemCfg, err := LoadSystemConfig()
 		if err != nil {
 			return nil, fmt.Errorf("failed to load system config: %w", err)
 		}
 		cfg.DataDirectory = systemCfg.DataDirectory
+	}
 
-		dataDir := cfg.DataDir()
-		userCfg, err := LoadUserConfig(dataDir)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load user config: %w", err)
-		}
-		cfg.OllamaHost = userCfg.Ollama.Host
-		cfg.DefaultModel = userCfg.DefaultModel         // Read from top-level first
-		cfg.DefaultProvider = userCfg.DefaultProvider   // NEW
-		cfg.LastUsedProvider = userCfg.LastUsedProvider // NEW
-		cfg.DefaultSystemPrompt = userCfg.DefaultSystemPrompt
-		cfg.PluginsEnabled = userCfg.PluginsEnabled
-		cfg.Security = userCfg.Security
-		cfg.Providers = userCfg.Providers
-		cfg.AllowedTools = userCfg.AllowedTools
-		cfg.RequireApproval = userCfg.RequireApproval
-		cfg.MaxIterations = userCfg.MaxIterations
-		cfg.EnableMultiStep = userCfg.EnableMultiStep
-		cfg.NotifyOnComplete = userCfg.NotifyOnComplete
-		cfg.Compaction = userCfg.Compaction
-		cfg.ModelContextOverrides = userCfg.ModelContextOverrides
+	userCfg, err := LoadUserConfig(cfg.DataDir())
+	if err != nil {
+		return nil, fmt.Errorf("failed to load user config: %w", err)
+	}
+	cfg.applyUserConfig(userCfg)
 
-		// Set defaults for multi-step execution (Phase 2)
-		if cfg.MaxIterations == 0 {
-			cfg.MaxIterations = 10
-		}
-
-		// Set defaults for compaction if not specified
-		if cfg.Compaction.AutoCompactThreshold == 0 {
-			cfg.Compaction.AutoCompactThreshold = 0.75
-		}
-		if cfg.Compaction.KeepPercentage == 0 {
-			cfg.Compaction.KeepPercentage = 0.50
-		}
-		if cfg.Compaction.WarnAtPercentage == 0 {
-			cfg.Compaction.WarnAtPercentage = 0.85
-		}
-
-		// MIGRATION: Move Ollama.DefaultModel to top-level if needed
-		if cfg.DefaultModel == "" && userCfg.Ollama.DefaultModel != "" {
-			cfg.DefaultModel = userCfg.Ollama.DefaultModel
-			if Debug && DebugLog != nil {
-				DebugLog.Printf("[Config] Migrated default_model from [ollama] to top-level: %s", cfg.DefaultModel)
-			}
-		}
-
-		// Set default provider if not specified
-		if cfg.DefaultProvider == "" {
-			if len(cfg.Providers) > 0 && cfg.Providers[0].Enabled {
-				cfg.DefaultProvider = cfg.Providers[0].ID
-			}
-			if cfg.DefaultProvider == "" {
-				cfg.DefaultProvider = "ollama"
-			}
-			if Debug && DebugLog != nil {
-				DebugLog.Printf("[Config] Set default_provider to: %s", cfg.DefaultProvider)
-			}
-		}
-
-		// Set last_used_provider if not specified (same as default)
-		if cfg.LastUsedProvider == "" {
-			cfg.LastUsedProvider = cfg.DefaultProvider
-		}
+	// Env values win over the profile (in memory only, never saved)
+	if env != nil {
+		cfg.applyEnvConfig(env)
 	}
 
 	dataDir := cfg.DataDir()
@@ -359,26 +378,13 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("failed to set data directory permissions: %w", err)
 	}
 
-	// Initialize CredentialStore
 	// Default to plaintext if not specified
 	if cfg.Security.CredentialStorage == "" {
 		cfg.Security.CredentialStorage = string(SecurityPlainText)
 	}
 
-	credMethod := SecurityMethod(cfg.Security.CredentialStorage)
-	cfg.CredentialStore = NewCredentialStore(credMethod, cfg.Security.SSHKeyPath)
-
-	// Load credentials
-	if err := cfg.CredentialStore.Load(dataDir); err != nil {
-		// If error is due to missing passphrase, return partial config so caller can retry with passphrase
-		if strings.Contains(err.Error(), "passphrase required") {
-			return cfg, fmt.Errorf("failed to load credentials: %w", err)
-		}
-		// For other errors, return nil
-		return nil, fmt.Errorf("failed to load credentials: %w", err)
-	}
-
-	// Load keybindings
+	// Load keybindings before credentials so the partial config returned when
+	// a passphrase is required is complete apart from credentials
 	keybindingsCfg, err := LoadKeybindings(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load keybindings: %w", err)

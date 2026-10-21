@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -37,7 +36,7 @@ func RenderConfirmationModal(state ConfirmationState, width, height int) string 
 
 	// Message section (with top border)
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Top padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
@@ -48,7 +47,7 @@ func RenderConfirmationModal(state ConfirmationState, width, height int) string 
 		messageLines = append(messageLines, messageStyle.Render(line))
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -100,7 +99,7 @@ func RenderToolWarningModal(modelName string, enabledPlugins []string, width, he
 
 	// Message section (with top border)
 	var contentLines []string
-	contentLines = append(contentLines, strings.Repeat(" ", modalWidth)) // Top padding
+	contentLines = append(contentLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
@@ -121,7 +120,7 @@ func RenderToolWarningModal(modelName string, enabledPlugins []string, width, he
 	}
 
 	contentLines = append(contentLines, messageStyle.Render(lipgloss.NewStyle().Foreground(accentColor).Render("Recommended:")+" qwen3-coder, llama3.1, mistral"))
-	contentLines = append(contentLines, strings.Repeat(" ", modalWidth)) // Bottom padding
+	contentLines = append(contentLines, safeRepeat(" ", modalWidth)) // Bottom padding
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).
@@ -156,37 +155,5 @@ func RenderUnsavedChangesModal(width, height int) string {
 		Title:   "Unsaved Changes",
 		Message: "You have unsaved changes. Discard them?",
 	}
-	return RenderConfirmationModal(state, width, height)
-}
-
-// RenderCompactionConfirmModal shows compaction confirmation with before/after stats
-func RenderCompactionConfirmModal(
-	currentTokens, contextWindow int,
-	afterTokens int,
-	compactedCount, keepCount int,
-	width, height int,
-) string {
-	currentPct := float64(currentTokens) / float64(contextWindow) * 100
-	afterPct := float64(afterTokens) / float64(contextWindow) * 100
-
-	message := fmt.Sprintf(
-		"Current: %d / %d tokens (%.0f%%)\n"+
-			"After:   %d / %d tokens (%.0f%%)\n\n"+
-			"Will compact %d messages\n"+
-			"Keeping last %d messages\n\n"+
-			"⚠  Compacted messages won't be sent to LLM\n"+
-			"but remain visible in history\n\n"+
-			"Press Y to compact, N to cancel",
-		currentTokens, contextWindow, currentPct,
-		afterTokens, contextWindow, afterPct,
-		compactedCount, keepCount,
-	)
-
-	state := ConfirmationState{
-		Active:  true,
-		Title:   "Compact Session",
-		Message: message,
-	}
-
 	return RenderConfirmationModal(state, width, height)
 }

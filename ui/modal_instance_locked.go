@@ -6,6 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"otui/safetext"
 )
 
 // InstanceLockedModal is a modal shown when another OTUI instance is detected
@@ -53,7 +55,14 @@ func (m InstanceLockedModal) ForceDelete() bool {
 	return m.forceDelete
 }
 
+// View renders the screen. Only color sequences reach the terminal: any
+// other control sequence in displayed text (model output, session files,
+// server errors) is removed.
 func (m InstanceLockedModal) View() string {
+	return safetext.SGROnly(m.view())
+}
+
+func (m InstanceLockedModal) view() string {
 	if m.width < 20 || m.height < 10 {
 		return "Terminal too small"
 	}
@@ -85,7 +94,7 @@ func (m InstanceLockedModal) View() string {
 
 	// Message section (with top border)
 	var messageLines []string
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Empty line
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Empty line
 
 	messageStyle := lipgloss.NewStyle().
 		Width(modalWidth).
@@ -96,7 +105,7 @@ func (m InstanceLockedModal) View() string {
 		messageLines = append(messageLines, styledLine)
 	}
 
-	messageLines = append(messageLines, strings.Repeat(" ", modalWidth)) // Empty line
+	messageLines = append(messageLines, safeRepeat(" ", modalWidth)) // Empty line
 
 	messageSection := lipgloss.NewStyle().
 		BorderTop(true).

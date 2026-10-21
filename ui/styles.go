@@ -18,12 +18,12 @@ var (
 	UserStyle = lipgloss.NewStyle().
 			Foreground(successColor).
 			Bold(true)
-	// NO .Background() = transparent!
+	// No background, so the terminal background shows through
 
 	// Assistant message style
 	AssistantStyle = lipgloss.NewStyle().
 			Foreground(accentColor)
-	// NO .Background() = transparent!
+	// No background, so the terminal background shows through
 
 	// System/timestamp style
 	DimStyle = lipgloss.NewStyle().

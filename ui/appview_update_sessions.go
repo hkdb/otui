@@ -10,50 +10,48 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"otui/config"
+	appmodel "otui/model"
+	"otui/safetext"
 )
 
 // handleSessionMessage handles session-related messages
 func (a AppView) handleSessionMessage(msg tea.Msg) (AppView, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sessionLoadedMsg:
-		if config.DebugLog != nil && msg.Session != nil {
-			config.DebugLog.Printf("[Session Load] === ENTRY === session=%s, enabledPlugins=%d, pluginsEnabledInConfig=%v, managerNil=%v",
+		if msg.Session != nil {
+			config.Debugf("[Session Load] session=%s, enabledPlugins=%d, pluginsEnabledInConfig=%v, managerNil=%v",
 				msg.Session.Name, len(msg.Session.EnabledPlugins), a.dataModel.Config.PluginsEnabled, a.dataModel.MCPManager == nil)
 		}
 
 		if msg.Err != nil {
-			// Check if error is due to session being locked
-			if msg.Err.Error() == "session_locked" {
-				a.showAcknowledgeModal = true
-				a.acknowledgeModalTitle = "Session In Use"
-				a.acknowledgeModalMsg = "This session is currently being used in another OTUI instance.\n\n" +
-					"Only one instance can use a session at a time.\n\n" +
-					"Options:\n" +
-					"• Close the other OTUI instance\n" +
-					"• Use a different session\n" +
-					"• Run OTUI in a container for isolated instances"
-				a.acknowledgeModalType = ModalTypeWarning
+			// Session is locked by another instance - offer to force delete the lock
+			a.discardSessionOnSwitch = ""
+			if lockedErr, ok := appmodel.AsSessionLockedError(msg.Err); ok {
+				a.showSessionLocked(lockedErr.SessionID, lockedErr.PID)
 				return a, nil
 			}
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Error loading Session: %v", msg.Err)
-			}
+			config.Debugf("Error loading Session: %v", msg.Err)
 			return a, nil
 		}
 
 		// Unlock old session before switching
 		if a.dataModel.CurrentSession != nil && a.dataModel.SessionStorage != nil {
-			_ = a.dataModel.SessionStorage.UnlockSession(a.dataModel.CurrentSession.ID)
+			oldID := a.dataModel.CurrentSession.ID
+			_ = a.dataModel.SessionStorage.UnlockSession(oldID)
+
+			// Delete the empty placeholder session replaced by a force loaded one
+			if a.discardSessionOnSwitch == oldID && oldID != msg.Session.ID {
+				_ = a.dataModel.SessionStorage.Delete(oldID)
+			}
 		}
+		a.discardSessionOnSwitch = ""
 
 		// Load session into UI and sync with MCP manager
 		a.setCurrentSession(msg.Session)
 
 		// Reset streaming/typewriter state from previous session
 		a.currentResp.Reset()
-		a.chunks = nil
-		a.chunkIndex = 0
 		a.userScrolledUp = false
 		a.highlightedMessageIdx = -1
 		a.highlightFlashCount = 0
@@ -83,7 +81,7 @@ func (a AppView) handleSessionMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			})
 		}
 
-		// Set model and provider from session (Phase 1.6: multi-provider support)
+		// Set model and provider from session
 		if msg.Session.Model != "" {
 			sessionProvider := msg.Session.Provider
 			if sessionProvider == "" {
@@ -94,22 +92,16 @@ func (a AppView) handleSessionMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			provider, ok := a.dataModel.Providers[sessionProvider]
 			if !ok {
 				// Fallback to current provider if session's provider not available
-				if config.Debug && config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] WARNING: Session provider '%s' not found, using fallback", sessionProvider)
-				}
+				config.Debugf("[UI] WARNING: Session provider '%s' not found, using fallback", sessionProvider)
 				a.dataModel.Provider.SetModel(msg.Session.Model)
 			} else {
 				a.dataModel.Provider = provider
 				provider.SetModel(msg.Session.Model)
-				if config.Debug && config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] Loaded session with provider '%s', model '%s'", sessionProvider, msg.Session.Model)
-				}
+				config.Debugf("[UI] Loaded session with provider '%s', model '%s'", sessionProvider, msg.Session.Model)
 			}
 		}
 
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Loaded session %s with %d messages", msg.Session.ID, len(msg.Session.Messages))
-		}
+		config.Debugf("Loaded session %s with %d messages", msg.Session.ID, len(msg.Session.Messages))
 
 		// Check if we need to scroll to a specific message
 		if a.pendingScrollToMessageIdx >= 0 && a.pendingScrollToMessageIdx < len(a.dataModel.Messages) {
@@ -215,33 +207,25 @@ func (a AppView) handleSessionMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		// 1. Recreate MCP manager (it was destroyed during data dir change)
 		// 2. Start plugins for this session
 		// This completes the data directory change flow.
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[Session Load] Checking plugin startup: pluginsEnabled=%v, sessionPluginCount=%d, managerNil=%v, condition=%v",
-				a.dataModel.Config.PluginsEnabled, len(msg.Session.EnabledPlugins), a.dataModel.MCPManager == nil,
-				a.dataModel.Config.PluginsEnabled && len(msg.Session.EnabledPlugins) > 0)
-		}
+		config.Debugf("[Session Load] Checking plugin startup: pluginsEnabled=%v, sessionPluginCount=%d, managerNil=%v, condition=%v",
+			a.dataModel.Config.PluginsEnabled, len(msg.Session.EnabledPlugins), a.dataModel.MCPManager == nil,
+			a.dataModel.Config.PluginsEnabled && len(msg.Session.EnabledPlugins) > 0)
 		if a.dataModel.Config.PluginsEnabled && len(msg.Session.EnabledPlugins) > 0 {
 			// Check if manager needs recreation (destroyed during data dir change)
 			if a.dataModel.MCPManager == nil {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] Recreating MCP manager after data dir change - session '%s' has %d enabled plugins", msg.Session.Name, len(msg.Session.EnabledPlugins))
-				}
+				config.Debugf("[UI] Recreating MCP manager after data dir change - session '%s' has %d enabled plugins", msg.Session.Name, len(msg.Session.EnabledPlugins))
 
-				// Recreate manager (same pattern as settings.go line 291-292)
+				// Recreate the manager
 				if err := a.ensureMCPManager(); err != nil {
-					if config.DebugLog != nil {
-						config.DebugLog.Printf("[UI] Failed to recreate MCP manager: %v", err)
-					}
+					config.Debugf("[UI] Failed to recreate MCP manager: %v", err)
 					// Continue without plugins - don't block session load
 					return a, tea.Batch(renderCmds...)
 				}
 
 				// Manager created successfully - show startup modal and start plugins
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[Session Load] === TRIGGERING PLUGIN STARTUP === session=%s", msg.Session.Name)
-				}
+				config.Debugf("[Session Load] Starting plugins for session=%s", msg.Session.Name)
 
-				// Show startup modal (same pattern as settings.go line 313-321)
+				// Show the startup modal
 				a.pluginSystemState = PluginSystemState{
 					Active:    true,
 					Operation: "starting",
@@ -252,7 +236,7 @@ func (a AppView) handleSessionMessage(msg tea.Msg) (AppView, tea.Cmd) {
 				a.pluginSystemState.Spinner.Spinner = spinner.Dot
 				a.pluginSystemState.Spinner.Style = lipgloss.NewStyle().Foreground(successColor)
 
-				// Start plugins (same pattern as settings.go line 323-326)
+				// Start plugins
 				// Combine markdown rendering with plugin startup
 				allCmds := append(renderCmds,
 					a.pluginSystemState.Spinner.Tick,
@@ -266,31 +250,23 @@ func (a AppView) handleSessionMessage(msg tea.Msg) (AppView, tea.Cmd) {
 
 	case sessionSavedMsg:
 		if msg.Err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Error saving Session: %v", msg.Err)
-			}
+			config.Debugf("Error saving Session: %v", msg.Err)
 			return a, nil
 		}
 
 		a.dataModel.SessionDirty = false
 
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Session saved successfully")
-		}
+		config.Debugf("Session saved successfully")
 
 		return a, nil
 
 	case sessionRenamedMsg:
 		if msg.Err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Error renaming Session: %v", msg.Err)
-			}
+			config.Debugf("Error renaming Session: %v", msg.Err)
 			return a, nil
 		}
 
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Session renamed successfully")
-		}
+		config.Debugf("Session renamed successfully")
 
 		return a, nil
 
@@ -323,9 +299,7 @@ func (a AppView) handleSessionMessage(msg tea.Msg) (AppView, tea.Cmd) {
 			a.exportCancelFunc = nil
 			a.sessionExportMode = false
 			a.exportTargetPath = ""
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Export error: %v", msg.Err)
-			}
+			config.Debugf("Export error: %v", msg.Err)
 			return a, nil
 		}
 
@@ -335,9 +309,7 @@ func (a AppView) handleSessionMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		a.exportCancelFunc = nil
 		a.sessionExportSuccess = msg.Path
 		a.exportTargetPath = ""
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Session exported successfully to: %s", msg.Path)
-		}
+		config.Debugf("Session exported successfully to: %s", msg.Path)
 		return a, nil
 
 	case sessionImportedMsg:
@@ -354,20 +326,32 @@ func (a AppView) handleSessionMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		if msg.Err != nil {
 			// Import failed - close modal with error
 			a.sessionImportPicker.Reset()
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Import error: %v", msg.Err)
-			}
+			config.Debugf("Import error: %v", msg.Err)
 			return a, nil
 		}
 
 		// Success - show success modal and refresh session list
 		successMsg := fmt.Sprintf("Imported: %s\nMessages: %d\nModel: %s",
 			msg.Session.Name, len(msg.Session.Messages), msg.Session.Model)
+
+		// Plugins and pre-approved tools from the file were removed; offer
+		// to keep them
+		a.sessionImportPermissions = msg.Permissions
+		if !msg.Permissions.Empty() {
+			successMsg += "\n\nThis session came with permissions, removed for safety:"
+			if len(msg.Permissions.EnabledPlugins) > 0 {
+				successMsg += "\n• Enabled plugins: " + safetext.Line(strings.Join(msg.Permissions.EnabledPlugins, ", "))
+			}
+			if len(msg.Permissions.AllowedTools) > 0 {
+				successMsg += "\n• Tools that run without asking: " + safetext.Line(strings.Join(msg.Permissions.AllowedTools, ", "))
+			}
+			successMsg += "\nKeep them only if you trust where this file came from."
+			a.sessionImportPicker.SuccessFooter = FormatFooter("k", "Keep permissions", "Enter", "Remove (default)")
+		}
+
 		a.sessionImportPicker.Success = &successMsg
 		a.sessionImportSuccess = msg.Session
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Session imported successfully: %s", msg.Session.Name)
-		}
+		config.Debugf("Session imported successfully: %s", msg.Session.Name)
 
 		// Refresh session list in background
 		return a, func() tea.Msg {

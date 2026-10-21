@@ -7,6 +7,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       matrix:
         arch: [amd64, arm64]
@@ -37,6 +41,12 @@ jobs:
           fi
           GOARCH=${{ matrix.arch }} GOOS=${{ matrix.os }} go build -o ${OUTPUT_NAME} .
 
+      # Provenance: gh attestation verify otui-<os>-<arch> --repo hkdb/otui
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: otui-${{ matrix.os }}-${{ matrix.arch }}*
+
       - uses: actions/upload-artifact@v6
         with:
           name: otui-${{ matrix.os }}-${{ matrix.arch }}
@@ -60,10 +70,17 @@ jobs:
 
       - uses: actions/download-artifact@v5
 
+      # Checksums of all binaries, verified by dist/get.sh
+      - name: Generate SHA256SUMS
+        run: |
+          mkdir -p release
+          cp otui-*/* release/
+          cd release && sha256sum otui-* > SHA256SUMS && cat SHA256SUMS
+
       - name: Publish release
         run: |
           TAG_NAME=${{ github.ref_name }}
-          gh release upload $TAG_NAME otui-*/*
+          gh release upload $TAG_NAME release/*
 
   deploy:
     needs:
