@@ -72,6 +72,7 @@
 - Updated OpenAI context window defaults
 - Faster global search
 - Added CI checks
+- Code cleanup
 
 ---
 

@@ -465,13 +465,11 @@ func (a AppView) handleNewSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) 
 			sessionName := strings.TrimSpace(a.newSessionNameInput.Value())
 			systemPrompt := strings.TrimSpace(a.newSessionPromptInput.Value())
 
-			// Create and save new session (shared implementation - fixes bug where session wasn't saved)
+			// Create and save the new session
 			newSession, err := a.dataModel.CreateAndSaveNewSession(sessionName, systemPrompt, a.newSessionEnabledPlugins)
 			if err != nil {
 				// If session creation fails, show error but don't crash
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("Failed to create new Session: %v", err)
-				}
+				config.Debugf("Failed to create new Session: %v", err)
 				// Could show error modal here, but for now just close the modal
 				a.showNewSessionModal = false
 				a.newSessionNameInput.Blur()
@@ -505,9 +503,7 @@ func (a AppView) handleNewSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) 
 		newSession, err := a.dataModel.CreateAndSaveNewSession(sessionName, systemPrompt, a.newSessionEnabledPlugins)
 		if err != nil {
 			// If session creation fails, show error but don't crash
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Failed to create new Session: %v", err)
-			}
+			config.Debugf("Failed to create new Session: %v", err)
 			// Could show error modal here, but for now just close the modal
 			a.showNewSessionModal = false
 			a.newSessionNameInput.Blur()
@@ -586,7 +582,7 @@ func (a AppView) handleModelSelectorUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 						a.showModelSelector = false
 						a.modelFilterMode = false
 					} else {
-						// No warning needed - proceed with switch (Phase 1.6: use SwitchModel)
+						// No warning needed - proceed with switch
 						a.showModelSelector = false
 						a.modelFilterMode = false
 						return a, a.dataModel.SwitchModel(selectedModelInfo)
@@ -678,7 +674,7 @@ func (a AppView) handleModelSelectorUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 				return a, nil
 			}
 
-			// Normal mode - update the client (Phase 1.6: use SwitchModel)
+			// Normal mode - update the client
 			a.showModelSelector = false
 			return a, a.dataModel.SwitchModel(selectedModelInfo)
 		}
@@ -843,11 +839,7 @@ func (a AppView) handleGlobalSearchUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 func (a AppView) handleEditSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 	kb := a.dataModel.Config.Keybindings
 
-	// Debug logging for keybinding matching
-	if config.Debug && config.DebugLog != nil {
-		compactKey := kb.GetActionKey("compact_session")
-		config.DebugLog.Printf("[EditSessionModal] Key pressed: %q, compact_session key: %q", msg.String(), compactKey)
-	}
+	config.Debugf("[EditSessionModal] Key pressed: %q, compact_session key: %q", msg.String(), kb.GetActionKey("compact_session"))
 
 	switch msg.String() {
 	case "esc":
@@ -1028,7 +1020,7 @@ func (a AppView) handleEditSessionModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd)
 func (a AppView) handleToolWarningModalUpdate(msg tea.KeyMsg) (AppView, tea.Cmd) {
 	switch msg.String() {
 	case "enter", "y":
-		// User confirmed - proceed with model switch (Phase 1.6: use SwitchModel)
+		// User confirmed - proceed with model switch
 		// Find the model info from the list (uses helper for cross-provider matching)
 		_, modelInfo := FindModelByName(a.modelList, a.pendingModelSwitch)
 		if modelInfo == nil {
@@ -1071,14 +1063,10 @@ func (a AppView) handleSystemPromptToolWarningUpdate(msg tea.KeyMsg) (AppView, t
 
 			// Clear editor temp file (defense in depth)
 			if err := config.ClearEditorTempFile(); err != nil {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("Warning: failed to clear editor temp file: %v", err)
-				}
+				config.Debugf("Warning: failed to clear editor temp file: %v", err)
 			}
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("System prompt warning acknowledged - sending message: %s", userMsg)
-			}
+			config.Debugf("System prompt warning acknowledged - sending message: %s", userMsg)
 
 			// Add user message
 			a.dataModel.Messages = append(a.dataModel.Messages, Message{
@@ -1108,9 +1096,7 @@ func (a AppView) handleSystemPromptToolWarningUpdate(msg tea.KeyMsg) (AppView, t
 			a.dataModel.Streaming = true
 			a.updateViewportContent(true)
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Firing sendToOllama() Cmd")
-			}
+			config.Debugf("Firing sendToOllama() Cmd")
 
 			// Start streaming response, spinner animation, and render user message markdown
 			return a, tea.Batch(

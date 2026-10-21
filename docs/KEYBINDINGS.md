@@ -145,11 +145,11 @@ primary = "alt"
 secondary = "alt+shift"
 
 [actions]
-# Require Ctrl+Shift+Q to quit (prevent accidental exits)
-quit = "ctrl+shift+q"
+# Require Alt+Shift+Q to quit (prevent accidental exits)
+quit = "alt+Q"
 
-# Require confirmation modifier for plugin force-shutdown
-force_shutdown = "ctrl+alt+shift+f"
+# Require Alt+Shift+K to clear the input (and lose the draft)
+clear_input = "alt+K"
 ```
 
 ## Keybinding Syntax Rules
@@ -164,7 +164,7 @@ Available modifiers (combine with `+`):
 - `super` - Windows/Command key
 - `shift` - Only for special keys (see below)
 
-Examples: `alt+j`, `ctrl+shift+f`, `super+n`
+Examples: `alt+j`, `ctrl+f`, `alt+shift+up`
 
 ### Letter Keys with Shift
 
@@ -173,13 +173,13 @@ Examples: `alt+j`, `ctrl+shift+f`, `super+n`
 ✅ **Correct:**
 ```toml
 half_page_down = "alt+D"    # Alt+Shift+D
-quit = "ctrl+Q"             # Ctrl+Shift+Q
+quit = "alt+Q"              # Alt+Shift+Q
 ```
 
 ❌ **Wrong:**
 ```toml
 half_page_down = "alt+shift+d"  # Won't work!
-quit = "ctrl+shift+q"           # Won't work!
+quit = "alt+shift+q"            # Won't work!
 ```
 
 **Why?** Terminals send uppercase letters when Shift is pressed, not `shift+letter`.
@@ -190,9 +190,8 @@ For non-letter keys, you **can** use `shift+`:
 
 ✅ **These work:**
 ```toml
-force_shutdown = "ctrl+shift+f1"    # Function keys
+scroll_to_top = "ctrl+shift+home"   # Home/End
 scroll_down = "alt+shift+down"      # Arrow keys
-page_down = "ctrl+shift+pgdown"     # Page keys
 ```
 
 ### Key Names Reference

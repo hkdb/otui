@@ -143,20 +143,14 @@ func LoadCredentialsWithPassphrase(cfg *config.Config, passphrase string) error 
 
 	// Try to load credentials (will fail if passphrase is wrong)
 	dataDir := cfg.DataDir()
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[modal_passphrase_helpers] LoadCredentialsWithPassphrase: Attempting to load credentials")
-	}
+	config.Debugf("[modal_passphrase_helpers] LoadCredentialsWithPassphrase: Attempting to load credentials")
 
 	if err := cfg.CredentialStore.Load(dataDir); err != nil {
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[modal_passphrase_helpers] LoadCredentialsWithPassphrase: Failed to load credentials: %v", err)
-		}
+		config.Debugf("[modal_passphrase_helpers] LoadCredentialsWithPassphrase: Failed to load credentials: %v", err)
 		return err
 	}
 
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[modal_passphrase_helpers] LoadCredentialsWithPassphrase: Successfully loaded credentials")
-	}
+	config.Debugf("[modal_passphrase_helpers] LoadCredentialsWithPassphrase: Successfully loaded credentials")
 
 	return nil
 }

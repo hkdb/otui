@@ -42,23 +42,23 @@ type CompactionConfig struct {
 }
 
 type UserConfig struct {
-	DefaultProvider        string           `toml:"default_provider,omitempty"`   // Which provider to use for new sessions
-	DefaultModel           string           `toml:"default_model,omitempty"`      // Default model (moved from Ollama)
-	LastUsedProvider       string           `toml:"last_used_provider,omitempty"` // Last provider user switched to
-	Ollama                 OllamaConfig     `toml:"ollama"`
-	DefaultSystemPrompt    string           `toml:"default_system_prompt,omitempty"`
-	PluginsEnabled         bool             `toml:"plugins_enabled"`
-	Security               SecurityConfig   `toml:"security"`
-	Providers              []ProviderConfig `toml:"providers,omitempty"`
-	AllowedTools           []string         `toml:"allowed_tools,omitempty"` // Global whitelist of tools that don't require approval
-	RequireApproval        bool             `toml:"require_approval"`        // Whether to ask for permission before executing tools
-	MaxIterations          int              `toml:"max_iterations"`          // Default: 10
-	EnableMultiStep        bool             `toml:"enable_multi_step"`       // Default: true
-	NotifyOnComplete       bool             `toml:"notify_on_complete"`      // Emit terminal bell when LLM response completes
-	FirstTokenTimeout      int              `toml:"first_token_timeout"`     // Seconds to wait for the first response chunk (0 = default)
-	StreamIdleTimeout      int              `toml:"stream_idle_timeout"`     // Seconds a response may go silent mid-stream (0 = default)
-	Compaction             CompactionConfig `toml:"compaction,omitempty"`    // Context window management settings
-	ModelContextOverrides  map[string]int   `toml:"model_context_overrides,omitempty"` // Per-model context window overrides
+	DefaultProvider       string           `toml:"default_provider,omitempty"`   // Which provider to use for new sessions
+	DefaultModel          string           `toml:"default_model,omitempty"`      // Default model (moved from Ollama)
+	LastUsedProvider      string           `toml:"last_used_provider,omitempty"` // Last provider user switched to
+	Ollama                OllamaConfig     `toml:"ollama"`
+	DefaultSystemPrompt   string           `toml:"default_system_prompt,omitempty"`
+	PluginsEnabled        bool             `toml:"plugins_enabled"`
+	Security              SecurityConfig   `toml:"security"`
+	Providers             []ProviderConfig `toml:"providers,omitempty"`
+	AllowedTools          []string         `toml:"allowed_tools,omitempty"`           // Global whitelist of tools that don't require approval
+	RequireApproval       bool             `toml:"require_approval"`                  // Whether to ask for permission before executing tools
+	MaxIterations         int              `toml:"max_iterations"`                    // Default: 10
+	EnableMultiStep       bool             `toml:"enable_multi_step"`                 // Default: true
+	NotifyOnComplete      bool             `toml:"notify_on_complete"`                // Emit terminal bell when LLM response completes
+	FirstTokenTimeout     int              `toml:"first_token_timeout"`               // Seconds to wait for the first response chunk (0 = default)
+	StreamIdleTimeout     int              `toml:"stream_idle_timeout"`               // Seconds a response may go silent mid-stream (0 = default)
+	Compaction            CompactionConfig `toml:"compaction,omitempty"`              // Context window management settings
+	ModelContextOverrides map[string]int   `toml:"model_context_overrides,omitempty"` // Per-model context window overrides
 }
 
 type Config struct {
@@ -72,20 +72,19 @@ type Config struct {
 	Security              SecurityConfig
 	Providers             []ProviderConfig
 	CredentialStore       *CredentialStore
-	AllowedTools          []string // Global whitelist of tools that don't require approval
-	RequireApproval       bool     // Whether to ask for permission before executing tools
-	MaxIterations         int      // Max iterations per user message
-	EnableMultiStep       bool     // Allow LLM to execute multiple steps
-	NotifyOnComplete      bool     // Emit terminal bell when LLM response completes
-	FirstTokenTimeoutSecs int      // Seconds to wait for the first response chunk
-	StreamIdleTimeoutSecs int      // Seconds a response may go silent mid-stream
+	AllowedTools          []string         // Global whitelist of tools that don't require approval
+	RequireApproval       bool             // Whether to ask for permission before executing tools
+	MaxIterations         int              // Max iterations per user message
+	EnableMultiStep       bool             // Allow LLM to execute multiple steps
+	NotifyOnComplete      bool             // Emit terminal bell when LLM response completes
+	FirstTokenTimeoutSecs int              // Seconds to wait for the first response chunk
+	StreamIdleTimeoutSecs int              // Seconds a response may go silent mid-stream
 	Compaction            CompactionConfig // Context window management settings
 	ModelContextOverrides map[string]int   // Per-model context window overrides
 	Keybindings           *KeyBindingsConfig
 	Env                   *EnvConfig // Set when configured through OTUI_* environment variables
 }
 
-var Debug = false
 var DebugLog *log.Logger
 
 func (c *Config) OllamaURL() string {
@@ -144,7 +143,7 @@ func (c *Config) applyUserConfig(userCfg *UserConfig) {
 	c.Compaction = userCfg.Compaction
 	c.ModelContextOverrides = userCfg.ModelContextOverrides
 
-	// Set defaults for multi-step execution (Phase 2)
+	// Set defaults for multi-step execution
 	if c.MaxIterations == 0 {
 		c.MaxIterations = 10
 	}
@@ -171,9 +170,7 @@ func (c *Config) applyUserConfig(userCfg *UserConfig) {
 	// MIGRATION: Move Ollama.DefaultModel to top-level if needed
 	if c.DefaultModel == "" && userCfg.Ollama.DefaultModel != "" {
 		c.DefaultModel = userCfg.Ollama.DefaultModel
-		if Debug && DebugLog != nil {
-			DebugLog.Printf("[Config] Migrated default_model from [ollama] to top-level: %s", c.DefaultModel)
-		}
+		Debugf("[Config] Migrated default_model from [ollama] to top-level: %s", c.DefaultModel)
 	}
 
 	// Set default provider if not specified
@@ -185,9 +182,7 @@ func (c *Config) applyUserConfig(userCfg *UserConfig) {
 		if c.DefaultProvider == "" {
 			c.DefaultProvider = "ollama"
 		}
-		if Debug && DebugLog != nil {
-			DebugLog.Printf("[Config] Set default_provider to: %s", c.DefaultProvider)
-		}
+		Debugf("[Config] Set default_provider to: %s", c.DefaultProvider)
 	}
 
 	// Set last_used_provider if not specified (same as default)
@@ -253,7 +248,6 @@ func InitEarlyDebugLog() {
 		return
 	}
 
-	Debug = true
 	cacheDir := GetCacheDir()
 
 	// Ensure cache dir exists
@@ -272,8 +266,8 @@ func InitEarlyDebugLog() {
 	}
 
 	DebugLog = log.New(f, "", log.Ldate|log.Ltime|log.Lmicroseconds|log.Lshortfile)
-	DebugLog.Printf("=== Early debug logging started (OTUI_DEBUG=%s) ===", os.Getenv("OTUI_DEBUG"))
-	DebugLog.Printf("Init log path: %s", logPath)
+	Debugf("=== Early debug logging started (OTUI_DEBUG=%s) ===", os.Getenv("OTUI_DEBUG"))
+	Debugf("Init log path: %s", logPath)
 }
 
 func InitDebugLog(dataDir string) {
@@ -282,11 +276,8 @@ func InitDebugLog(dataDir string) {
 	}
 
 	// Log transition if early debug was active
-	if DebugLog != nil {
-		DebugLog.Printf("=== Switching from init debug log to main debug log ===")
-	}
+	Debugf("=== Switching from init debug log to main debug log ===")
 
-	Debug = true
 	logPath := filepath.Join(dataDir, "debug.log")
 
 	// Create debug log with secure permissions (0600 - may contain sensitive debug info)
@@ -297,8 +288,8 @@ func InitDebugLog(dataDir string) {
 	}
 
 	DebugLog = log.New(f, "", log.Ldate|log.Ltime|log.Lmicroseconds|log.Lshortfile)
-	DebugLog.Printf("=== Main debug logging started (OTUI_DEBUG=%s) ===", os.Getenv("OTUI_DEBUG"))
-	DebugLog.Printf("Log path: %s", logPath)
+	Debugf("=== Main debug logging started (OTUI_DEBUG=%s) ===", os.Getenv("OTUI_DEBUG"))
+	Debugf("Log path: %s", logPath)
 }
 
 // Load loads the configuration including credentials. Used at startup and

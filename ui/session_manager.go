@@ -14,7 +14,7 @@ import (
 	"otui/storage"
 )
 
-func renderSessionManager(a AppView,sessions []storage.SessionMetadata, selectedIdx int, currentSessionID string, renameMode bool, renameInput textinput.Model, exportMode bool, exportInput textinput.Model, exporting bool, exportCleaningUp bool, exportSpinner spinner.Model, exportSuccess string, importPicker FilePickerState, importSuccess *storage.Session, confirmDelete *storage.SessionMetadata, filterMode bool, filterInput textinput.Model, filteredSessions []storage.SessionMetadata, width, height int) string {
+func renderSessionManager(a AppView, sessions []storage.SessionMetadata, selectedIdx int, currentSessionID string, renameMode bool, renameInput textinput.Model, exportMode bool, exportInput textinput.Model, exporting bool, exportCleaningUp bool, exportSpinner spinner.Model, exportSuccess string, importPicker FilePickerState, importSuccess *storage.Session, confirmDelete *storage.SessionMetadata, filterMode bool, filterInput textinput.Model, filteredSessions []storage.SessionMetadata, width, height int) string {
 	// Modal dimensions
 	modalWidth := width - 10
 	if modalWidth > 110 {
@@ -272,9 +272,7 @@ func renderSessionManager(a AppView,sessions []storage.SessionMetadata, selected
 	var sections []string
 	sections = append(sections, titleSection)
 	sections = append(sections, headerSection)
-	for _, line := range sessionLines {
-		sections = append(sections, line)
-	}
+	sections = append(sections, sessionLines...)
 	sections = append(sections, footerSection)
 
 	content := strings.Join(sections, "\n")
@@ -486,74 +484,6 @@ func renderExportSuccess(exportPath string, operationType string, width, height 
 	content := strings.Join(sections, "\n")
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)
-}
-
-func renderImportSuccess(session *storage.Session, width, height int) string {
-	modalWidth := 70
-	if width < modalWidth+10 {
-		modalWidth = width - 10
-	}
-
-	titleStyled := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(successColor).
-		Align(lipgloss.Center).
-		Width(modalWidth).
-		Render("✓ Import Successful")
-
-	// Build message with session details (matches mockup)
-	message := fmt.Sprintf("Imported: %s\nMessages: %d\nModel: %s",
-		session.Name,
-		len(session.Messages),
-		session.Model)
-
-	wrappedMsg := wordWrap(message, modalWidth-4)
-	messageStyled := lipgloss.NewStyle().
-		Width(modalWidth - 4).
-		Foreground(accentColor).
-		Render(wrappedMsg)
-
-	footer := lipgloss.NewStyle().
-		Foreground(dimColor).
-		Align(lipgloss.Center).
-		Width(modalWidth - 2).
-		Render("Press Enter to acknowledge")
-
-	borderStyle := lipgloss.NewStyle().
-		Foreground(dimColor).
-		Width(modalWidth)
-
-	topBorder := borderStyle.Render("┌" + safeRepeat("─", modalWidth-2) + "┐")
-	middleBorder := borderStyle.Render("├" + safeRepeat("─", modalWidth-2) + "┤")
-	bottomBorder := borderStyle.Render("└" + safeRepeat("─", modalWidth-2) + "┘")
-	emptyLine := "│" + safeRepeat(" ", modalWidth-2) + "│"
-
-	var content strings.Builder
-	content.WriteString(topBorder + "\n")
-	content.WriteString("│" + titleStyled + "│\n")
-	content.WriteString(middleBorder + "\n")
-	content.WriteString(emptyLine + "\n")
-
-	// Add message lines
-	for _, line := range strings.Split(messageStyled, "\n") {
-		paddedLine := lipgloss.NewStyle().
-			Width(modalWidth - 2).
-			Render("  " + line)
-		content.WriteString("│" + paddedLine + "│\n")
-	}
-
-	content.WriteString(emptyLine + "\n")
-	content.WriteString(middleBorder + "\n")
-	content.WriteString("│" + footer + "│\n")
-	content.WriteString(bottomBorder)
-
-	return lipgloss.Place(
-		width,
-		height,
-		lipgloss.Center,
-		lipgloss.Center,
-		content.String(),
-	)
 }
 
 func renderSessionModal(a AppView, title string, nameInput textinput.Model, promptInput textarea.Model, focusedField int, width, height int, availablePlugins []mcp.Plugin, enabledPluginIDs []string, unavailablePluginIDs []string, selectedPluginIdx int) string {

@@ -13,64 +13,64 @@ type ModelMetadata struct {
 // OllamaFallbackMetadata contains fallback metadata for Ollama models
 var OllamaFallbackMetadata = map[string]ModelMetadata{
 	// Llama 3.x family
-	"llama3.1":        {ContextWindow: 128000, MaxOutput: 8192, SupportsTools: true},
-	"llama3.2":        {ContextWindow: 128000, MaxOutput: 8192, SupportsTools: true},
-	"llama3":          {ContextWindow: 8192, MaxOutput: 4096, SupportsTools: true},
+	"llama3.1": {ContextWindow: 128000, MaxOutput: 8192, SupportsTools: true},
+	"llama3.2": {ContextWindow: 128000, MaxOutput: 8192, SupportsTools: true},
+	"llama3":   {ContextWindow: 8192, MaxOutput: 4096, SupportsTools: true},
 
 	// Qwen family
-	"qwen2.5":         {ContextWindow: 32768, MaxOutput: 8192, SupportsTools: true},
-	"qwen2.5-coder":   {ContextWindow: 32768, MaxOutput: 8192, SupportsTools: true},
-	"qwen3":           {ContextWindow: 131072, MaxOutput: 8192, SupportsTools: true},
-	"qwen3-coder":     {ContextWindow: 131072, MaxOutput: 8192, SupportsTools: true},
+	"qwen2.5":       {ContextWindow: 32768, MaxOutput: 8192, SupportsTools: true},
+	"qwen2.5-coder": {ContextWindow: 32768, MaxOutput: 8192, SupportsTools: true},
+	"qwen3":         {ContextWindow: 131072, MaxOutput: 8192, SupportsTools: true},
+	"qwen3-coder":   {ContextWindow: 131072, MaxOutput: 8192, SupportsTools: true},
 
 	// Mistral family
-	"mistral":         {ContextWindow: 32768, MaxOutput: 8192, SupportsTools: true},
-	"mistral-nemo":    {ContextWindow: 128000, MaxOutput: 8192, SupportsTools: true},
-	"m2":              {ContextWindow: 128000, MaxOutput: 8192, SupportsTools: true},
-	"mistral2":        {ContextWindow: 128000, MaxOutput: 8192, SupportsTools: true},
+	"mistral":      {ContextWindow: 32768, MaxOutput: 8192, SupportsTools: true},
+	"mistral-nemo": {ContextWindow: 128000, MaxOutput: 8192, SupportsTools: true},
+	"m2":           {ContextWindow: 128000, MaxOutput: 8192, SupportsTools: true},
+	"mistral2":     {ContextWindow: 128000, MaxOutput: 8192, SupportsTools: true},
 
 	// DeepSeek
-	"deepseek-coder":  {ContextWindow: 16384, MaxOutput: 4096, SupportsTools: false},
+	"deepseek-coder":    {ContextWindow: 16384, MaxOutput: 4096, SupportsTools: false},
 	"deepseek-coder-v2": {ContextWindow: 32768, MaxOutput: 8192, SupportsTools: true},
 
 	// CodeLlama
-	"codellama":       {ContextWindow: 16384, MaxOutput: 4096, SupportsTools: false},
+	"codellama": {ContextWindow: 16384, MaxOutput: 4096, SupportsTools: false},
 }
 
 // AnthropicFallbackMetadata contains fallback metadata for Anthropic models
 var AnthropicFallbackMetadata = map[string]ModelMetadata{
 	// Claude 5 family (prefix match covers 5.x snapshots): 1M context, 128K output
-	"claude-fable-5":  {ContextWindow: 1000000, MaxOutput: 128000, SupportsTools: true},
-	"claude-opus-5":   {ContextWindow: 1000000, MaxOutput: 128000, SupportsTools: true},
-	"claude-sonnet-5": {ContextWindow: 1000000, MaxOutput: 128000, SupportsTools: true},
-	"claude-haiku-5":  {ContextWindow: 1000000, MaxOutput: 128000, SupportsTools: true},
-	"claude-sonnet-4":              {ContextWindow: 200000, MaxOutput: 8192, SupportsTools: true},
-	"claude-sonnet-4-5":            {ContextWindow: 200000, MaxOutput: 8192, SupportsTools: true},
-	"claude-opus-4":                {ContextWindow: 200000, MaxOutput: 8192, SupportsTools: true},
-	"claude-opus-4-5":              {ContextWindow: 200000, MaxOutput: 8192, SupportsTools: true},
-	"claude-3-5-sonnet-20241022":   {ContextWindow: 200000, MaxOutput: 8192, SupportsTools: true},
-	"claude-3-5-sonnet-20240620":   {ContextWindow: 200000, MaxOutput: 8192, SupportsTools: true},
-	"claude-3-opus-20240229":       {ContextWindow: 200000, MaxOutput: 4096, SupportsTools: true},
-	"claude-3-sonnet-20240229":     {ContextWindow: 200000, MaxOutput: 4096, SupportsTools: true},
-	"claude-3-haiku-20240307":      {ContextWindow: 200000, MaxOutput: 4096, SupportsTools: true},
+	"claude-fable-5":             {ContextWindow: 1000000, MaxOutput: 128000, SupportsTools: true},
+	"claude-opus-5":              {ContextWindow: 1000000, MaxOutput: 128000, SupportsTools: true},
+	"claude-sonnet-5":            {ContextWindow: 1000000, MaxOutput: 128000, SupportsTools: true},
+	"claude-haiku-5":             {ContextWindow: 1000000, MaxOutput: 128000, SupportsTools: true},
+	"claude-sonnet-4":            {ContextWindow: 200000, MaxOutput: 8192, SupportsTools: true},
+	"claude-sonnet-4-5":          {ContextWindow: 200000, MaxOutput: 8192, SupportsTools: true},
+	"claude-opus-4":              {ContextWindow: 200000, MaxOutput: 8192, SupportsTools: true},
+	"claude-opus-4-5":            {ContextWindow: 200000, MaxOutput: 8192, SupportsTools: true},
+	"claude-3-5-sonnet-20241022": {ContextWindow: 200000, MaxOutput: 8192, SupportsTools: true},
+	"claude-3-5-sonnet-20240620": {ContextWindow: 200000, MaxOutput: 8192, SupportsTools: true},
+	"claude-3-opus-20240229":     {ContextWindow: 200000, MaxOutput: 4096, SupportsTools: true},
+	"claude-3-sonnet-20240229":   {ContextWindow: 200000, MaxOutput: 4096, SupportsTools: true},
+	"claude-3-haiku-20240307":    {ContextWindow: 200000, MaxOutput: 4096, SupportsTools: true},
 }
 
 // OpenAIFallbackMetadata contains fallback metadata for OpenAI models
 var OpenAIFallbackMetadata = map[string]ModelMetadata{
 	// OpenAI's API doesn't report context windows: this table is the only
 	// source (prefix match, longest first)
-	"gpt-6":   {ContextWindow: 1050000, MaxOutput: 128000, SupportsTools: true},
-	"gpt-5.5": {ContextWindow: 1050000, MaxOutput: 128000, SupportsTools: true},
-	"gpt-5":   {ContextWindow: 400000, MaxOutput: 128000, SupportsTools: true},
-	"gpt-4.1": {ContextWindow: 1047576, MaxOutput: 32768, SupportsTools: true},
-	"o1":      {ContextWindow: 200000, MaxOutput: 100000, SupportsTools: true},
-	"o3":      {ContextWindow: 200000, MaxOutput: 100000, SupportsTools: true},
-	"o4-mini": {ContextWindow: 200000, MaxOutput: 100000, SupportsTools: true},
-	"gpt-4o":                  {ContextWindow: 128000, MaxOutput: 16384, SupportsTools: true},
-	"gpt-4o-mini":             {ContextWindow: 128000, MaxOutput: 16384, SupportsTools: true},
-	"gpt-4-turbo":             {ContextWindow: 128000, MaxOutput: 4096, SupportsTools: true},
-	"gpt-4":                   {ContextWindow: 8192, MaxOutput: 4096, SupportsTools: true},
-	"gpt-3.5-turbo":           {ContextWindow: 16385, MaxOutput: 4096, SupportsTools: true},
+	"gpt-6":         {ContextWindow: 1050000, MaxOutput: 128000, SupportsTools: true},
+	"gpt-5.5":       {ContextWindow: 1050000, MaxOutput: 128000, SupportsTools: true},
+	"gpt-5":         {ContextWindow: 400000, MaxOutput: 128000, SupportsTools: true},
+	"gpt-4.1":       {ContextWindow: 1047576, MaxOutput: 32768, SupportsTools: true},
+	"o1":            {ContextWindow: 200000, MaxOutput: 100000, SupportsTools: true},
+	"o3":            {ContextWindow: 200000, MaxOutput: 100000, SupportsTools: true},
+	"o4-mini":       {ContextWindow: 200000, MaxOutput: 100000, SupportsTools: true},
+	"gpt-4o":        {ContextWindow: 128000, MaxOutput: 16384, SupportsTools: true},
+	"gpt-4o-mini":   {ContextWindow: 128000, MaxOutput: 16384, SupportsTools: true},
+	"gpt-4-turbo":   {ContextWindow: 128000, MaxOutput: 4096, SupportsTools: true},
+	"gpt-4":         {ContextWindow: 8192, MaxOutput: 4096, SupportsTools: true},
+	"gpt-3.5-turbo": {ContextWindow: 16385, MaxOutput: 4096, SupportsTools: true},
 }
 
 // GetFallbackMetadata returns fallback metadata for a model based on its name

@@ -103,6 +103,7 @@ func SSHKeyType(keyPath string) (string, error) {
 	case strings.Contains(content, "BEGIN EC PRIVATE KEY"):
 		return "ecdsa", nil
 	case strings.Contains(content, "BEGIN DSA PRIVATE KEY"):
+		//lint:ignore SA1019 DSA keys are detected so they can be rejected
 		return ssh.KeyAlgoDSA, nil
 	}
 
@@ -215,9 +216,7 @@ func CreateOTUIKey(passphrase string) (string, error) {
 			}
 		}
 
-		if DebugLog != nil {
-			DebugLog.Printf("[SSH] Base key exists, using unique name: %s", filepath.Base(keyPath))
-		}
+		Debugf("[SSH] Base key exists, using unique name: %s", filepath.Base(keyPath))
 	}
 
 	// Ensure .ssh directory exists
@@ -231,9 +230,7 @@ func CreateOTUIKey(passphrase string) (string, error) {
 		return "", err
 	}
 
-	if DebugLog != nil {
-		DebugLog.Printf("[SSH] Created OTUI encryption key at %s", keyPath)
-	}
+	Debugf("[SSH] Created OTUI encryption key at %s", keyPath)
 
 	return keyPath, nil
 }
@@ -283,25 +280,4 @@ func writeED25519Key(keyPath, passphrase, comment string) error {
 		return fmt.Errorf("failed to write SSH public key: %w", err)
 	}
 	return nil
-}
-
-// GetOTUIKeyPath returns the BASE path to the OTUI-specific SSH key.
-// WARNING: This function only returns the base name (~/.ssh/otui_ed25519),
-// not timestamped variants like otui_ed25519_2025111001.
-//
-// For key creation: Use the path returned by CreateOTUIKey() instead.
-// For existence checks: This function is appropriate (used by OTUIKeyExists).
-func GetOTUIKeyPath() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(homeDir, ".ssh", "otui_ed25519")
-}
-
-// OTUIKeyExists checks if the OTUI SSH key already exists
-func OTUIKeyExists() bool {
-	keyPath := GetOTUIKeyPath()
-	_, err := os.Stat(keyPath)
-	return err == nil
 }

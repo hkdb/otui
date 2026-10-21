@@ -37,9 +37,7 @@ func (m *Model) EnablePlugin(pluginID string) tea.Cmd {
 	}
 	manager := m.MCPManager
 	return func() tea.Msg {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[UI] enablePlugin: Starting plugin '%s'", pluginID)
-		}
+		config.Debugf("[UI] enablePlugin: Starting plugin '%s'", pluginID)
 
 		// Create timeout-monitored operation
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -60,9 +58,7 @@ func (m *Model) EnablePlugin(pluginID string) tea.Cmd {
 		select {
 		case res := <-resultChan:
 			// Operation completed (success or error)
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] enablePlugin: Result for '%s': success=%v, err=%v", pluginID, res.err == nil, res.err)
-			}
+			config.Debugf("[UI] enablePlugin: Result for '%s': success=%v, err=%v", pluginID, res.err == nil, res.err)
 			return PluginOperationCompleteMsg{
 				Operation: "enable",
 				PluginID:  pluginID,
@@ -72,9 +68,7 @@ func (m *Model) EnablePlugin(pluginID string) tea.Cmd {
 		case <-ctx.Done():
 			// Timeout reached - operation never completed
 			timeoutErr := fmt.Errorf("plugin failed to start: operation timed out after 3 seconds (plugin may not exist, may be incompatible, or failed to respond)")
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] enablePlugin: TIMEOUT for plugin '%s' - returning error message", pluginID)
-			}
+			config.Debugf("[UI] enablePlugin: TIMEOUT for plugin '%s' - returning error message", pluginID)
 			return PluginOperationCompleteMsg{
 				Operation: "enable",
 				PluginID:  pluginID,
@@ -92,9 +86,7 @@ func (m *Model) DisablePlugin(pluginID string) tea.Cmd {
 	}
 	manager := m.MCPManager
 	return func() tea.Msg {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[UI] disablePlugin: Stopping plugin '%s'", pluginID)
-		}
+		config.Debugf("[UI] disablePlugin: Stopping plugin '%s'", pluginID)
 
 		// Create timeout-monitored operation
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -115,9 +107,7 @@ func (m *Model) DisablePlugin(pluginID string) tea.Cmd {
 		select {
 		case res := <-resultChan:
 			// Operation completed (success or error)
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] disablePlugin: Result for '%s': success=%v, err=%v", pluginID, res.err == nil, res.err)
-			}
+			config.Debugf("[UI] disablePlugin: Result for '%s': success=%v, err=%v", pluginID, res.err == nil, res.err)
 			return PluginOperationCompleteMsg{
 				Operation: "disable",
 				PluginID:  pluginID,
@@ -127,9 +117,7 @@ func (m *Model) DisablePlugin(pluginID string) tea.Cmd {
 		case <-ctx.Done():
 			// Timeout reached - operation never completed
 			timeoutErr := fmt.Errorf("plugin failed to stop: operation timed out after 5 seconds (plugin may be unresponsive)")
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[UI] disablePlugin: TIMEOUT for plugin '%s' - returning error message", pluginID)
-			}
+			config.Debugf("[UI] disablePlugin: TIMEOUT for plugin '%s' - returning error message", pluginID)
 			return PluginOperationCompleteMsg{
 				Operation: "disable",
 				PluginID:  pluginID,
@@ -147,18 +135,14 @@ func (m *Model) RefreshRegistry() tea.Cmd {
 	}
 	registry := m.Plugins.Registry
 	return func() tea.Msg {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[UI] refreshRegistry: Starting registry refresh")
-		}
+		config.Debugf("[UI] refreshRegistry: Starting registry refresh")
 
 		err := registry.Refresh()
 
-		if config.DebugLog != nil {
-			if err != nil {
-				config.DebugLog.Printf("[UI] refreshRegistry: Failed with error: %v", err)
-			} else {
-				config.DebugLog.Printf("[UI] refreshRegistry: Completed successfully")
-			}
+		if err != nil {
+			config.Debugf("[UI] refreshRegistry: Failed with error: %v", err)
+		} else {
+			config.Debugf("[UI] refreshRegistry: Completed successfully")
 		}
 
 		return RegistryRefreshCompleteMsg{

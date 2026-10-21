@@ -184,38 +184,3 @@ func SavePluginConfigSecure(cfg *Config, dataDir string, pluginsConfig *PluginsC
 		return fmt.Errorf("unknown security method: %s", cfg.Security.CredentialStorage)
 	}
 }
-
-// LoadPluginConfigSecure loads plugin config with proper security handling
-func LoadPluginConfigSecure(cfg *Config, pluginsConfig *PluginsConfig, pluginID string) (map[string]string, error) {
-	entry, exists := pluginsConfig.Plugins[pluginID]
-	switch {
-	case !exists:
-		return make(map[string]string), nil
-	}
-
-	result := make(map[string]string)
-
-	// Load plaintext config
-	for key, value := range entry.Config {
-		result[key] = value
-	}
-
-	// Load sensitive keys from CredentialStore (only if using encryption)
-	switch cfg.Security.CredentialStorage {
-	case string(SecuritySSHKey):
-		for _, key := range entry.SensitiveKeys {
-			value := cfg.CredentialStore.GetPlugin(pluginID, key)
-			switch {
-			case value == "":
-				continue
-			}
-			result[key] = value
-		}
-	case string(SecurityPlainText):
-		// All values already in Config, nothing more to load
-	default:
-		return nil, fmt.Errorf("unknown security method: %s", cfg.Security.CredentialStorage)
-	}
-
-	return result, nil
-}

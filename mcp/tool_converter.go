@@ -119,16 +119,6 @@ func convertPropertyValue(propValue any) api.ToolProperty {
 	return toolProp
 }
 
-// ConvertOllamaToolCallToMCP converts an Ollama tool call to MCP CallToolRequest format
-func ConvertOllamaToolCallToMCP(toolCall api.ToolCall) (string, map[string]any, error) {
-	toolName := toolCall.Function.Name
-
-	// Arguments is already a map[string]any in Ollama API
-	args := map[string]any(toolCall.Function.Arguments)
-
-	return toolName, args, nil
-}
-
 // ConvertMCPToolsToOpenAIFormat converts MCP tools to OpenAI/OpenRouter format.
 // This format is shared between OpenAI and OpenRouter since they use the same API.
 //

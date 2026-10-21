@@ -113,6 +113,7 @@ func TestSSHKeyType(t *testing.T) {
 		})
 	}
 
+	//lint:ignore SA1019 checks that DSA is rejected
 	if IsSupportedEncryptionKeyType(ssh.KeyAlgoDSA) {
 		t.Error("DSA must not be supported")
 	}

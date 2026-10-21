@@ -39,9 +39,9 @@ func TestTokenCounter(t *testing.T) {
 // TestCountMessages tests token counting for message arrays
 func TestCountMessages(t *testing.T) {
 	messages := []storage.Message{
-		{Role: "user", Content: "Hello there"},        // 11 chars = 2 tokens
+		{Role: "user", Content: "Hello there"},           // 11 chars = 2 tokens
 		{Role: "assistant", Content: "Hi, how are you?"}, // 17 chars = 4 tokens
-		{Role: "user", Content: "I'm doing great!"},   // 16 chars = 4 tokens
+		{Role: "user", Content: "I'm doing great!"},      // 16 chars = 4 tokens
 	}
 
 	counter := &TokenCounter{}
@@ -56,14 +56,14 @@ func TestCountMessages(t *testing.T) {
 func TestCalculateTokenUsage(t *testing.T) {
 	// Create test session
 	session := &storage.Session{
-		ID:      "test-session",
-		Name:    "Test Session",
-		Model:   "test-model",
+		ID:        "test-session",
+		Name:      "Test Session",
+		Model:     "test-model",
 		CreatedAt: time.Now(),
 		Messages: []storage.Message{
-			{Role: "user", Content: "Message 1 with some text here"},      // 30 chars = 7 tokens
-			{Role: "assistant", Content: "Response 1 with more text"},     // 29 chars = 7 tokens
-			{Role: "user", Content: "Message 2 continuing the chat"},      // 31 chars = 7 tokens
+			{Role: "user", Content: "Message 1 with some text here"},       // 30 chars = 7 tokens
+			{Role: "assistant", Content: "Response 1 with more text"},      // 29 chars = 7 tokens
+			{Role: "user", Content: "Message 2 continuing the chat"},       // 31 chars = 7 tokens
 			{Role: "assistant", Content: "Response 2 with even more text"}, // 33 chars = 8 tokens
 		},
 		CompactionMarker: 2, // First 2 messages are compacted
@@ -96,9 +96,9 @@ func TestCalculateTokenUsage(t *testing.T) {
 
 	// Actual character-based estimation results (divide by 4, integer division)
 	// The exact counts depend on the actual string lengths
-	expectedTotal := 27      // Actual total tokens from all messages
-	expectedActive := 14     // Actual active tokens (after marker)
-	expectedCompacted := 13  // Actual compacted tokens (before marker)
+	expectedTotal := 27     // Actual total tokens from all messages
+	expectedActive := 14    // Actual active tokens (after marker)
+	expectedCompacted := 13 // Actual compacted tokens (before marker)
 
 	if usage.TotalTokens != expectedTotal {
 		t.Errorf("TotalTokens = %d, expected %d", usage.TotalTokens, expectedTotal)
@@ -117,12 +117,12 @@ func TestCalculateTokenUsage(t *testing.T) {
 // TestGetContextUsagePercentage tests percentage calculation
 func TestGetContextUsagePercentage(t *testing.T) {
 	session := &storage.Session{
-		ID:      "test-session",
-		Name:    "Test Session",
-		Model:   "test-model",
+		ID:        "test-session",
+		Name:      "Test Session",
+		Model:     "test-model",
 		CreatedAt: time.Now(),
 		Messages: []storage.Message{
-			{Role: "user", Content: string(make([]byte, 4000))},    // 1000 tokens
+			{Role: "user", Content: string(make([]byte, 4000))},      // 1000 tokens
 			{Role: "assistant", Content: string(make([]byte, 4000))}, // 1000 tokens
 		},
 		CompactionMarker: 0, // No compaction
@@ -181,8 +181,8 @@ func TestSuggestCompactionPoint(t *testing.T) {
 				{Role: "assistant", Content: string(make([]byte, 4000))}, // 1000 tokens
 			},
 			contextWindow:  10000,
-			keepPercentage: 0.5,   // Keep 5000 tokens
-			expectedMarker: 0,     // Keep last 2 messages (2000 tokens < 5000, so keep more)
+			keepPercentage: 0.5, // Keep 5000 tokens
+			expectedMarker: 0,   // Keep last 2 messages (2000 tokens < 5000, so keep more)
 		},
 		{
 			name: "compact to 25%",
@@ -193,19 +193,19 @@ func TestSuggestCompactionPoint(t *testing.T) {
 				{Role: "assistant", Content: string(make([]byte, 4000))}, // 1000 tokens
 			},
 			contextWindow:  10000,
-			keepPercentage: 0.25,  // Keep 2500 tokens
-			expectedMarker: 1,     // Keep last 3 messages (counts backward until >=2500)
+			keepPercentage: 0.25, // Keep 2500 tokens
+			expectedMarker: 1,    // Keep last 3 messages (counts backward until >=2500)
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			session := &storage.Session{
-				ID:       "test-session",
-				Name:     "Test Session",
-				Model:    "test-model",
-				CreatedAt:  time.Now(),
-				Messages: tt.messages,
+				ID:        "test-session",
+				Name:      "Test Session",
+				Model:     "test-model",
+				CreatedAt: time.Now(),
+				Messages:  tt.messages,
 			}
 
 			cfg := &config.Config{
@@ -245,10 +245,10 @@ func TestGetActiveContext(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
+		name             string
 		compactionMarker int
-		expectedCount  int
-		expectedFirst  string
+		expectedCount    int
+		expectedFirst    string
 	}{
 		{"no compaction", 0, 5, "Message 1"},
 		{"compact first 2", 2, 3, "Message 2"},
@@ -261,7 +261,7 @@ func TestGetActiveContext(t *testing.T) {
 				ID:               "test-session",
 				Name:             "Test Session",
 				Model:            "test-model",
-				CreatedAt:          time.Now(),
+				CreatedAt:        time.Now(),
 				Messages:         messages,
 				CompactionMarker: tt.compactionMarker,
 			}
@@ -298,7 +298,7 @@ func TestGetCompactedContext(t *testing.T) {
 	}{
 		{"no compaction", 0, 0},
 		{"compact first 2", 2, 2},
-		{"marker at end", 4, 4},    // Manual compaction compacts everything
+		{"marker at end", 4, 4},     // Manual compaction compacts everything
 		{"marker beyond end", 9, 4}, // Clamped to the messages that exist
 	}
 
@@ -308,7 +308,7 @@ func TestGetCompactedContext(t *testing.T) {
 				ID:               "test-session",
 				Name:             "Test Session",
 				Model:            "test-model",
-				CreatedAt:          time.Now(),
+				CreatedAt:        time.Now(),
 				Messages:         messages,
 				CompactionMarker: tt.compactionMarker,
 			}
@@ -350,9 +350,9 @@ func TestShouldAutoCompact(t *testing.T) {
 				// Create message with enough content to reach target tokens
 				content := string(make([]byte, tt.activeTokens*4))
 				session = &storage.Session{
-					ID:      "test-session",
-					Name:    "Test Session",
-					Model:   "test-model",
+					ID:        "test-session",
+					Name:      "Test Session",
+					Model:     "test-model",
 					CreatedAt: time.Now(),
 					Messages: []storage.Message{
 						{Role: "user", Content: content},
@@ -409,11 +409,11 @@ func TestCompactSession(t *testing.T) {
 	}
 
 	session := &storage.Session{
-		ID:       "test-session",
-		Name:     "Test Session",
-		Model:    "test-model",
-		CreatedAt:  time.Now(),
-		Messages: messages,
+		ID:        "test-session",
+		Name:      "Test Session",
+		Model:     "test-model",
+		CreatedAt: time.Now(),
+		Messages:  messages,
 	}
 
 	cfg := &config.Config{

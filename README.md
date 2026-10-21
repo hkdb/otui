@@ -302,7 +302,7 @@ rm -rf ~/.local/share/otui # or whatever data dir the user specified. This also 
 - A lot of OTUI was made possible with: [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 - Some of OTUI was originally inspired by: [LIT TUI](https://github.com/Positronic-AI/lit-tui)
 - Most of the project was vibe coded with [OpenCode](https://opencode.ai) + [Claude Sonnet 4.5](https://www.anthropic.com/claude/sonnet)
-- The project is currently switched to using Claud Code instead of OpenCode due to recent changes imposed by Anthropic.
+- The project is currently switched to using Claude Code instead of OpenCode due to recent changes imposed by Anthropic.
 
 ## 🦾 Support this Project
 

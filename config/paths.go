@@ -109,15 +109,6 @@ func EnsureDir(path string) error {
 	return os.MkdirAll(path, 0700)
 }
 
-// IsEmptyDir checks if a directory is empty
-func IsEmptyDir(path string) (bool, error) {
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return false, err
-	}
-	return len(entries) == 0, nil
-}
-
 // FileExists checks if a file exists
 func FileExists(path string) bool {
 	_, err := os.Stat(path)

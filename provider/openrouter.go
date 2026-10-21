@@ -101,15 +101,10 @@ func (p *OpenRouterProvider) ChatWithTools(ctx context.Context, messages []model
 			Content: buildToolInstructions(tools),
 		}
 		messagesWithInstructions = append([]model.Message{toolInstruction}, messages...)
+		config.Debugf("[OpenRouter] Model '%s': Adding tool instructions", modelName)
 	}
-
-	// Debug logging for tool instruction decisions (no else statements)
-	if config.DebugLog != nil && len(tools) > 0 && shouldSkipToolInstructions(modelName) {
-		config.DebugLog.Printf("[OpenRouter] Model '%s': Skipping tool instructions (blacklisted - uses native understanding)", modelName)
-	}
-
-	if config.DebugLog != nil && len(tools) > 0 && !shouldSkipToolInstructions(modelName) {
-		config.DebugLog.Printf("[OpenRouter] Model '%s': Adding tool instructions", modelName)
+	if len(tools) > 0 && shouldSkipToolInstructions(modelName) {
+		config.Debugf("[OpenRouter] Model '%s': Skipping tool instructions (blacklisted - uses native understanding)", modelName)
 	}
 
 	// Convert OTUI messages to OpenAI format

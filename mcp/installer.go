@@ -125,8 +125,8 @@ func (i *Installer) UninstallWithContext(ctx context.Context, pluginID string, p
 		if err := os.RemoveAll(pluginDir); err != nil {
 			return fmt.Errorf("failed to remove plugin directory: %w", err)
 		}
-	} else if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] Uninstall: not removing files of plugin with invalid ID %q", pluginID)
+	} else {
+		config.Debugf("[MCP] Uninstall: not removing files of plugin with invalid ID %q", pluginID)
 	}
 
 	if progressCh != nil {

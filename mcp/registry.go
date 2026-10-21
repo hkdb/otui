@@ -145,9 +145,7 @@ func (r *Registry) GetAll() []Plugin {
 	for _, rp := range r.plugins {
 		if customIDs[rp.ID] {
 			// Skip registry plugin - custom version takes precedence
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[Registry] Hiding registry plugin '%s' - custom version installed", rp.ID)
-			}
+			config.Debugf("[Registry] Hiding registry plugin '%s' - custom version installed", rp.ID)
 			continue
 		}
 		all = append(all, rp)
@@ -346,9 +344,7 @@ func validPlugins(plugins []Plugin) []Plugin {
 	for _, p := range plugins {
 		sanitizePlugin(&p)
 		if err := ValidatePluginID(p.ID); err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[Registry] Ignoring plugin: %v", err)
-			}
+			config.Debugf("[Registry] Ignoring plugin: %v", err)
 			continue
 		}
 		valid = append(valid, p)
@@ -412,14 +408,6 @@ func generatePluginID(name string) string {
 	id = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(id, "-")
 	id = strings.Trim(id, "-")
 	return id
-}
-
-func extractAuthor(repo string) string {
-	parts := strings.Split(strings.TrimPrefix(repo, "https://github.com/"), "/")
-	if len(parts) > 0 {
-		return parts[0]
-	}
-	return ""
 }
 
 func validateGitHubURL(url string) error {
@@ -604,7 +592,7 @@ func (r *Registry) UpdateCustomPlugin(pluginID string, updatedPlugin *Plugin) ([
 		return nil, fmt.Errorf("failed to save custom plugins: %w", err)
 	}
 
-	// Generate trust warnings (reuse existing logic)
+	// Generate trust warnings
 	trustWarnings := []string{}
 	if !updatedPlugin.Verified {
 		trustWarnings = append(trustWarnings, "⚠️  This plugin is not verified by the OTUI team")

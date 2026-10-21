@@ -10,9 +10,7 @@ import (
 // summary is generated in the background. The result is applied by
 // ApplyCompaction when CompactionCompleteMsg arrives.
 func (m *Model) CompactSessionMarkerCmd(markerIndex int) tea.Cmd {
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[compaction] CompactSessionMarkerCmd with marker=%d", markerIndex)
-	}
+	config.Debugf("[compaction] CompactSessionMarkerCmd with marker=%d", markerIndex)
 
 	job, err := m.prepareCompaction(markerIndex)
 	if err != nil {
@@ -34,9 +32,7 @@ func (m *Model) CompactSessionCmd(keepPercentage float64) tea.Cmd {
 		return nil
 	}
 
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[compaction] CompactSessionCmd with keep=%.1f%%", keepPercentage*100)
-	}
+	config.Debugf("[compaction] CompactSessionCmd with keep=%.1f%%", keepPercentage*100)
 
 	// Calculate marker index
 	markerIndex := m.SuggestCompactionPoint(keepPercentage)
@@ -49,18 +45,14 @@ func (m *Model) CompactSessionCmd(keepPercentage float64) tea.Cmd {
 			markerIndex = 1
 		}
 
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[compaction] Using fallback marker: %d (half of %d messages)",
-				markerIndex, messageCount)
-		}
+		config.Debugf("[compaction] Using fallback marker: %d (half of %d messages)",
+			markerIndex, messageCount)
 	}
 
 	// Nothing new to compact (the kept part alone exceeds the threshold)
 	if markerIndex <= m.CurrentSession.CompactionMarker {
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[compaction] Nothing new to compact (suggested %d, current marker %d)",
-				markerIndex, m.CurrentSession.CompactionMarker)
-		}
+		config.Debugf("[compaction] Nothing new to compact (suggested %d, current marker %d)",
+			markerIndex, m.CurrentSession.CompactionMarker)
 		return nil
 	}
 
@@ -73,9 +65,7 @@ func (m *Model) CheckAutoCompactionCmd() tea.Cmd {
 		return nil
 	}
 
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[compaction] Auto-compaction check: triggering compaction")
-	}
+	config.Debugf("[compaction] Auto-compaction check: triggering compaction")
 
 	// Return compaction command with configured keep percentage
 	return m.CompactSessionCmd(m.Config.Compaction.KeepPercentage)

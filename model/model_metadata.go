@@ -130,9 +130,7 @@ func (m *Model) RefreshModelMetadataCmd() tea.Cmd {
 // Must be called from Update.
 func (m *Model) SetModelMetadata(msg ModelMetadataMsg) {
 	if msg.Err != nil || msg.Metadata.ContextWindow <= 0 {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[metadata] Fetch failed for %s/%s: %v", msg.ProviderID, msg.ModelName, msg.Err)
-		}
+		config.Debugf("[metadata] Fetch failed for %s/%s: %v", msg.ProviderID, msg.ModelName, msg.Err)
 		return
 	}
 
@@ -143,10 +141,8 @@ func (m *Model) SetModelMetadata(msg ModelMetadataMsg) {
 	m.metadataCache[metadataCacheKey(msg.ProviderID, msg.ModelName)] = msg.Metadata
 	m.metadataMu.Unlock()
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[metadata] %s/%s: context window %d (source: %s)",
-			msg.ProviderID, msg.ModelName, msg.Metadata.ContextWindow, msg.Metadata.Source)
-	}
+	config.Debugf("[metadata] %s/%s: context window %d (source: %s)",
+		msg.ProviderID, msg.ModelName, msg.Metadata.ContextWindow, msg.Metadata.Source)
 }
 
 // ClearModelMetadata drops all fetched metadata, e.g. after provider settings

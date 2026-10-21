@@ -155,9 +155,7 @@ func isMajorVersionSuffix(s string) bool {
 func (m *MCPManager) buildPluginCommand(plugin *Plugin, installed *storage.InstalledPlugin, pluginConfig map[string]string) (string, []string) {
 	command, args := pluginCommand(plugin, installed, pluginConfig)
 	if err := checkPluginPaths(plugin, installed, pluginConfig, command, args); err != nil {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] Refusing to start plugin '%s': %v", plugin.ID, err)
-		}
+		config.Debugf("[MCP] Refusing to start plugin '%s': %v", plugin.ID, err)
 		return "", nil
 	}
 	return command, args
@@ -286,9 +284,7 @@ func (m *MCPManager) GetTools(ctx context.Context) ([]mcptypes.Tool, error) {
 	defer m.mu.RUnlock()
 
 	if !m.config.PluginsEnabled {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] AUDIT: GetTools called while plugins disabled")
-		}
+		config.Debugf("[MCP] AUDIT: GetTools called while plugins disabled")
 		return nil, nil
 	}
 
@@ -337,9 +333,7 @@ func (m *MCPManager) CallTool(ctx context.Context, toolName string, args map[str
 	defer m.mu.RUnlock()
 
 	if !m.config.PluginsEnabled {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] SECURITY: CallTool(%s) rejected - plugins disabled", toolName)
-		}
+		config.Debugf("[MCP] SECURITY: CallTool(%s) rejected - plugins disabled", toolName)
 		return nil, fmt.Errorf("plugin system is disabled")
 	}
 
@@ -347,46 +341,33 @@ func (m *MCPManager) CallTool(ctx context.Context, toolName string, args map[str
 }
 
 func (m *MCPManager) Shutdown(ctx context.Context) error {
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] Shutdown: Called - beginning shutdown process")
-	}
+	config.Debugf("[MCP] Shutdown: Called - beginning shutdown process")
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.client != nil {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] Shutdown: Calling m.client.Shutdown")
-		}
+		config.Debugf("[MCP] Shutdown: Calling m.client.Shutdown")
 		if err := m.client.Shutdown(ctx); err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[MCP] Shutdown: ERROR in m.client.Shutdown: %v", err)
-			}
+			config.Debugf("[MCP] Shutdown: ERROR in m.client.Shutdown: %v", err)
 			return err
 		}
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] Shutdown: m.client.Shutdown completed successfully")
-		}
+		config.Debugf("[MCP] Shutdown: m.client.Shutdown completed successfully")
 	}
 
 	m.activePlugins = make(map[string]bool)
 	m.failedPlugins = make(map[string]error)
 	m.currentSession = nil
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] Shutdown: Shutdown process completed")
-	}
+	config.Debugf("[MCP] Shutdown: Shutdown process completed")
 
 	return nil
 }
 
 // ShutdownWithTracking attempts to shut down plugins and returns the names of plugins that didn't respond
 func (m *MCPManager) ShutdownWithTracking(ctx context.Context) ([]string, error) {
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] ShutdownWithTracking: ========== FUNCTION CALLED ==========")
-		if deadline, ok := ctx.Deadline(); ok {
-			config.DebugLog.Printf("[MCP] ShutdownWithTracking: Context deadline: %v (timeout in %v)", deadline, time.Until(deadline))
-		}
+	if deadline, ok := ctx.Deadline(); ok {
+		config.Debugf("[MCP] ShutdownWithTracking: Context deadline: %v (timeout in %v)", deadline, time.Until(deadline))
 	}
 
 	m.mu.Lock()
@@ -397,26 +378,18 @@ func (m *MCPManager) ShutdownWithTracking(ctx context.Context) ([]string, error)
 		plugin := m.registry.GetByID(pluginID)
 		if plugin != nil {
 			activePluginNames = append(activePluginNames, plugin.Name)
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[MCP] ShutdownWithTracking: Active plugin: %s (ID: %s)", plugin.Name, pluginID)
-			}
+			config.Debugf("[MCP] ShutdownWithTracking: Active plugin: %s (ID: %s)", plugin.Name, pluginID)
 		} else {
 			activePluginNames = append(activePluginNames, pluginID)
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[MCP] ShutdownWithTracking: Active plugin: %s (no metadata)", pluginID)
-			}
+			config.Debugf("[MCP] ShutdownWithTracking: Active plugin: %s (no metadata)", pluginID)
 		}
 	}
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] ShutdownWithTracking: Total %d active plugins before shutdown: %v", len(activePluginNames), activePluginNames)
-	}
+	config.Debugf("[MCP] ShutdownWithTracking: Total %d active plugins before shutdown: %v", len(activePluginNames), activePluginNames)
 
 	m.mu.Unlock()
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] ShutdownWithTracking: Starting shutdown with timeout enforcement...")
-	}
+	config.Debugf("[MCP] ShutdownWithTracking: Starting shutdown with timeout enforcement...")
 
 	// Run shutdown in goroutine with timeout enforcement
 	// This prevents m.Shutdown from blocking forever on zombie/unresponsive processes
@@ -426,13 +399,9 @@ func (m *MCPManager) ShutdownWithTracking(ctx context.Context) ([]string, error)
 	resultChan := make(chan shutdownResult, 1)
 
 	go func() {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] ShutdownWithTracking: Goroutine started - calling m.Shutdown(ctx)")
-		}
+		config.Debugf("[MCP] ShutdownWithTracking: Goroutine started - calling m.Shutdown(ctx)")
 		err := m.Shutdown(ctx)
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] ShutdownWithTracking: Goroutine - m.Shutdown returned with err=%v", err)
-		}
+		config.Debugf("[MCP] ShutdownWithTracking: Goroutine - m.Shutdown returned with err=%v", err)
 		resultChan <- shutdownResult{err: err}
 	}()
 
@@ -441,24 +410,18 @@ func (m *MCPManager) ShutdownWithTracking(ctx context.Context) ([]string, error)
 	select {
 	case result := <-resultChan:
 		// Shutdown completed before timeout
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] ShutdownWithTracking: Shutdown completed successfully, err=%v", result.err)
-		}
+		config.Debugf("[MCP] ShutdownWithTracking: Shutdown completed successfully, err=%v", result.err)
 		shutdownErr = result.err
 
 		// Shutdown succeeded - return empty list
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] ShutdownWithTracking: RETURNING empty list (all plugins shut down)")
-		}
+		config.Debugf("[MCP] ShutdownWithTracking: RETURNING empty list (all plugins shut down)")
 		return []string{}, shutdownErr
 
 	case <-ctx.Done():
 		// Context timed out - shutdown didn't complete in time
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] ShutdownWithTracking: Context timeout reached: %v", ctx.Err())
-			config.DebugLog.Printf("[MCP] ShutdownWithTracking: Shutdown goroutine still running (will be abandoned)")
-			config.DebugLog.Printf("[MCP] ShutdownWithTracking: RETURNING unresponsive plugins: %v", activePluginNames)
-		}
+		config.Debugf("[MCP] ShutdownWithTracking: Context timeout reached: %v", ctx.Err())
+		config.Debugf("[MCP] ShutdownWithTracking: Shutdown goroutine still running (will be abandoned)")
+		config.Debugf("[MCP] ShutdownWithTracking: RETURNING unresponsive plugins: %v", activePluginNames)
 
 		// All active plugins are considered unresponsive since shutdown timed out
 		return activePluginNames, ctx.Err()
@@ -498,29 +461,21 @@ func (m *MCPManager) GetActivePluginNames() []string {
 // StartAllEnabledPlugins starts all plugins that are enabled in Plugins Manager (Layer 2)
 // This is called once on OTUI startup to initialize all available plugins
 func (m *MCPManager) StartAllEnabledPlugins(ctx context.Context) error {
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] StartAllEnabledPlugins: Starting plugin startup process")
-	}
+	config.Debugf("[MCP] StartAllEnabledPlugins: Starting plugin startup process")
 
 	if !m.config.PluginsEnabled {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] StartAllEnabledPlugins: Plugins disabled in config, skipping")
-		}
+		config.Debugf("[MCP] StartAllEnabledPlugins: Plugins disabled in config, skipping")
 		return nil
 	}
 
 	// Get all installed plugins
 	installedPlugins, err := m.pluginStorage.List()
 	if err != nil {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] StartAllEnabledPlugins: ERROR listing plugins: %v", err)
-		}
+		config.Debugf("[MCP] StartAllEnabledPlugins: ERROR listing plugins: %v", err)
 		return fmt.Errorf("failed to list installed plugins: %w", err)
 	}
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] StartAllEnabledPlugins: Found %d installed plugins", len(installedPlugins))
-	}
+	config.Debugf("[MCP] StartAllEnabledPlugins: Found %d installed plugins", len(installedPlugins))
 
 	// Collect plugins to start (with mutex held briefly)
 	type pluginToStart struct {
@@ -568,15 +523,11 @@ func (m *MCPManager) StartAllEnabledPlugins(ctx context.Context) error {
 	}
 	m.mu.Unlock()
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] StartAllEnabledPlugins: Collected %d plugins to start", len(pluginsToStart))
-	}
+	config.Debugf("[MCP] StartAllEnabledPlugins: Collected %d plugins to start", len(pluginsToStart))
 
 	// Start plugins WITHOUT holding the mutex (slow operation)
 	for _, pts := range pluginsToStart {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] StartAllEnabledPlugins: Starting plugin '%s'", pts.installed.ID)
-		}
+		config.Debugf("[MCP] StartAllEnabledPlugins: Starting plugin '%s'", pts.installed.ID)
 		// Configure the plugin
 		mcpConfig := PluginConfig{
 			ID:         pts.installed.ID,
@@ -594,13 +545,10 @@ func (m *MCPManager) StartAllEnabledPlugins(ctx context.Context) error {
 		userConfig := m.pluginsConfig.GetPluginConfig(pts.installed.ID)
 		if serverURLOverride := userConfig["server_url"]; serverURLOverride != "" {
 			mcpConfig.ServerURL = serverURLOverride
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[MCP] StartAllEnabledPlugins: Overriding server_url for '%s': %s → %s", pts.installed.ID, pts.installed.ServerURL, serverURLOverride)
-			}
+			config.Debugf("[MCP] StartAllEnabledPlugins: Overriding server_url for '%s': %s → %s", pts.installed.ID, pts.installed.ServerURL, serverURLOverride)
 		}
 
 		// For remote plugins, merge env vars from config into Env
-		// (Phase 0 will handle loading encrypted credentials here)
 		switch pts.plugin.InstallType {
 		case "remote":
 			// Get config which may contain auth headers (OTUI's own settings,
@@ -622,10 +570,8 @@ func (m *MCPManager) StartAllEnabledPlugins(ctx context.Context) error {
 			// Plugin failed to start - mark as failed so it shows up in shutdown
 			// This includes zombie processes, crashed plugins, etc.
 			fmt.Printf("Warning: Failed to start plugin %s: %v\n", pts.installed.ID, err)
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[MCP] StartAllEnabledPlugins: ERROR starting plugin '%s': %v", pts.installed.ID, err)
-				config.DebugLog.Printf("[MCP] StartAllEnabledPlugins: Marking '%s' as failed (zombie/crashed)", pts.installed.ID)
-			}
+			config.Debugf("[MCP] StartAllEnabledPlugins: ERROR starting plugin '%s': %v", pts.installed.ID, err)
+			config.Debugf("[MCP] StartAllEnabledPlugins: Marking '%s' as failed (zombie/crashed)", pts.installed.ID)
 
 			// Mark as both active AND failed - so it shows up in shutdown as unresponsive
 			m.mu.Lock()
@@ -635,9 +581,7 @@ func (m *MCPManager) StartAllEnabledPlugins(ctx context.Context) error {
 			continue
 		}
 
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] StartAllEnabledPlugins: Successfully started plugin '%s'", pts.installed.ID)
-		}
+		config.Debugf("[MCP] StartAllEnabledPlugins: Successfully started plugin '%s'", pts.installed.ID)
 
 		// Mark as active (acquire mutex just for this write)
 		m.mu.Lock()
@@ -645,9 +589,7 @@ func (m *MCPManager) StartAllEnabledPlugins(ctx context.Context) error {
 		m.mu.Unlock()
 	}
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] StartAllEnabledPlugins: Completed plugin startup process")
-	}
+	config.Debugf("[MCP] StartAllEnabledPlugins: Completed plugin startup process")
 	return nil
 }
 
@@ -735,26 +677,20 @@ func (m *MCPManager) GetPluginShortName(pluginID string) string {
 
 // StartPlugin starts a specific plugin (called when user enables it in Plugins Manager)
 func (m *MCPManager) StartPlugin(ctx context.Context, pluginID string) error {
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] StartPlugin: Called for plugin '%s'", pluginID)
-	}
+	config.Debugf("[MCP] StartPlugin: Called for plugin '%s'", pluginID)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if !m.config.PluginsEnabled {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] StartPlugin: Plugins disabled in config")
-		}
+		config.Debugf("[MCP] StartPlugin: Plugins disabled in config")
 		return nil
 	}
 
 	// If plugin previously failed, clear its state to allow retry
 	// (a failed start already stopped its process)
 	if m.failedPlugins[pluginID] != nil {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] StartPlugin: Plugin '%s' previously failed (%v), clearing state for retry", pluginID, m.failedPlugins[pluginID])
-		}
+		config.Debugf("[MCP] StartPlugin: Plugin '%s' previously failed (%v), clearing state for retry", pluginID, m.failedPlugins[pluginID])
 		// Clear failed state to allow retry
 		delete(m.activePlugins, pluginID)
 		delete(m.failedPlugins, pluginID)
@@ -763,9 +699,7 @@ func (m *MCPManager) StartPlugin(ctx context.Context, pluginID string) error {
 
 	// Skip if already running (successfully, not failed)
 	if m.activePlugins[pluginID] {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] StartPlugin: Plugin '%s' already running, skipping", pluginID)
-		}
+		config.Debugf("[MCP] StartPlugin: Plugin '%s' already running, skipping", pluginID)
 		return nil
 	}
 
@@ -791,9 +725,7 @@ func (m *MCPManager) StartPlugin(ctx context.Context, pluginID string) error {
 		return fmt.Errorf("failed to build command for plugin: %s", pluginID)
 	}
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] StartPlugin: Built command for '%s': command='%s', %d args", pluginID, command, len(args))
-	}
+	config.Debugf("[MCP] StartPlugin: Built command for '%s': command='%s', %d args", pluginID, command, len(args))
 
 	// Configure plugin
 	mcpConfig := PluginConfig{
@@ -812,9 +744,7 @@ func (m *MCPManager) StartPlugin(ctx context.Context, pluginID string) error {
 	userConfig := m.pluginsConfig.GetPluginConfig(pluginID)
 	if serverURLOverride := userConfig["server_url"]; serverURLOverride != "" {
 		mcpConfig.ServerURL = serverURLOverride
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] StartPlugin: Overriding server_url for '%s': %s → %s", pluginID, installed.ServerURL, serverURLOverride)
-		}
+		config.Debugf("[MCP] StartPlugin: Overriding server_url for '%s': %s → %s", pluginID, installed.ServerURL, serverURLOverride)
 	}
 
 	// For remote plugins, merge env vars from config into Env
@@ -834,19 +764,13 @@ func (m *MCPManager) StartPlugin(ctx context.Context, pluginID string) error {
 		mcpConfig.Env = SubstituteSessionVars(mcpConfig.Env, m.currentSession.ID, m.currentSession.Name, m.dataDir)
 	}
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] StartPlugin: Plugin config for '%s': Runtime=%s, Config=%v", pluginID, mcpConfig.Runtime, config.RedactMap(mcpConfig.Config))
-	}
+	config.Debugf("[MCP] StartPlugin: Plugin config for '%s': Runtime=%s, Config=%v", pluginID, mcpConfig.Runtime, config.RedactMap(mcpConfig.Config))
 
 	// Start the plugin
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] StartPlugin: Calling m.client.Start for plugin '%s'", pluginID)
-	}
+	config.Debugf("[MCP] StartPlugin: Calling m.client.Start for plugin '%s'", pluginID)
 	if err := m.client.Start(ctx, mcpConfig); err != nil {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] StartPlugin: ERROR starting plugin '%s': %v", pluginID, err)
-			config.DebugLog.Printf("[MCP] StartPlugin: Marking '%s' as failed (zombie/crashed)", pluginID)
-		}
+		config.Debugf("[MCP] StartPlugin: ERROR starting plugin '%s': %v", pluginID, err)
+		config.Debugf("[MCP] StartPlugin: Marking '%s' as failed (zombie/crashed)", pluginID)
 		// Mark as both active AND failed - so it shows up in shutdown as unresponsive
 		m.activePlugins[pluginID] = true
 		m.failedPlugins[pluginID] = err
@@ -856,44 +780,32 @@ func (m *MCPManager) StartPlugin(ctx context.Context, pluginID string) error {
 	// Mark as active
 	m.activePlugins[pluginID] = true
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] StartPlugin: Successfully started plugin '%s'", pluginID)
-	}
+	config.Debugf("[MCP] StartPlugin: Successfully started plugin '%s'", pluginID)
 
 	return nil
 }
 
 // StopPlugin stops a specific plugin (called when user disables it in Plugins Manager)
 func (m *MCPManager) StopPlugin(ctx context.Context, pluginID string) error {
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] StopPlugin: Called for plugin '%s'", pluginID)
-	}
+	config.Debugf("[MCP] StopPlugin: Called for plugin '%s'", pluginID)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if !m.activePlugins[pluginID] {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] StopPlugin: Plugin '%s' not running, skipping", pluginID)
-		}
+		config.Debugf("[MCP] StopPlugin: Plugin '%s' not running, skipping", pluginID)
 		return nil
 	}
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] StopPlugin: Calling m.client.Stop for plugin '%s'", pluginID)
-	}
+	config.Debugf("[MCP] StopPlugin: Calling m.client.Stop for plugin '%s'", pluginID)
 	if err := m.client.Stop(ctx, pluginID); err != nil {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] StopPlugin: ERROR stopping plugin '%s': %v", pluginID, err)
-		}
+		config.Debugf("[MCP] StopPlugin: ERROR stopping plugin '%s': %v", pluginID, err)
 		return fmt.Errorf("failed to stop plugin: %w", err)
 	}
 
 	delete(m.activePlugins, pluginID)
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[MCP] StopPlugin: Successfully stopped plugin '%s'", pluginID)
-	}
+	config.Debugf("[MCP] StopPlugin: Successfully stopped plugin '%s'", pluginID)
 
 	return nil
 }
@@ -905,9 +817,7 @@ func (m *MCPManager) ExecuteTool(ctx context.Context, toolName string, args map[
 	defer m.mu.RUnlock()
 
 	if !m.config.PluginsEnabled {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[MCP] SECURITY: ExecuteTool(%s) rejected - plugins disabled", toolName)
-		}
+		config.Debugf("[MCP] SECURITY: ExecuteTool(%s) rejected - plugins disabled", toolName)
 		return nil, fmt.Errorf("plugins are disabled")
 	}
 

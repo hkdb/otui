@@ -12,8 +12,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-go@v6
         with:
@@ -25,22 +23,18 @@ jobs:
       - name: Test (race detector)
         run: go test -race ./...
 
-      # Only files changed by this push/PR: some existing files aren't gofmt'ed yet
-      - name: gofmt (changed files)
+      - name: gofmt
         run: |
-          base="${{ github.event.pull_request.base.sha || github.event.before }}"
-          if [ -z "$base" ] || ! git cat-file -e "$base" 2>/dev/null; then
-            echo "No base commit to compare with, skipping"
-            exit 0
-          fi
-          files=$(git diff --name-only --diff-filter=ACMR "$base" HEAD -- '*.go')
-          [ -z "$files" ] && exit 0
-          unformatted=$(gofmt -l $files)
+          unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then
             echo "Not gofmt'ed:"
             echo "$unformatted"
             exit 1
           fi
+
+      # v0.8+ needs Go 1.26 (go.mod targets 1.25)
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
 
   test-macos:
     runs-on: macos-latest

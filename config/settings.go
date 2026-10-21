@@ -62,15 +62,13 @@ func LoadUserConfig(dataDir string) (*UserConfig, error) {
 	// TOML read them as ollama.* and they were ignored - honor them
 	applyMisplacedOllamaKeys(userConfigPath, md, cfg)
 
-	// MIGRATION: Add enable_multi_step if not present (Phase 2 feature)
+	// Migration: add enable_multi_step if not present
 	if !strings.Contains(string(content), "enable_multi_step") {
 		// Insert as top-level keys (before the first table, so TOML doesn't
 		// put them in whatever table comes last)
-		migration := "# Multi-step execution (Phase 2)\nenable_multi_step = true\nmax_iterations = 10\n\n"
+		migration := "# Multi-step execution\nenable_multi_step = true\nmax_iterations = 10\n\n"
 		if err := WriteFileAtomic(userConfigPath, []byte(insertBeforeFirstTable(string(content), migration)), 0600); err == nil {
-			if Debug && DebugLog != nil {
-				DebugLog.Printf("[Config] Migrated: added enable_multi_step and max_iterations to config")
-			}
+			Debugf("[Config] Migrated: added enable_multi_step and max_iterations to config")
 		}
 		// Set in memory (since we already decoded before migration)
 		cfg.EnableMultiStep = true
@@ -83,11 +81,9 @@ func LoadUserConfig(dataDir string) (*UserConfig, error) {
 	if needsWizardDefaultsRepair(cfg) {
 		repairWizardDefaults(cfg)
 		if err := SaveUserConfig(cfg, dataDir); err != nil {
-			if DebugLog != nil {
-				DebugLog.Printf("[Config] Failed to save repaired wizard defaults: %v", err)
-			}
-		} else if DebugLog != nil {
-			DebugLog.Printf("[Config] Repaired wizard defaults: require_approval, enable_multi_step, max_iterations, compaction")
+			Debugf("[Config] Failed to save repaired wizard defaults: %v", err)
+		} else {
+			Debugf("[Config] Repaired wizard defaults: require_approval, enable_multi_step, max_iterations, compaction")
 		}
 	}
 
@@ -153,8 +149,8 @@ func applyMisplacedOllamaKeys(path string, md toml.MetaData, cfg *UserConfig) {
 		cfg.NotifyOnComplete = *o.NotifyOnComplete
 	}
 
-	if len(applied) > 0 && DebugLog != nil {
-		DebugLog.Printf("[Config] Applied settings found under [ollama] as top-level: %s", strings.Join(applied, ", "))
+	if len(applied) > 0 {
+		Debugf("[Config] Applied settings found under [ollama] as top-level: %s", strings.Join(applied, ", "))
 	}
 }
 

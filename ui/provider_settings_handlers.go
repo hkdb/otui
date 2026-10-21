@@ -96,25 +96,19 @@ func (a AppView) handleProviderSettingsInput(msg tea.KeyMsg) (tea.Model, tea.Cmd
 
 	case "enter", " ":
 		// Enter edit mode (or toggle for boolean fields)
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[ProviderSettings] Enter pressed, selectedIdx=%d", a.providerSettingsState.selectedFieldIdx)
-		}
+		config.Debugf("[ProviderSettings] Enter pressed, selectedIdx=%d", a.providerSettingsState.selectedFieldIdx)
 
 		providerID := a.providerSettingsState.selectedProviderID
 		currentFields := a.providerSettingsState.currentFieldsMap[providerID]
 		if a.providerSettingsState.selectedFieldIdx < len(currentFields) {
 			field := currentFields[a.providerSettingsState.selectedFieldIdx]
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[ProviderSettings] Field: label=%s, type=%d, value=%s", field.Label, field.Type, config.Redact(field.Label, field.Value))
-				config.DebugLog.Printf("[ProviderSettings] ProviderFieldTypeEnabled=%d, match=%v", ProviderFieldTypeEnabled, field.Type == ProviderFieldTypeEnabled)
-			}
+			config.Debugf("[ProviderSettings] Field: label=%s, type=%d, value=%s", field.Label, field.Type, config.Redact(field.Label, field.Value))
+			config.Debugf("[ProviderSettings] ProviderFieldTypeEnabled=%d, match=%v", ProviderFieldTypeEnabled, field.Type == ProviderFieldTypeEnabled)
 
 			// Special handling: Toggle Enabled field in cache (don't save yet)
 			if field.Type == ProviderFieldTypeEnabled {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[ProviderSettings] TOGGLE ENABLED FIELD - current=%s", field.Value)
-				}
+				config.Debugf("[ProviderSettings] Toggling enabled field (current=%s)", field.Value)
 
 				// Determine new value
 				var newValue string
@@ -125,27 +119,17 @@ func (a AppView) handleProviderSettingsInput(msg tea.KeyMsg) (tea.Model, tea.Cmd
 					newValue = "true"
 				}
 
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[ProviderSettings] Toggle: %s -> %s (in cache only, wait for Alt+Enter)", field.Value, newValue)
-				}
+				config.Debugf("[ProviderSettings] Toggle: %s -> %s (in cache only, wait for Alt+Enter)", field.Value, newValue)
 
-				// Modify map directly (not copy!)
+				// Modify the cached field in place
 				a.providerSettingsState.currentFieldsMap[providerID][a.providerSettingsState.selectedFieldIdx].Value = newValue
-
-				// DEBUG: Verify map was actually updated
-				if config.DebugLog != nil {
-					verifyValue := a.providerSettingsState.currentFieldsMap[providerID][a.providerSettingsState.selectedFieldIdx].Value
-					config.DebugLog.Printf("[ProviderSettings] ✅ VERIFY: Map[%s][%d].Value is now: %s", providerID, a.providerSettingsState.selectedFieldIdx, verifyValue)
-				}
 
 				// Mark as changed but don't save yet
 				a.providerSettingsState.hasChanges = true
 				return a, nil
 			}
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[ProviderSettings] NOT enabled field type, entering edit mode")
-			}
+			config.Debugf("[ProviderSettings] NOT enabled field type, entering edit mode")
 
 			// Normal text edit mode for other fields
 			actualValue := a.getProviderFieldActualValue(field)
@@ -200,7 +184,7 @@ func (a AppView) saveProviderField() (tea.Model, tea.Cmd) {
 
 	newValue := a.providerSettingsState.editInput.Value()
 
-	// Modify map directly (not copy!)
+	// Modify the cached field in place
 	a.providerSettingsState.currentFieldsMap[providerID][a.providerSettingsState.selectedFieldIdx].Value = newValue
 
 	// Exit edit mode
@@ -283,9 +267,7 @@ func (a AppView) saveAllProviderFieldsCmd() tea.Cmd {
 					continue // API keys were saved already
 				}
 
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[SaveCmd] %s.%s = %q", providerID, fieldName, field.Value)
-				}
+				config.Debugf("[SaveCmd] %s.%s = %q", providerID, fieldName, field.Value)
 
 				if err := config.UpdateProviderField(dataDir, providerID, fieldName, field.Value); err != nil {
 					return providerFieldsSavedMsg{success: false, err: err}

@@ -29,14 +29,6 @@ func EnvVarsToString(envVarKeys []string) string {
 	return strings.Join(envVarKeys, " ")
 }
 
-// StringToEnvVars converts space-separated string to env var keys
-func StringToEnvVars(envString string) []string {
-	if envString == "" {
-		return []string{}
-	}
-	return strings.Fields(envString)
-}
-
 // EnvironmentKeys returns the env var keys of a plugin's Environment field
 // (without their ;;'default' suffixes)
 func EnvironmentKeys(envString string) []string {
@@ -261,27 +253,9 @@ func SubstituteArgs(argsString string, userConfig map[string]string) []string {
 		prevWasFlag = false
 	}
 
-	if globalconfig.DebugLog != nil {
-		globalconfig.DebugLog.Printf("[ConfigBuilder] SubstituteArgs: %d args", len(args))
-	}
+	globalconfig.Debugf("[ConfigBuilder] SubstituteArgs: %d args", len(args))
 
 	return args
-}
-
-// BuildEnvMap extracts environment variables from plugin.Environment and user config
-func BuildEnvMap(envString string, userConfig map[string]string) map[string]string {
-	envMap := make(map[string]string)
-
-	if envString != "" {
-		envVars := strings.Fields(envString)
-		for _, envVar := range envVars {
-			if val, ok := userConfig[envVar]; ok {
-				envMap[envVar] = val
-			}
-		}
-	}
-
-	return envMap
 }
 
 // ArgDefinition represents a parsed argument with optional default value
@@ -364,9 +338,7 @@ func parseEnvironmentWithDefaults(envString string) []EnvVarDefinition {
 			}
 
 			// Malformed default (missing quotes) - treat as required
-			if globalconfig.DebugLog != nil {
-				globalconfig.DebugLog.Printf("[ConfigBuilder] Invalid default format for '%s': missing quotes around '%s'", key, parts[1])
-			}
+			globalconfig.Debugf("[ConfigBuilder] Invalid default format for '%s': missing quotes around '%s'", key, parts[1])
 			result = append(result, EnvVarDefinition{
 				Key:          key,
 				DefaultValue: "",
@@ -431,9 +403,8 @@ func SubstituteSessionVars(env map[string]string, sessionID, sessionName, dataDi
 		}
 		result[k] = substituted
 
-		// Debug log if substitution occurred
-		if globalconfig.DebugLog != nil && substituted != v {
-			globalconfig.DebugLog.Printf("[ConfigBuilder] SubstituteSessionVars: %s = '%s' → '%s'", k, globalconfig.Redact(k, v), globalconfig.Redact(k, substituted))
+		if substituted != v {
+			globalconfig.Debugf("[ConfigBuilder] SubstituteSessionVars: %s = '%s' → '%s'", k, globalconfig.Redact(k, v), globalconfig.Redact(k, substituted))
 		}
 	}
 

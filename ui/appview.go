@@ -80,7 +80,6 @@ type AppView struct {
 	filteredSessionList  []storage.SessionMetadata
 	sessionExportMode    bool
 	sessionExportInput   textinput.Model
-	sessionExporting     bool
 	sessionExportSuccess string // Contains export path if successful, empty otherwise
 
 	// Import session state
@@ -206,11 +205,11 @@ type AppView struct {
 	// Used for creating new data directories from Settings
 	RestartAfterQuit bool
 
-	// Tool execution state (Phase 6)
+	// Tool execution state
 	executingTool        string        // Plugin name currently executing (e.g., "mcp-searxng")
 	toolExecutionSpinner spinner.Model // Spinner for tool execution indicator
 
-	// Permission system state (Phase 1: Permission System)
+	// Permission system state
 	waitingForPermission    bool
 	pendingPermission       *appmodel.ToolPermissionRequestMsg
 	waitingForCompaction    bool
@@ -224,7 +223,7 @@ type AppView struct {
 	pluginOperationError     string // Error message if failed
 	pluginOperationSpinner   spinner.Model
 
-	// Multi-step iteration UI state (Phase 2)
+	// Multi-step iteration UI state
 	iterationCount int // Current step number
 	maxIterations  int // Max from config
 
@@ -245,13 +244,11 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 		cfg.Keybindings = config.DefaultKeybindings()
 	}
 
-	// Initialize MCP components (allow graceful degradation - Phase 4)
+	// Initialize MCP components (allow graceful degradation)
 	registry, err := mcp.NewRegistry(cfg.DataDir())
 	if err != nil {
 		// Don't panic - plugins will be disabled
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[AppView] Plugin registry init failed: %v (plugins disabled)", err)
-		}
+		config.Debugf("[AppView] Plugin registry init failed: %v (plugins disabled)", err)
 		registry = nil
 	}
 
@@ -260,9 +257,7 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 		pluginStorage, err = storage.NewPluginStorage(cfg.DataDir())
 		if err != nil {
 			// Don't panic - plugins will be disabled
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[AppView] Plugin storage init failed: %v (plugins disabled)", err)
-			}
+			config.Debugf("[AppView] Plugin storage init failed: %v (plugins disabled)", err)
 			registry = nil
 			pluginStorage = nil
 		}
@@ -273,9 +268,7 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 		pluginsConfig, err = config.LoadPluginsConfig(cfg.DataDir())
 		if err != nil {
 			// Don't panic - plugins will be disabled
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[AppView] Plugins config load failed: %v (plugins disabled)", err)
-			}
+			config.Debugf("[AppView] Plugins config load failed: %v (plugins disabled)", err)
 			registry = nil
 			pluginStorage = nil
 			pluginsConfig = nil
@@ -338,7 +331,7 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 	globalSearchInput.Prompt = "Search all: "
 	globalSearchInput.CharLimit = 100
 
-	// Initialize passphrase input for data dir switch (reuses shared helper)
+	// Initialize passphrase input for data dir switch
 	passphraseForDataDir := NewPassphraseInput("Enter passphrase for SSH key")
 
 	// Create plugin state
@@ -351,8 +344,7 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 	// Create search index
 	searchIndex := storage.NewSearchIndex(sessionStorage)
 
-	// Initialize ALL providers (Ollama + cloud providers) via provider package
-	// Provider package owns provider lifecycle - zero business logic in UI
+	// Initialize all providers (Ollama + cloud providers)
 	allProviders := provider.InitializeProviders(cfg)
 
 	// Determine which provider to use for initialization
@@ -373,8 +365,7 @@ func NewAppView(cfg *config.Config, sessionStorage *storage.SessionStorage, last
 		}
 	}
 
-	// Initialize the core data model with correct provider (session's or default)
-	// This fixes bug where non-default provider sessions would use wrong provider on restart
+	// Start with the last session's provider (or the default)
 	dataModel := appmodel.NewModel(cfg, initialProvider, sessionStorage, lastSession, pluginState, mcpManager, searchIndex, version, license)
 
 	// Set ALL providers on the model (multi-provider support)
@@ -723,7 +714,7 @@ func (a AppView) view() string {
 
 	title := otuiText + modelText + sessionText + pluginText
 
-	// Add tool execution indicator (Phase 6)
+	// Add tool execution indicator
 	if a.executingTool != "" {
 		toolIndicator := fmt.Sprintf(" | 🔧: %s %s", a.executingTool, a.toolExecutionSpinner.View())
 		title += TitleStyle.Render(toolIndicator)
@@ -832,8 +823,8 @@ func (a AppView) formatKeyDisplay(modifier, key string) string {
 	return mod + "+" + key
 }
 
-// setCurrentSession sets the current session and syncs it with the MCP manager
-// This ensures plugin isolation and prevents security holes from stale session references
+// setCurrentSession sets the current session and scopes the MCP manager to
+// it, so tools are only available for the plugins enabled in that session
 func (a *AppView) setCurrentSession(session *storage.Session) {
 	// Switching is blocked while a response is in progress; if a switch still
 	// happens, the old request must not reach the new session

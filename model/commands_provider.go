@@ -24,7 +24,7 @@ func getModelsFromProvider(providerID string, providerClient Provider) ([]ollama
 	}
 
 	if providerID == "ollama" {
-		// Ensure provider info is set (belt and suspenders)
+		// Ensure provider info is set
 		for i := range models {
 			models[i].Provider = "ollama"
 			if models[i].InternalName == "" {
@@ -47,17 +47,13 @@ func aggregateModels(providers map[string]Provider, cached map[string][]ollama.M
 	for providerID, providerClient := range providers {
 		models, ok := cached[providerID]
 		if ok {
-			if config.Debug {
-				config.DebugLog.Printf("[Model] Using cached models for provider %s", providerID)
-			}
+			config.Debugf("[Model] Using cached models for provider %s", providerID)
 		} else {
 			var err error
 			models, err = getModelsFromProvider(providerID, providerClient)
 			if err != nil {
 				// Log but don't fail - allow showing models from other providers
-				if config.Debug {
-					config.DebugLog.Printf("Warning: failed to fetch models from %s: %v", providerID, err)
-				}
+				config.Debugf("Warning: failed to fetch models from %s: %v", providerID, err)
 				continue
 			}
 			fetched[providerID] = models
@@ -122,9 +118,7 @@ func (m *Model) StoreModelCache(fetched map[string][]ollama.ModelInfo) {
 		}
 		m.ModelCache[providerID] = models
 		m.CacheExpiry[providerID] = time.Now().Add(modelCacheTTL)
-		if config.Debug {
-			config.DebugLog.Printf("[Model] Cached %d models for provider %s", len(models), providerID)
-		}
+		config.Debugf("[Model] Cached %d models for provider %s", len(models), providerID)
 	}
 }
 
@@ -134,18 +128,14 @@ func (m *Model) ClearModelCache(providerID string) {
 		// Clear all caches
 		m.ModelCache = make(map[string][]ollama.ModelInfo)
 		m.CacheExpiry = make(map[string]time.Time)
-		if config.Debug {
-			config.DebugLog.Printf("[Model] Cleared all model caches")
-		}
+		config.Debugf("[Model] Cleared all model caches")
 		return
 	}
 
 	// Clear specific provider cache
 	delete(m.ModelCache, providerID)
 	delete(m.CacheExpiry, providerID)
-	if config.Debug {
-		config.DebugLog.Printf("[Model] Cleared model cache for provider %s", providerID)
-	}
+	config.Debugf("[Model] Cleared model cache for provider %s", providerID)
 }
 
 // CanSendMessage checks if the current session's provider is enabled
@@ -172,7 +162,7 @@ func (m *Model) CanSendMessage() (bool, string) {
 }
 
 // SwitchModel switches the current session to use a different model and provider.
-// This is the business logic for model switching - updates session state and active provider.
+// It updates the session and the active provider.
 //
 // The method handles:
 //   - Updating session.Model with InternalName (full API name like "qwen/qwen3-coder:free")
@@ -185,7 +175,7 @@ func (m *Model) CanSendMessage() (bool, string) {
 // This encapsulates all business logic for model switching, ensuring session state
 // stays consistent with the active provider.
 func (m *Model) SwitchModel(modelInfo ollama.ModelInfo) tea.Cmd {
-	// Update session with InternalName and Provider (business logic)
+	// Update session with InternalName and Provider
 	if m.CurrentSession != nil {
 		m.CurrentSession.Model = modelInfo.InternalName
 		m.CurrentSession.Provider = modelInfo.Provider
@@ -196,22 +186,18 @@ func (m *Model) SwitchModel(modelInfo ollama.ModelInfo) tea.Cmd {
 	if m.Config.LastUsedProvider != modelInfo.Provider {
 		m.Config.LastUsedProvider = modelInfo.Provider
 
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[Model] Updated last_used_provider: %s", modelInfo.Provider)
-		}
+		config.Debugf("[Model] Updated last_used_provider: %s", modelInfo.Provider)
 
 		// Note: Config auto-save happens on app exit, no need to save immediately
 		// This prevents blocking the UI on every model switch
 	}
 
-	// Switch to the selected provider (business logic)
+	// Switch to the selected provider
 	provider, ok := m.Providers[modelInfo.Provider]
 	if !ok {
 		// Fallback: use current provider (should not happen in normal operation)
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[Model] WARNING: Provider '%s' not found for model '%s', using fallback",
-				modelInfo.Provider, modelInfo.Name)
-		}
+		config.Debugf("[Model] WARNING: Provider '%s' not found for model '%s', using fallback",
+			modelInfo.Provider, modelInfo.Name)
 		m.Provider.SetModel(modelInfo.InternalName)
 		return m.RefreshModelMetadataCmd()
 	}
@@ -219,10 +205,8 @@ func (m *Model) SwitchModel(modelInfo ollama.ModelInfo) tea.Cmd {
 	m.Provider = provider
 	provider.SetModel(modelInfo.InternalName)
 
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[Model] Switched to model '%s' (provider: %s, internal: %s)",
-			modelInfo.Name, modelInfo.Provider, modelInfo.InternalName)
-	}
+	config.Debugf("[Model] Switched to model '%s' (provider: %s, internal: %s)",
+		modelInfo.Name, modelInfo.Provider, modelInfo.InternalName)
 
 	// Fetch the new model's real context window in the background
 	return m.RefreshModelMetadataCmd()
@@ -244,10 +228,8 @@ func (m *Model) SwitchToDefaultProvider() {
 	provider, ok := m.Providers[m.Config.DefaultProvider]
 	if !ok {
 		// Fallback: use current provider with config model
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[Model] WARNING: Default provider '%s' not found, using fallback",
-				m.Config.DefaultProvider)
-		}
+		config.Debugf("[Model] WARNING: Default provider '%s' not found, using fallback",
+			m.Config.DefaultProvider)
 		m.Provider.SetModel(m.Config.DefaultModel)
 		return
 	}
@@ -255,8 +237,6 @@ func (m *Model) SwitchToDefaultProvider() {
 	m.Provider = provider
 	m.Provider.SetModel(m.Config.DefaultModel)
 
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[Model] Switched to default provider '%s' with model '%s'",
-			m.Config.DefaultProvider, m.Config.DefaultModel)
-	}
+	config.Debugf("[Model] Switched to default provider '%s' with model '%s'",
+		m.Config.DefaultProvider, m.Config.DefaultModel)
 }

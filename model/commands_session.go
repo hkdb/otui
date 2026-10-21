@@ -201,7 +201,7 @@ func (m *Model) AutoSaveSession() tea.Cmd {
 		// Switch active provider to match session
 		m.SwitchToDefaultProvider()
 
-		// Sync with MCP manager (security fix)
+		// Scope the MCP manager to the new session
 		if m.MCPManager != nil {
 			m.MCPManager.SetSession(m.CurrentSession)
 		}
@@ -412,9 +412,7 @@ func (m *Model) CleanupPartialFileCmd(filePath string) tea.Cmd {
 	return func() tea.Msg {
 		// Delete the partial file
 		if err := os.Remove(filePath); err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Failed to cleanup partial file: %v", err)
-			}
+			config.Debugf("Failed to cleanup partial file: %v", err)
 		}
 		return ExportCleanupDoneMsg{}
 	}
@@ -425,18 +423,10 @@ func (m *Model) CleanupPartialDataExportCmd(filePath string) tea.Cmd {
 	return func() tea.Msg {
 		// Delete the partial data export file
 		if err := os.Remove(filePath); err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Failed to cleanup partial data export: %v", err)
-			}
+			config.Debugf("Failed to cleanup partial data export: %v", err)
 		}
 		return DataExportCleanupDoneMsg{}
 	}
-}
-
-// fileExists checks if a file exists
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 // UpdateSessionPropertiesCmd updates session properties and refreshes the session list
@@ -523,14 +513,10 @@ func (m *Model) CreateAndSaveNewSession(name, systemPrompt string, enabledPlugin
 // This is pure business logic: destroys manager, updates storage, clears session.
 // Does NOT handle plugin shutdown/restart or provider re-initialization - that's UI orchestration.
 //
-// STEPS 2-3: Destroy MCP manager, switch data directory
-//
 // Note: Provider re-initialization must be done by UI layer due to import cycle
 // (provider package imports model, so model cannot import provider).
 func (m *Model) ApplyDataDirSwitch(newDataDir string, passphrase string) error {
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[Model] STEP 2-3: Applying data dir switch to %s", newDataDir)
-	}
+	config.Debugf("[Model] Applying data dir switch to %s", newDataDir)
 
 	// Validate new data directory first
 	newStorage, err := storage.NewSessionStorage(newDataDir)
@@ -548,15 +534,12 @@ func (m *Model) ApplyDataDirSwitch(newDataDir string, passphrase string) error {
 		return fmt.Errorf("failed to initialize plugin registry: %w", err)
 	}
 
-	// STEP 2: Destroy MCP Manager (business logic - manager tied to old data dir)
+	// The MCP manager belongs to the old data dir
 	if m.MCPManager != nil {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[Model] STEP 2: Destroying MCP manager")
-		}
+		config.Debugf("[Model] Destroying MCP manager")
 		m.MCPManager = nil
 	}
 
-	// STEP 3: Switch data directory (business logic - state transitions)
 	// Unlock current session from OLD data directory before switching
 	if m.CurrentSession != nil && m.SessionStorage != nil {
 		_ = m.SessionStorage.UnlockSession(m.CurrentSession.ID)
@@ -564,15 +547,11 @@ func (m *Model) ApplyDataDirSwitch(newDataDir string, passphrase string) error {
 
 	// Unlock OTUI instance from OLD data directory before switching
 	if m.SessionStorage != nil {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[Model] STEP 3a: Unlocking OTUI instance in old data dir")
-		}
+		config.Debugf("[Model] Unlocking OTUI instance in old data dir")
 		_ = m.SessionStorage.UnlockOTUIInstance()
 	}
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[Model] STEP 3b: Switching data directory")
-	}
+	config.Debugf("[Model] Switching data directory")
 
 	m.SessionStorage = newStorage
 	m.SearchIndex = storage.NewSearchIndex(newStorage)
@@ -581,9 +560,7 @@ func (m *Model) ApplyDataDirSwitch(newDataDir string, passphrase string) error {
 	if err := newStorage.LockOTUIInstance(); err != nil {
 		return fmt.Errorf("failed to lock new data directory: %w", err)
 	}
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[Model] STEP 3c: Locked OTUI instance in new data dir")
-	}
+	config.Debugf("[Model] Locked OTUI instance in new data dir")
 
 	// Update plugin components
 	m.Plugins.Registry = newRegistry
@@ -600,14 +577,10 @@ func (m *Model) ApplyDataDirSwitch(newDataDir string, passphrase string) error {
 	m.CacheExpiry = make(map[string]time.Time)
 
 	// Re-initialize debug log for new data directory
-	if config.Debug {
-		config.InitDebugLog(m.Config.DataDir())
-	}
+	config.InitDebugLog(m.Config.DataDir())
 
-	// Reload config from NEW data directory (business logic - config owns model state)
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[Model] STEP 3b: Reloading config from new data directory")
-	}
+	// Reload config from the new data directory
+	config.Debugf("[Model] Reloading config from new data directory")
 	cfg, err := config.Load()
 	if err != nil {
 		// If passphrase required and we DON'T have one yet, return error for UI to handle
@@ -631,9 +604,7 @@ func (m *Model) ApplyDataDirSwitch(newDataDir string, passphrase string) error {
 	}
 	m.Config = cfg
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[Model] STEP 2-3 complete: Data directory switch applied")
-	}
+	config.Debugf("[Model] Data directory switch applied")
 
 	return nil
 }

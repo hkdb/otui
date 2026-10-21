@@ -21,7 +21,7 @@ type PluginManagerState struct {
 	// Reference to plugin data (stored in model)
 	pluginState *model.PluginState
 
-	// Grouped state (Phase 5: State Management)
+	// Grouped state
 	selection       SelectionState
 	installModal    InstallModalState
 	uninstallModal  UninstallModalState

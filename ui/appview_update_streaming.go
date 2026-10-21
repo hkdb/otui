@@ -53,9 +53,7 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		return a, nil
 
 	case streamDoneMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("streamDoneMsg received - response length: %d", len(msg.FullResponse))
-		}
+		config.Debugf("streamDoneMsg received - response length: %d", len(msg.FullResponse))
 
 		if a.staleRequest(msg.RequestID) || !a.dataModel.Streaming {
 			return a, nil
@@ -69,9 +67,7 @@ func (a AppView) handleStreamingMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		return a, a.finishResponse(msg.FullResponse, nil)
 
 	case streamErrorMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("streamErrorMsg received: %v", msg.Err)
-		}
+		config.Debugf("streamErrorMsg received: %v", msg.Err)
 
 		// Errors of a cancelled request (e.g. "context canceled") aren't shown
 		if a.staleRequest(msg.RequestID) {
@@ -134,9 +130,7 @@ func (a *AppView) finishResponse(fullResp string, summary *IterationSummaryMsg) 
 	a.currentResp.Reset()
 	a.resetTypewriter()
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("Response complete - finalizing message (len=%d)", len(fullResp))
-	}
+	config.Debugf("Response complete - finalizing message (len=%d)", len(fullResp))
 
 	// Remove "Waiting for response..." / "Analyzing results..." message
 	a.removeLastNonPersistentSystemMessage()
@@ -151,7 +145,7 @@ func (a *AppView) finishResponse(fullResp string, summary *IterationSummaryMsg) 
 	}
 	messageIndex := len(a.dataModel.Messages) - 1
 
-	// Add summary after assistant message (Phase 2)
+	// Add summary after assistant message
 	if summary != nil && summary.TotalSteps > 0 {
 		summaryContent := buildIterationSummary(*summary)
 		a.dataModel.Messages = append(a.dataModel.Messages, Message{

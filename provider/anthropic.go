@@ -199,9 +199,7 @@ func (p *AnthropicProvider) ListModels(ctx context.Context) ([]ollama.ModelInfo,
 		ids = append(ids, pager.Current().ID)
 	}
 	if err := pager.Err(); err != nil || len(ids) == 0 {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[Anthropic] Models API unavailable (%v), using built-in model list", err)
-		}
+		config.Debugf("[Anthropic] Models API unavailable (%v), using built-in model list", err)
 		ids = anthropicFallbackModels
 	}
 
@@ -211,7 +209,7 @@ func (p *AnthropicProvider) ListModels(ctx context.Context) ([]ollama.ModelInfo,
 			Name:         id,
 			InternalName: id,
 			Size:         0,           // Anthropic doesn't provide size info
-			Provider:     "anthropic", // CRITICAL: Must match provider ID
+			Provider:     "anthropic", // Must match the provider ID (selecting the model switches to it)
 		})
 	}
 

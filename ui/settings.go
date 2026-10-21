@@ -52,17 +52,11 @@ type dataDirectoryNotFoundMsg struct {
 const dataDirPinnedMessage = "The data directory is set by the OTUI_DATA_DIR\nenvironment variable and can't be changed here."
 
 func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("[Settings] ========== handleSettingsInput CALLED ==========")
-		config.DebugLog.Printf("[Settings] Message type: %T", msg)
-		config.DebugLog.Printf("[Settings] providerSettingsState.visible = %v", a.providerSettingsState.visible)
-	}
+	config.Debugf("[Settings] handleSettingsInput: %T (provider settings visible: %v)", msg, a.providerSettingsState.visible)
 
 	// Route to provider settings sub-screen if visible (keyboard input only)
 	if a.providerSettingsState.visible {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[Settings] Routing to provider settings handler")
-		}
+		config.Debugf("[Settings] Routing to provider settings handler")
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			return a.handleProviderSettingsInput(msg)
@@ -70,11 +64,11 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	// Handle provider save messages regardless of visibility (fixes race condition where
-	// user presses Alt+Enter then immediately Esc before message arrives)
+	// Provider save results are handled even when settings are closed (the
+	// user can press Alt+Enter then Esc before the result arrives)
 	switch msg := msg.(type) {
 	case providerFieldSavedMsg:
-		// Handle save result (single field - legacy)
+		// Single field save result
 		switch {
 		case msg.success:
 			// Update config in memory
@@ -88,10 +82,6 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle batch save result (all providers' fields)
 		switch {
 		case msg.success:
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[Settings] ========== providerFieldsSavedMsg SUCCESS ==========")
-			}
-
 			// Update config in memory
 			a.dataModel.Config = msg.cfg
 
@@ -102,7 +92,7 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-			// Re-initialize providers and fetch models (shared helper with debug logging)
+			// Re-initialize providers and fetch models
 			return a, a.refreshProvidersAndModels()
 		case !msg.success:
 			// Shown on the Settings screen (Provider Settings is already closed)
@@ -114,9 +104,7 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case dataDirectoryNotFoundMsg:
 		// Data directory doesn't exist - show confirmation modal
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[Settings] Showing new data dir confirmation for: %s", msg.path)
-		}
+		config.Debugf("[Settings] Showing new data dir confirmation for: %s", msg.path)
 		a.settingsDataDirNotFound = true
 		a.settingsNewDataDirPath = msg.path
 		return a, nil
@@ -165,36 +153,17 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		// ========== DATA DIRECTORY CHANGE & PLUGIN LIFECYCLE ORCHESTRATION ==========
-		//
-		// Flow for handling data directory changes with plugins:
-		//
-		// SCENARIO 1: Switch from data dir A (plugins enabled) → data dir B (plugins disabled)
-		//   1. STEP 1 (line 126-154): Shutdown plugins from old data dir, return early with modal
-		//   2. pluginSystemOperationMsg handler (appview_update.go:1283): Destroy manager, dismiss modal
-		//   3. User manually saves settings again (or shutdown completes and auto-continues)
-		//   4. STEP 2 (line 159-256): Validate and switch to new data dir
-		//   5. STEP 5 (line 324): Fetch session list, load first session
-		//   6. sessionLoadedMsg handler: Plugins not enabled, nothing to do ✓
-		//
-		// SCENARIO 2: Switch from data dir A (plugins disabled) → data dir B (plugins enabled)
-		//   1. STEP 1 (line 126-154): No plugins running, skip
-		//   2. STEP 2 (line 159-256): Validate and switch to new data dir, clear session to nil
-		//   3. STEP 3 (line 260-305): Condition FALSE (data dir changed), skip plugin enabling
-		//   4. STEP 5 (line 324): Fetch session list, load first session
-		//   5. sessionLoadedMsg handler (appview_update.go:~1512): Create manager, start plugins ✓
-		//
-		// SCENARIO 3: Just toggle plugins (no data dir change)
-		//   1. STEP 1 (line 126-154): If disabling, shutdown and return
-		//   2. STEP 2 (line 159-256): Skip (data dir didn't change)
-		//   3. STEP 3 (line 260-305): If enabling, create manager and start plugins ✓
-		//   4. STEP 5 (line 324): Fetch session list (refresh)
-		//
-		// NOTE: This orchestration logic lives in UI because Bubbletea has no controller layer.
-		//       Business logic (shutdown, startup, manager lifecycle) is in model/ and mcp/ packages.
-		//       UI just orchestrates: "when to call what, in what order" (Update pattern).
-		//
-		// ============================================================================
+		// Apply the saved settings. Plugin system and data directory changes
+		// need ordering, which happens here (the lifecycle itself lives in
+		// model/ and mcp/):
+		//   - Plugins disabled, same data dir: stop the plugin system behind
+		//     the shutdown modal and return
+		//   - Data dir changed: switchDataDirectory stops running plugins,
+		//     switches (asking for a passphrase if needed) and starts the new
+		//     directory's plugins
+		//   - Plugins enabled, same data dir: recreate the manager and start
+		//     the session's plugins
+		// Otherwise the settings close and the session list is refreshed.
 
 		// Preserve current state for rollback (capture BEFORE config reload)
 		oldDataDir := a.dataModel.Config.DataDir()
@@ -202,16 +171,12 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		oldPluginsEnabled := a.dataModel.Config.PluginsEnabled
 		currentModel := a.dataModel.Provider.GetModel()
 
-		// Reload config immediately after successful save to pick up fresh values
-		// This was removed during data dir refactor but is needed for ALL settings saves
-		// (not just data dir changes). Fixes regression from commit 094e265.
-		// Keeps the unlocked credential store (no passphrase needed). A data
-		// dir change is loaded properly by switchDataDirectory below.
+		// Reload the saved config, keeping the unlocked credential store (no
+		// passphrase needed). A data dir change is loaded by
+		// switchDataDirectory below.
 		cfg, err := config.Reload(a.dataModel.Config.CredentialStore)
 		if err != nil {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[Settings Save] ERROR reloading config: %v", err)
-			}
+			config.Debugf("[Settings Save] ERROR reloading config: %v", err)
 			a.showAcknowledgeModal = true
 			a.acknowledgeModalTitle = "⚠️  Settings Save Error"
 			a.acknowledgeModalMsg = fmt.Sprintf("Settings were saved to disk but failed to reload:\n\n%v\n\nPlease restart OTUI to ensure changes take effect.", err)
@@ -219,10 +184,8 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[Settings Save] Config reloaded successfully: PluginsEnabled=%v, DefaultSystemPrompt=%q",
-				cfg.PluginsEnabled, cfg.DefaultSystemPrompt)
-		}
+		config.Debugf("[Settings Save] Config reloaded successfully: PluginsEnabled=%v, DefaultSystemPrompt=%q",
+			cfg.PluginsEnabled, cfg.DefaultSystemPrompt)
 
 		a.dataModel.Config = cfg
 
@@ -236,22 +199,13 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		newDataDir := config.ExpandPath(systemCfg.DataDirectory)
 
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[Settings Save] === ENTRY === oldDataDir=%s, newDataDir=%s, oldPlugins=%v",
-				oldDataDir, newDataDir, oldPluginsEnabled)
-		}
+		config.Debugf("[Settings Save] oldDataDir=%s, newDataDir=%s, oldPlugins=%v",
+			oldDataDir, newDataDir, oldPluginsEnabled)
 
-		// STEP 1: Handle plugin shutdown based on scenario
-		// For plugin state changes, we need to check current config since we haven't reloaded yet
-		// (Data dir changes are handled by switchDataDirectory which loads config after switch)
-
-		// SCENARIO B: Just disabling plugins (no data dir change) - show modal and return
-		// Note: We use oldDataDir == newDataDir comparison since config not reloaded yet
+		// Plugins disabled (same data dir): stop them behind the shutdown modal
 		if !a.dataModel.Config.PluginsEnabled && oldPluginsEnabled && oldDataDir == newDataDir {
 			if a.dataModel.MCPManager != nil {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[Settings] Plugin system disabling (no data dir change) - showing shutdown modal")
-				}
+				config.Debugf("[Settings] Plugin system disabling (no data dir change) - showing shutdown modal")
 
 				// Close settings modal
 				a.showSettings = false
@@ -267,9 +221,6 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				a.pluginSystemState.Spinner.Spinner = spinner.Dot
 
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[Settings Save] === EARLY RETURN for plugin shutdown (no data dir change) ===")
-				}
 				return a, tea.Batch(
 					a.pluginSystemState.Spinner.Tick,
 					stopPluginSystemCmd(a.dataModel.MCPManager),
@@ -277,19 +228,15 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// STEP 2: Handle data directory change (if any)
-		// Delegated to switchDataDirectory() helper which orchestrates all 6 steps
-		// Config will be loaded AFTER switch (may prompt for passphrase)
+		// Data dir changed: switchDataDirectory loads the new directory's
+		// config (which may need a passphrase)
 		if newDataDir != oldDataDir {
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[Settings] Data directory changed: %s → %s", oldDataDir, newDataDir)
-			}
+			config.Debugf("[Settings] Data directory changed: %s → %s", oldDataDir, newDataDir)
 
 			// Close settings modal
 			a.showSettings = false
 			a.settingsHasChanges = false
 
-			// Call helper that orchestrates all 6 steps
 			return a, a.switchDataDirectory(newDataDir)
 		}
 
@@ -300,26 +247,19 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.dataModel.SearchIndex = storage.NewSearchIndex(newStorage)
 		}
 
-		// STEP 3: Handle plugin enabling (only if data dir didn't change)
-		// If data dir changed, plugins will start after session loads (see sessionLoadedMsg handler)
-		// Use current config since we haven't reloaded yet (only reload happens during data dir switch)
+		// Plugins enabled (same data dir)
 		newPluginsEnabled := a.dataModel.Config.PluginsEnabled
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[Settings Save] Checking plugin enable: oldPlugins=%v, newPlugins=%v, dataDirSame=%v, condition=%v",
-				oldPluginsEnabled, newPluginsEnabled, newDataDir == oldDataDir, !oldPluginsEnabled && newPluginsEnabled && newDataDir == oldDataDir)
-		}
+		config.Debugf("[Settings Save] Checking plugin enable: oldPlugins=%v, newPlugins=%v, dataDirSame=%v, condition=%v",
+			oldPluginsEnabled, newPluginsEnabled, newDataDir == oldDataDir, !oldPluginsEnabled && newPluginsEnabled && newDataDir == oldDataDir)
 		if !oldPluginsEnabled && newPluginsEnabled && newDataDir == oldDataDir {
-			// ENABLING: Force manager recreation to pick up new config
-			// This fixes stale config after reload (disable → quit → launch → enable)
+			// Recreate the manager so it uses the reloaded config
 			if a.dataModel.MCPManager != nil {
 				a.dataModel.MCPManager = nil
 			}
 
 			// Ensure manager exists, then start plugins
 			if err := a.ensureMCPManager(); err != nil {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[Settings] Plugin system enable FAILED: cannot recreate manager: %v", err)
-				}
+				config.Debugf("[Settings] Plugin system enable failed: cannot recreate manager: %v", err)
 				// Show error modal
 				a.showSettings = false
 				a.settingsHasChanges = false
@@ -330,9 +270,7 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[Settings] Plugin system enabling - showing startup modal")
-			}
+			config.Debugf("[Settings] Plugin system enabling - showing startup modal")
 
 			// Close settings modal
 			a.showSettings = false
@@ -355,9 +293,7 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			)
 		}
 
-		// STEP 4: Handle other config changes (Ollama host, etc.)
-		// Only update provider if HOST changed
-		// Use current config since we're not reloading (only happens during data dir switch)
+		// Ollama host changed: recreate the Ollama provider
 		if a.dataModel.Config.OllamaURL() != oldHost {
 			providerCfg := provider.Config{
 				Type:    provider.ProviderTypeOllama,
@@ -370,13 +306,10 @@ func (a AppView) handleSettingsInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// STEP 5: Close settings and fetch session list
+		// Close settings and refresh the session list
 		a.showSettings = false
 		a.settingsHasChanges = false
 		a.settingsSaveError = ""
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[Settings Save] === NORMAL RETURN === fetching session list")
-		}
 		return a, a.dataModel.FetchSessionList()
 
 	case tea.KeyMsg:
@@ -425,9 +358,7 @@ func (a AppView) handleSettingsNavigationMode(msg tea.KeyMsg) (tea.Model, tea.Cm
 		switch msg.String() {
 		case "y", "Y":
 			// User confirmed - create new data directory via restart
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[Settings] User confirmed new data dir creation: %s", a.settingsNewDataDirPath)
-			}
+			config.Debugf("[Settings] User confirmed new data dir creation: %s", a.settingsNewDataDirPath)
 
 			a.settingsDataDirNotFound = false
 			a.showSettings = false
@@ -447,14 +378,12 @@ func (a AppView) handleSettingsNavigationMode(msg tea.KeyMsg) (tea.Model, tea.Cm
 			// Set restart flag
 			a.RestartAfterQuit = true
 
-			// Trigger quit flow (reuse existing logic)
+			// Trigger quit flow
 			a.dataModel.Quitting = true
 
 			// If plugins running, show shutdown modal
 			if a.dataModel.MCPManager != nil && a.dataModel.Config.PluginsEnabled {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[Settings] New data dir creation: shutting down plugins before restart")
-				}
+				config.Debugf("[Settings] New data dir creation: shutting down plugins before restart")
 				a.pluginSystemState = PluginSystemState{
 					Active:    true,
 					Operation: "stopping",
@@ -470,9 +399,7 @@ func (a AppView) handleSettingsNavigationMode(msg tea.KeyMsg) (tea.Model, tea.Cm
 			}
 
 			// No plugins - quit immediately
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[Settings] New data dir creation: no plugins, quitting immediately")
-			}
+			config.Debugf("[Settings] New data dir creation: no plugins, quitting immediately")
 			if a.dataModel.CurrentSession != nil && a.dataModel.SessionStorage != nil {
 				_ = a.dataModel.SessionStorage.UnlockSession(a.dataModel.CurrentSession.ID)
 			}
@@ -480,9 +407,7 @@ func (a AppView) handleSettingsNavigationMode(msg tea.KeyMsg) (tea.Model, tea.Cm
 
 		case "n", "N", "esc":
 			// User cancelled - return to Settings
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[Settings] User cancelled new data dir creation")
-			}
+			config.Debugf("[Settings] User cancelled new data dir creation")
 			a.settingsDataDirNotFound = false
 			return a, nil
 		}
@@ -549,21 +474,17 @@ func (a AppView) handleSettingsNavigationMode(msg tea.KeyMsg) (tea.Model, tea.Cm
 			// Load ALL providers' fields into cache (not just current tab)
 			a.providerSettingsState.currentFieldsMap = make(map[string][]ProviderField)
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[CacheInit] ========== INITIALIZING PROVIDER CACHE ==========")
-			}
-
 			for _, providerID := range providerTabs {
 				a.providerSettingsState.currentFieldsMap[providerID] = a.providerSettingsState.getProviderFields(
 					providerID,
 					a.dataModel.Config,
 				)
 
-				if config.DebugLog != nil {
+				if config.DebugEnabled() {
 					fields := a.providerSettingsState.currentFieldsMap[providerID]
-					config.DebugLog.Printf("[CacheInit] Provider: %s (%d fields)", providerID, len(fields))
+					config.Debugf("[CacheInit] Provider: %s (%d fields)", providerID, len(fields))
 					for i, f := range fields {
-						config.DebugLog.Printf("[CacheInit]   Field[%d]: %s = '%s'", i, f.Label, config.Redact(f.Label, f.Value))
+						config.Debugf("[CacheInit]   Field[%d]: %s = '%s'", i, f.Label, config.Redact(f.Label, f.Value))
 					}
 				}
 			}
@@ -573,9 +494,7 @@ func (a AppView) handleSettingsNavigationMode(msg tea.KeyMsg) (tea.Model, tea.Cm
 
 		// Check if this is the model field - open model selector instead
 		if a.settingsFields[a.selectedSettingIdx].Type == SettingTypeModel {
-			// Get Ollama host from config (no longer in settings fields)
-			ollamaHost := a.dataModel.Config.OllamaHost
-			return a, a.fetchModelListFromHost(ollamaHost)
+			return a, a.fetchModelListFromHost(a.dataModel.Config.OllamaHost)
 		}
 
 		// Check if this is a boolean toggle field
@@ -887,9 +806,7 @@ func (a AppView) saveSettingsCmd() tea.Cmd {
 		// Check if data directory exists
 		if !fileExists(dataDir) {
 			// Directory doesn't exist - prompt user to create new data directory
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[Settings] Data directory doesn't exist: %s", dataDir)
-			}
+			config.Debugf("[Settings] Data directory doesn't exist: %s", dataDir)
 			return dataDirectoryNotFoundMsg{path: dataDir}
 		}
 

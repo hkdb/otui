@@ -50,17 +50,13 @@ func (a AppView) removeCompactingMessage() AppView {
 
 // handleCompactionComplete handles compaction completion
 func (a AppView) handleCompactionComplete(msg appmodel.CompactionCompleteMsg) (AppView, tea.Cmd) {
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[ui] handleCompactionComplete: success=%v", msg.Success)
-	}
+	config.Debugf("[ui] handleCompactionComplete: success=%v", msg.Success)
 
 	// Store the result on the session (in Update, not in the Cmd goroutine)
 	err := a.dataModel.ApplyCompaction(msg)
 	if errors.Is(err, appmodel.ErrStaleCompaction) {
 		// Session switched or compacted further while the summary was generated
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[ui] Ignoring stale compaction result (session=%s marker=%d)", msg.SessionID, msg.Marker)
-		}
+		config.Debugf("[ui] Ignoring stale compaction result (session=%s marker=%d)", msg.SessionID, msg.Marker)
 		a = a.removeCompactingMessage()
 		a.updateViewportContent(!a.userScrolledUp)
 		return a, nil
@@ -97,16 +93,14 @@ func (a AppView) handleCompactionComplete(msg appmodel.CompactionCompleteMsg) (A
 
 	// Insert marker message - this stays permanently in history
 	a.dataModel.Messages = append(a.dataModel.Messages, appmodel.Message{
-		Role:      "system",
-		Content:   markerMsg,
-		Rendered:  markerMsg,
-		Timestamp: time.Now(),
+		Role:       "system",
+		Content:    markerMsg,
+		Rendered:   markerMsg,
+		Timestamp:  time.Now(),
 		Persistent: true, // Mark as persistent so it gets saved
 	})
 
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[ui] Session compacted successfully: %s", msg.Summary)
-	}
+	config.Debugf("[ui] Session compacted successfully: %s", msg.Summary)
 
 	// Add LLM summary as persistent system message for display
 	// (Actual LLM context injection happens via system prompt in SendToOllama)
@@ -137,9 +131,7 @@ func (a AppView) handleCompactionComplete(msg appmodel.CompactionCompleteMsg) (A
 
 // handleCompactionRequest shows inline approval message (like tool permissions)
 func (a AppView) handleCompactionRequest(msg appmodel.CompactionRequestMsg) (AppView, tea.Cmd) {
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[ui] Compaction request: marker=%d, messages=%d", msg.MarkerIndex, msg.MessageCount)
-	}
+	config.Debugf("[ui] Compaction request: marker=%d, messages=%d", msg.MarkerIndex, msg.MessageCount)
 
 	// Build the approval message content
 	percentage := float64(msg.CurrentTokens) / float64(msg.ContextWindow) * 100
@@ -189,9 +181,7 @@ func (a AppView) handleCompactionRequest(msg appmodel.CompactionRequestMsg) (App
 
 // handleCompactionResponse processes user's Y/N response
 func (a AppView) handleCompactionResponse(msg appmodel.CompactionResponseMsg) (AppView, tea.Cmd) {
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[ui] Compaction response: approved=%v", msg.Approved)
-	}
+	config.Debugf("[ui] Compaction response: approved=%v", msg.Approved)
 
 	// Remove approval message from chat
 	a = a.removeLastSystemMessage()
@@ -202,9 +192,7 @@ func (a AppView) handleCompactionResponse(msg appmodel.CompactionResponseMsg) (A
 
 	// If denied, just return
 	if !msg.Approved {
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[ui] Compaction cancelled by user")
-		}
+		config.Debugf("[ui] Compaction cancelled by user")
 		a.updateViewportContent(false)
 		return a, nil
 	}
@@ -225,12 +213,9 @@ func (a AppView) handleCompactionResponse(msg appmodel.CompactionResponseMsg) (A
 
 // handleTokenUsageUpdated handles token usage updates
 func (a AppView) handleTokenUsageUpdated(msg appmodel.TokenUsageUpdatedMsg) (AppView, tea.Cmd) {
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[ui] Token usage updated: %d active / %d total tokens",
-			msg.Usage.ActiveTokens, msg.Usage.TotalTokens)
-	}
+	config.Debugf("[ui] Token usage updated: %d active / %d total tokens",
+		msg.Usage.ActiveTokens, msg.Usage.TotalTokens)
 
 	// Token usage is already in session - just trigger a re-render
 	return a, nil
 }
-

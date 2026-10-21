@@ -72,12 +72,12 @@ func (a *AppView) updateViewportContent(gotoBottom bool) {
 			renderedContent = fmt.Sprintf("%s %s", a.loadingSpinner.View(), msg.Content)
 		}
 
-		// Special handling for step message spinner (Phase 2)
+		// Special handling for step message spinner
 		if msg.Role == "system" && strings.HasPrefix(msg.Content, "🔧 ") && strings.HasSuffix(msg.Content, "...") {
 			renderedContent = fmt.Sprintf("%s %s", msg.Content, a.loadingSpinner.View())
 		}
 
-		// Special handling for "Analyzing results..." spinner (Phase 2)
+		// Special handling for "Analyzing results..." spinner
 		if msg.Role == "system" && msg.Content == "Analyzing results..." {
 			renderedContent = fmt.Sprintf("%s %s", a.loadingSpinner.View(), msg.Content)
 		}
@@ -258,9 +258,7 @@ func stripCodeBlockPrefix(line string) string {
 func (a AppView) renderMarkdownAsync(messageIndex int, content string) tea.Cmd {
 	generation := a.sessionGeneration
 	return func() tea.Msg {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Starting async markdown render for message %d - length: %d chars", messageIndex, len(content))
-		}
+		config.Debugf("Starting async markdown render for message %d - length: %d chars", messageIndex, len(content))
 		startTime := time.Now()
 
 		// Preprocess: strip markdown link syntax [text](url) → url
@@ -281,9 +279,7 @@ func (a AppView) renderMarkdownAsync(messageIndex int, content string) tea.Cmd {
 		processed := postProcessMarkdown(string(rendered), a.width)
 
 		elapsed := time.Since(startTime)
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Markdown rendered and post-processed in %v", elapsed)
-		}
+		config.Debugf("Markdown rendered and post-processed in %v", elapsed)
 
 		return markdownRenderedMsg{
 			MessageIndex:      messageIndex,
@@ -434,7 +430,7 @@ func formatPermissionMessage(timestamp, content string) string {
 	return result.String()
 }
 
-// buildIterationSummary formats multi-step summary (Phase 2)
+// buildIterationSummary formats multi-step summary
 func buildIterationSummary(summary IterationSummaryMsg) string {
 	var b strings.Builder
 

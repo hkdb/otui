@@ -115,7 +115,7 @@ func (m *Model) SendToOllama() tea.Cmd {
 	// Capture necessary state
 	currentSession := m.CurrentSession
 
-	// Get provider from session (Phase 1.6: multi-provider support)
+	// Get provider from session
 	sessionProvider := "ollama"
 	if currentSession != nil && currentSession.Provider != "" {
 		sessionProvider = currentSession.Provider
@@ -126,9 +126,7 @@ func (m *Model) SendToOllama() tea.Cmd {
 	if !ok {
 		// Fallback to m.Provider if session provider not found
 		client = m.Provider
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[Model] WARNING: Session provider '%s' not found, using fallback", sessionProvider)
-		}
+		config.Debugf("[Model] WARNING: Session provider '%s' not found, using fallback", sessionProvider)
 	}
 
 	// Ensure model is set on provider (session.Model contains InternalName)
@@ -165,29 +163,23 @@ func (m *Model) SendToOllama() tea.Cmd {
 			Content: "I have the context from our earlier conversation and will use it to inform my responses.",
 		}
 		uiMessages = append([]Message{contextMsg, ackMsg}, uiMessages...)
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[Model] Injected compaction context as user/assistant exchange (summary length: %d)", len(m.CurrentSession.LLMSummary))
-		}
+		config.Debugf("[Model] Injected compaction context as user/assistant exchange (summary length: %d)", len(m.CurrentSession.LLMSummary))
 	}
 
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[Model] Sending %d messages to provider (compaction marker at %d, total messages: %d)",
-			len(uiMessages), compactionMarker, len(m.Messages))
-	}
+	config.Debugf("[Model] Sending %d messages to provider (compaction marker at %d, total messages: %d)",
+		len(uiMessages), compactionMarker, len(m.Messages))
 
 	// A new user message starts a new request (cancelling any previous one)
 	reqCtx, reqID := m.beginRequest()
 
-	// Reset iteration state for new user message (Phase 2)
+	// Reset iteration state for new user message
 	m.ResetIterations()
 	timeouts := m.streamTimeouts()
 
 	return func() tea.Msg {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("sendToOllama goroutine started")
-		}
+		config.Debugf("sendToOllama goroutine started")
 
-		// Get enabled plugins and their tools (Phase 6)
+		// Get enabled plugins and their tools
 		var mcpTools []mcptypes.Tool
 		if mcpManager != nil && currentSession != nil {
 			// Get tools from all enabled plugins in current session
@@ -196,27 +188,25 @@ func (m *Model) SendToOllama() tea.Cmd {
 			mcpTools, err = mcpManager.GetTools(ctx)
 			cancel()
 			if err == nil && len(mcpTools) > 0 {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("Loaded %d tools for current session", len(mcpTools))
+				if config.DebugEnabled() {
+					config.Debugf("Loaded %d tools for current session", len(mcpTools))
 					for i, tool := range mcpTools {
-						config.DebugLog.Printf("  Tool %d: %s - %s", i+1, tool.Name, tool.Description)
+						config.Debugf("  Tool %d: %s - %s", i+1, tool.Name, tool.Description)
 					}
 				}
 			} else {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("WARNING: No tools loaded! mcpManager=%v, currentSession=%v, err=%v, toolCount=%d",
-						mcpManager != nil, currentSession != nil, err, len(mcpTools))
-				}
+				config.Debugf("WARNING: No tools loaded! mcpManager=%v, currentSession=%v, err=%v, toolCount=%d",
+					mcpManager != nil, currentSession != nil, err, len(mcpTools))
 			}
 		}
 
 		// Build API messages with minimal tool instructions (universal approach for all model sizes)
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[Model] buildAPIMessages: uiMessages=%d, systemPrompt length=%d, tools=%d",
+		if config.DebugEnabled() {
+			config.Debugf("[Model] buildAPIMessages: uiMessages=%d, systemPrompt length=%d, tools=%d",
 				len(uiMessages), len(systemPrompt), len(mcpTools))
 			for i, msg := range uiMessages {
 				preview := truncateRunes(msg.Content, 80)
-				config.DebugLog.Printf("[Model]   uiMessage[%d]: role=%s content=%q", i, msg.Role, preview)
+				config.Debugf("[Model]   uiMessage[%d]: role=%s content=%q", i, msg.Role, preview)
 			}
 		}
 		messages := buildAPIMessages(uiMessages, systemPrompt, mcpTools)
@@ -229,21 +219,15 @@ func (m *Model) SendToOllama() tea.Cmd {
 			func(response string, toolCalls []ToolCall, err error) tea.Msg {
 				elapsed := time.Since(startTime)
 				if err != nil {
-					if config.DebugLog != nil {
-						config.DebugLog.Printf("Ollama error after %v: %v", elapsed, err)
-					}
+					config.Debugf("Ollama error after %v: %v", elapsed, err)
 					return StreamErrorMsg{Err: err, RequestID: reqID}
 				}
 
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("Ollama response received after %v - %d chars", elapsed, len(response))
-				}
+				config.Debugf("Ollama response received after %v - %d chars", elapsed, len(response))
 
 				// If tool calls detected, return special message to trigger execution
 				if len(toolCalls) > 0 {
-					if config.DebugLog != nil {
-						config.DebugLog.Printf("Tool calls detected: %d", len(toolCalls))
-					}
+					config.Debugf("Tool calls detected: %d", len(toolCalls))
 					return ToolCallsDetectedMsg{
 						ToolCalls:       ensureToolCallIDs(toolCalls),
 						InitialResponse: response,
@@ -358,7 +342,7 @@ func (m *Model) buildPurposeFromArgs(args map[string]interface{}) string {
 
 // ExtractPurpose parses the LLM's reasoning from context messages to understand why it wants to use this tool
 func (m *Model) ExtractPurpose(contextMessages []Message, toolCall *ToolCall) string {
-	// No tool call - extract from last assistant message (Phase 2: non-tool steps)
+	// No tool call - extract from last assistant message (non-tool steps)
 	if toolCall == nil {
 		if len(contextMessages) > 0 {
 			lastMsg := contextMessages[len(contextMessages)-1]
@@ -454,7 +438,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 		return nil // Cancelled
 	}
 
-	// Check permissions BEFORE incrementing iteration (Phase 1: Permission System)
+	// Check permissions BEFORE incrementing iteration
 	// Only check if RequireApproval is enabled
 	if m.Config.RequireApproval {
 		for _, toolCall := range msg.ToolCalls {
@@ -465,9 +449,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 
 			// Tool not allowed - request permission (don't increment iteration yet)
 			purpose := m.ExtractPurpose(withResponse(msg.ContextMessages, msg.InitialResponse), &toolCall)
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Permission required for tool: %s (purpose: %s)", toolCall.Name, purpose)
-			}
+			config.Debugf("Permission required for tool: %s (purpose: %s)", toolCall.Name, purpose)
 
 			// Carry the whole batch so approving this tool re-runs
 			// all calls (asking about any other unapproved ones next)
@@ -484,14 +466,12 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 		}
 	}
 
-	// Increment iteration AFTER permission check passes (Phase 2)
+	// Increment iteration AFTER permission check passes
 	m.CurrentIteration++
 	iteration := m.CurrentIteration
 	maxReached := iteration >= m.MaxIterations
 
-	if config.DebugLog != nil {
-		config.DebugLog.Printf("Starting iteration %d", iteration)
-	}
+	config.Debugf("Starting iteration %d", iteration)
 
 	// Everything the Cmd needs, captured now (the Cmd must not read m)
 	mcpManager := m.MCPManager
@@ -505,16 +485,14 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 	timeouts := m.streamTimeouts()
 
 	return func() tea.Msg {
-		// Track step start time (Phase 2)
+		// Track step start time
 		stepStartTime := time.Now()
 
 		// Tools get 120s; the model's response streams without a total limit
 		ctx, cancel := context.WithTimeout(reqCtx, 120*time.Second)
 		defer cancel()
 
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Executing %d tool calls", len(msg.ToolCalls))
-		}
+		config.Debugf("Executing %d tool calls", len(msg.ToolCalls))
 
 		// Execute each tool call and collect results (one per call, in order)
 		results := make([]string, len(msg.ToolCalls))
@@ -525,9 +503,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 				return ToolExecutionErrorMsg{Err: err, RequestID: reqID}
 			}
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Executing tool call %d: %s", i+1, toolCall.Name)
-			}
+			config.Debugf("Executing tool call %d: %s", i+1, toolCall.Name)
 
 			// ToolCall is already in provider-agnostic format (model.ToolCall)
 			// Extract name and arguments directly
@@ -537,9 +513,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 			// Execute tool via MCP manager
 			result, err := mcpManager.ExecuteTool(ctx, toolName, args)
 			if err != nil {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("Error executing tool %s: %v", toolName, err)
-				}
+				config.Debugf("Error executing tool %s: %v", toolName, err)
 				results[i] = fmt.Sprintf("Error executing %s: %v", toolName, err)
 				continue
 			}
@@ -559,9 +533,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 				resultContent = "Tool executed successfully (no output)"
 			}
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Tool %s result: %d chars", toolName, len(resultContent))
-			}
+			config.Debugf("Tool %s result: %d chars", toolName, len(resultContent))
 
 			results[i] = resultContent
 		}
@@ -570,7 +542,7 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 		// tool calls, then one result per call tied to the call's ID
 		fullMessages := buildToolStepMessages(msg.ContextMessages, msg.InitialResponse, msg.ToolCalls, results)
 
-		// Record step (Phase 2: ALL steps, not just tool executions).
+		// Record step (all steps, not just tool executions).
 		// Update adds it to IterationHistory (ApplyToolStep).
 		var step *IterationStep
 		if enableMultiStep {
@@ -597,10 +569,8 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 				step.ShortName = strings.Join(shortNames, ", ")
 			}
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Recorded step %d: %s (%.1fs)",
-					step.StepNumber, step.Purpose, step.Duration.Seconds())
-			}
+			config.Debugf("Recorded step %d: %s (%.1fs)",
+				step.StepNumber, step.Purpose, step.Duration.Seconds())
 		}
 
 		// Get tools for next iteration
@@ -614,36 +584,30 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 			}
 		}
 
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Sending %d messages back to LLM (including %d tool results)", len(fullMessages), len(results))
-		}
+		config.Debugf("Sending %d messages back to LLM (including %d tool results)", len(fullMessages), len(results))
 
 		// Send back to LLM, streaming the response; the step ends with
 		// ToolExecutionCompleteMsg
 		stream := startChatStream(reqCtx, reqID, client, fullMessages, nextTools, timeouts,
 			func(finalResponse string, detectedToolCalls []ToolCall, err error) tea.Msg {
 				if err != nil {
-					if config.DebugLog != nil {
-						config.DebugLog.Printf("Error getting response after tools: %v", err)
-					}
+					config.Debugf("Error getting response after tools: %v", err)
 					return ToolExecutionErrorMsg{Err: err, RequestID: reqID}
 				}
 
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("Post-tool response: %d chars, hasToolCalls=%v",
+				if config.DebugEnabled() {
+					config.Debugf("Post-tool response: %d chars, hasToolCalls=%v",
 						len(finalResponse), len(detectedToolCalls) > 0)
 					if len(finalResponse) > 0 {
-						config.DebugLog.Printf("Post-tool response content (first 200): %s", truncateRunes(finalResponse, 200))
+						config.Debugf("Post-tool response content (first 200): %s", truncateRunes(finalResponse, 200))
 					}
 				}
 
 				// Clean leaked tool calls from response (for both context and display)
 				// This prevents leaked JSON/XML from polluting LLM context and user display
 				if cleaned := cleanLeakedToolCalls(finalResponse); cleaned != finalResponse {
-					if config.DebugLog != nil {
-						config.DebugLog.Printf("Cleaned leaked tool calls from response: %d -> %d chars",
-							len(finalResponse), len(cleaned))
-					}
+					config.Debugf("Cleaned leaked tool calls from response: %d -> %d chars",
+						len(finalResponse), len(cleaned))
 					finalResponse = cleaned
 				}
 
@@ -657,17 +621,15 @@ func (m *Model) ExecuteToolsAndContinue(msg ToolCallsDetectedMsg) tea.Cmd {
 				// Complete (no more tool calls) or max iterations reached: Update
 				// builds the summary (ApplyToolStep)
 				if len(detectedToolCalls) == 0 || maxReached {
-					if maxReached && len(detectedToolCalls) > 0 && config.DebugLog != nil {
-						config.DebugLog.Printf("Max iterations (%d) reached", iteration)
+					if maxReached && len(detectedToolCalls) > 0 {
+						config.Debugf("Max iterations (%d) reached", iteration)
 					}
 					return result
 				}
 
 				// Continue iteration
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("Next iteration will be %d: %d tool calls detected",
-						iteration+1, len(detectedToolCalls))
-				}
+				config.Debugf("Next iteration will be %d: %d tool calls detected",
+					iteration+1, len(detectedToolCalls))
 
 				// Context for the next step. The LLM's current response becomes the
 				// next step's assistant turn together with its tool calls (not a
@@ -700,9 +662,7 @@ func (m *Model) ApplyToolStep(msg *ToolExecutionCompleteMsg) {
 			TotalSteps: len(m.IterationHistory),
 			MaxReached: msg.MaxReached,
 		}
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Multi-step complete: %d steps (max reached: %v)", len(m.IterationHistory), msg.MaxReached)
-		}
+		config.Debugf("Multi-step complete: %d steps (max reached: %v)", len(m.IterationHistory), msg.MaxReached)
 	}
 	m.ResetIterations()
 }

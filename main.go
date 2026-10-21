@@ -230,8 +230,8 @@ func main() {
 
 	// Ensure cleanup on exit
 	defer func() {
-		if err := config.CleanupTempDir(); err != nil && config.DebugLog != nil {
-			config.DebugLog.Printf("Warning: failed to cleanup temp directory on exit: %v", err)
+		if err := config.CleanupTempDir(); err != nil {
+			config.Debugf("Warning: failed to cleanup temp directory on exit: %v", err)
 		}
 	}()
 
@@ -305,8 +305,8 @@ func main() {
 
 	// Ensure cleanup on exit - uses appView method to unlock CURRENT data directory
 	defer func() {
-		if err := appView.UnlockCurrentDataDir(); err != nil && config.DebugLog != nil {
-			config.DebugLog.Printf("Warning: failed to unlock OTUI instance: %v", err)
+		if err := appView.UnlockCurrentDataDir(); err != nil {
+			config.Debugf("Warning: failed to unlock OTUI instance: %v", err)
 		}
 	}()
 
@@ -333,9 +333,7 @@ func main() {
 
 	// Check if we should restart OTUI (for creating new data directories)
 	if appView, ok := finalModel.(ui.AppView); ok && appView.RestartAfterQuit {
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[main] RestartAfterQuit flag detected - restarting OTUI")
-		}
+		config.Debugf("[main] RestartAfterQuit flag detected - restarting OTUI")
 
 		binary, err := os.Executable()
 		if err != nil {

@@ -106,9 +106,7 @@ func ParseLeakedJSONToolCalls(content string) []model.ToolCall {
 					Arguments: args,
 				}
 			}
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[Provider] Parsed %d leaked JSON tool calls from content", len(result))
-			}
+			config.Debugf("[Provider] Parsed %d leaked JSON tool calls from content", len(result))
 			return result
 		}
 	}
@@ -135,9 +133,7 @@ func ParseLeakedJSONToolCalls(content string) []model.ToolCall {
 			if args == nil {
 				args = call.Input
 			}
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("[Provider] Parsed 1 leaked JSON tool call from content: %s", call.Name)
-			}
+			config.Debugf("[Provider] Parsed 1 leaked JSON tool call from content: %s", call.Name)
 			return []model.ToolCall{{
 				Name:      call.Name,
 				Arguments: args,
@@ -202,68 +198,10 @@ func ParseLeakedXMLToolCalls(content string) []model.ToolCall {
 		}
 	}
 
-	if len(result) > 0 && config.DebugLog != nil {
-		config.DebugLog.Printf("[Provider] Parsed %d leaked XML tool calls from content", len(result))
+	if len(result) > 0 {
+		config.Debugf("[Provider] Parsed %d leaked XML tool calls from content", len(result))
 	}
 
-	return result
-}
-
-// CleanLeakedToolCalls removes leaked JSON/XML tool calls from content.
-// Returns cleaned content suitable for display to the user.
-func CleanLeakedToolCalls(content string) string {
-	// Remove JSON array tool calls (with argument variations)
-	jsonArrayRegex := regexp.MustCompile(`\[\s*\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"(?:arguments|param|parameters|input)"\s*:\s*\{[^}]*\}\s*\}\s*\]`)
-	content = jsonArrayRegex.ReplaceAllString(content, "")
-
-	// Remove single JSON object tool calls (with argument variations)
-	jsonObjRegex := regexp.MustCompile(`\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"(?:arguments|param|parameters|input)"\s*:\s*\{[^}]*\}\s*\}`)
-	content = jsonObjRegex.ReplaceAllString(content, "")
-
-	// Remove XML tool calls
-	xmlRegex := regexp.MustCompile(`<(?:tool_call|function_call)>\s*<name>[^<]+</name>\s*<arguments>[^<]*</arguments>\s*</(?:tool_call|function_call)>`)
-	content = xmlRegex.ReplaceAllString(content, "")
-
-	// Remove qwen3-coder style XML tool calls (with multiline support)
-	// Pattern: <function=TOOL_NAME><parameter=PARAM_NAME>VALUE</parameter></function>
-	// (?s) enables dot to match newlines
-	qwenXmlRegex := regexp.MustCompile(`(?s)<function=[^>]+><parameter=[^>]+>.*?</parameter></function>(?:</tool_call>)?`)
-	content = qwenXmlRegex.ReplaceAllString(content, "")
-
-	// Remove system-reminder tags that may leak into content
-	sysReminderRegex := regexp.MustCompile(`(?s)<system-reminder>.*?</system-reminder>`)
-	content = sysReminderRegex.ReplaceAllString(content, "")
-
-	// Clean up extra whitespace
-	content = strings.TrimSpace(content)
-
-	return content
-}
-
-// ConvertFromOllamaMessages converts Ollama api.Message to OTUI model.Message.
-//
-// This conversion is used when receiving messages from the Ollama API. It creates
-// OTUI messages with Role and Content fields populated from the Ollama message.
-//
-// Note: The Timestamp field is not set (will be zero value) because Ollama API
-// messages don't include timestamp information. The Rendered field is also not set
-// and should be populated by the UI layer when needed.
-//
-// Example:
-//
-//	ollamaMessages := []api.Message{
-//	    {Role: "assistant", Content: "Response text"},
-//	}
-//	otuiMessages := ConvertFromOllamaMessages(ollamaMessages)
-//	// otuiMessages[0].Timestamp will be zero, set it manually if needed
-func ConvertFromOllamaMessages(messages []api.Message) []model.Message {
-	result := make([]model.Message, len(messages))
-	for i, msg := range messages {
-		result[i] = model.Message{
-			Role:    msg.Role,
-			Content: msg.Content,
-		}
-	}
 	return result
 }
 
@@ -297,38 +235,6 @@ func ConvertToProviderToolCalls(ollamaCalls []api.ToolCall) []model.ToolCall {
 		result[i] = model.ToolCall{
 			Name:      call.Function.Name,
 			Arguments: call.Function.Arguments,
-		}
-	}
-	return result
-}
-
-// ConvertFromProviderToolCalls converts provider-agnostic model.ToolCall to Ollama api.ToolCall.
-//
-// This conversion is primarily used for testing and mocking purposes, allowing tests
-// to create provider-agnostic tool calls and convert them to Ollama format for
-// validation.
-//
-// Returns nil if the input is nil or empty, maintaining the same nil semantics.
-//
-// Example:
-//
-//	providerCalls := []model.ToolCall{
-//	    {Name: "search", Arguments: map[string]any{"query": "golang"}},
-//	}
-//	ollamaCalls := ConvertFromProviderToolCalls(providerCalls)
-//	// ollamaCalls[0].Function.Name == "search"
-func ConvertFromProviderToolCalls(providerCalls []model.ToolCall) []api.ToolCall {
-	if len(providerCalls) == 0 {
-		return nil
-	}
-
-	result := make([]api.ToolCall, len(providerCalls))
-	for i, call := range providerCalls {
-		result[i] = api.ToolCall{
-			Function: api.ToolCallFunction{
-				Name:      call.Name,
-				Arguments: call.Arguments,
-			},
 		}
 	}
 	return result

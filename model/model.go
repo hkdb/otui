@@ -36,7 +36,7 @@ type Model struct {
 	NeedsInitialRender bool
 	Quitting           bool
 
-	// Multi-step iteration state (Phase 2)
+	// Multi-step iteration state
 	CurrentIteration int             // Current step number (0 = no iteration)
 	MaxIterations    int             // Max steps from config
 	IterationHistory []IterationStep // ALL steps (including non-tool steps)
@@ -88,7 +88,7 @@ func NewModel(cfg *config.Config, providerClient Provider, sessionStorage *stora
 		needsRender = len(messages) > 0
 	}
 
-	// Initialize multi-step config (Phase 2)
+	// Initialize multi-step config
 	maxIter := cfg.MaxIterations
 	if maxIter == 0 {
 		maxIter = 10 // Default
@@ -122,10 +122,8 @@ func NewModel(cfg *config.Config, providerClient Provider, sessionStorage *stora
 	// Safe to call even if plugins disabled - GetTools() has guards
 	if mcpManager != nil && lastSession != nil {
 		_ = mcpManager.SetSession(lastSession)
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[Model] NewModel: Synced session '%s' with MCP Manager (EnabledPlugins: %v)",
-				lastSession.Name, lastSession.EnabledPlugins)
-		}
+		config.Debugf("[Model] NewModel: Synced session '%s' with MCP Manager (EnabledPlugins: %v)",
+			lastSession.Name, lastSession.EnabledPlugins)
 	}
 
 	return m

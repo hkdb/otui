@@ -98,8 +98,8 @@ func (a AppView) handlePassphraseForDataDir(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Step 4: Re-create MCP manager if plugins enabled
 			if a.dataModel.Config.PluginsEnabled {
-				if err := a.ensureMCPManager(); err != nil && config.DebugLog != nil {
-					config.DebugLog.Printf("[UI] Failed to recreate MCP manager: %v", err)
+				if err := a.ensureMCPManager(); err != nil {
+					config.Debugf("[UI] Failed to recreate MCP manager: %v", err)
 				}
 			}
 
@@ -251,9 +251,7 @@ func (a AppView) handleSessionImportMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if info, err := os.Stat(a.sessionImportPicker.Picker.Path); err == nil && !info.IsDir() {
 			path := a.sessionImportPicker.Picker.Path
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("FILE SELECTED: %s", path)
-			}
+			config.Debugf("[Import] File selected: %s", path)
 
 			// Create cancellation context
 			ctx, cancel := context.WithCancel(context.Background())
@@ -263,9 +261,7 @@ func (a AppView) handleSessionImportMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Start import
 			a.sessionImportPicker.Processing = true
 
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("SET Processing = true, Active = %v", a.sessionImportPicker.Active)
-			}
+			config.Debugf("SET Processing = true, Active = %v", a.sessionImportPicker.Active)
 
 			return a, tea.Batch(
 				a.dataModel.ImportSessionCmd(ctx, path),

@@ -99,9 +99,7 @@ func (a AppView) handleSessionLockedModalUpdate(msg tea.KeyMsg) (AppView, tea.Cm
 		sessionID := a.lockedSessionID
 		a.clearSessionLocked()
 
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("[Session Lock] Force deleting lock and loading session %s", sessionID)
-		}
+		config.Debugf("[Session Lock] Force deleting lock and loading session %s", sessionID)
 
 		// Don't leave behind the empty "New Session" that was created on
 		// startup in place of the locked session
@@ -123,9 +121,7 @@ func (a AppView) handleSessionLockedModalUpdate(msg tea.KeyMsg) (AppView, tea.Cm
 		if a.dataModel.CurrentSession == nil {
 			newSession, err := a.dataModel.CreateAndSaveNewSession("New Session", "", []string{})
 			if err != nil {
-				if config.DebugLog != nil {
-					config.DebugLog.Printf("[Session Lock] Failed to create new session: %v", err)
-				}
+				config.Debugf("[Session Lock] Failed to create new session: %v", err)
 				return a, nil
 			}
 			a.dataModel.Messages = []Message{}

@@ -14,9 +14,7 @@ import (
 func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 	switch msg := msg.(type) {
 	case toolCallsDetectedMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Tool calls detected: %d calls", len(msg.ToolCalls))
-		}
+		config.Debugf("Tool calls detected: %d calls", len(msg.ToolCalls))
 
 		// Tool calls of a cancelled request must not run
 		if a.staleRequest(msg.RequestID) {
@@ -69,9 +67,7 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		return a, appmodel.WaitForStream(msg.Stream)
 
 	case toolExecutionCompleteMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Tool step complete - response %d chars, more steps: %v", len(msg.FullResponse), msg.HasMoreSteps)
-		}
+		config.Debugf("Tool step complete - response %d chars, more steps: %v", len(msg.FullResponse), msg.HasMoreSteps)
 
 		// Cancelled (Esc already reset the tool state)
 		if a.staleRequest(msg.RequestID) || !a.dataModel.Streaming {
@@ -123,9 +119,7 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		return next, tea.Batch(append(cmds, nextCmd)...)
 
 	case toolExecutionErrorMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Tool execution error: %v", msg.Err)
-		}
+		config.Debugf("Tool execution error: %v", msg.Err)
 
 		if a.staleRequest(msg.RequestID) {
 			return a, nil
@@ -158,9 +152,7 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		return a, nil
 
 	case toolPermissionRequestMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Permission request for tool: %s", msg.ToolName)
-		}
+		config.Debugf("Permission request for tool: %s", msg.ToolName)
 
 		if a.staleRequest(msg.RequestID) {
 			return a, nil
@@ -189,9 +181,7 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 		return a, nil
 
 	case toolPermissionResponseMsg:
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Permission response - Approved: %v, AlwaysAllow: %v", msg.Approved, msg.AlwaysAllow)
-		}
+		config.Debugf("Permission response - Approved: %v, AlwaysAllow: %v", msg.Approved, msg.AlwaysAllow)
 
 		if a.staleRequest(msg.RequestID) {
 			return a, nil
@@ -243,20 +233,16 @@ func (a AppView) handleToolMessage(msg tea.Msg) (AppView, tea.Cmd) {
 
 		// Handle persistence based on AlwaysAllow flag
 		if msg.AlwaysAllow {
-			// ALWAYS ALLOW: Mark session dirty for disk persistence
+			// Always allow: mark the session dirty so the allowed tool is saved
 			a.dataModel.SessionDirty = true
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Added %s to session allowed tools (PERSISTENT)", msg.ToolName)
-			}
+			config.Debugf("Added %s to session allowed tools (saved)", msg.ToolName)
 		}
 
 		// NOT AlwaysAllow: Track for removal after execution
 		if !msg.AlwaysAllow {
 			a.temporarilyAllowedTools = append(a.temporarilyAllowedTools, msg.ToolName)
 			// DON'T mark session dirty (no disk persistence)
-			if config.DebugLog != nil {
-				config.DebugLog.Printf("Added %s to session allowed tools (TEMPORARY)", msg.ToolName)
-			}
+			config.Debugf("Added %s to session allowed tools (TEMPORARY)", msg.ToolName)
 		}
 
 		// Re-trigger execution of the whole batch with the approved tool now
@@ -322,9 +308,7 @@ func (a AppView) cleanupTemporaryTools() AppView {
 		}
 		a.dataModel.CurrentSession.AllowedTools = filtered
 
-		if config.DebugLog != nil {
-			config.DebugLog.Printf("Removed temporary tool from allowed list: %s", tempTool)
-		}
+		config.Debugf("Removed temporary tool from allowed list: %s", tempTool)
 	}
 
 	// Clear temporary list

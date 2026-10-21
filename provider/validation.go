@@ -53,9 +53,7 @@ func PingProvider(providerID, baseURL, apiKey string) tea.Cmd {
 			}
 		}
 
-		if config.Debug {
-			config.DebugLog.Printf("[Provider] Provider %s ping successful", providerID)
-		}
+		config.Debugf("[Provider] Provider %s ping successful", providerID)
 
 		return PingProviderMsg{
 			ProviderID: providerID,
@@ -129,9 +127,7 @@ func FetchSingleProviderModels(providerID, baseURL, apiKey, ollamaURL string) te
 			models = fetchedModels
 		}
 
-		if config.Debug {
-			config.DebugLog.Printf("[Provider] Fetched %d models from provider %s", len(models), providerID)
-		}
+		config.Debugf("[Provider] Fetched %d models from provider %s", len(models), providerID)
 
 		return SingleProviderModelsMsg{
 			ProviderID: providerID,

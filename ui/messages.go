@@ -37,7 +37,7 @@ type registryRefreshCompleteMsg = model.RegistryRefreshCompleteMsg
 type editorContentMsg = model.EditorContentMsg
 type editorErrorMsg = model.EditorErrorMsg
 
-// Phase 2: Multi-step execution
+// Multi-step execution
 type IterationStep = model.IterationStep
 type IterationSummaryMsg = model.IterationSummaryMsg
 

@@ -169,9 +169,8 @@ func (s *SessionStorage) Load(id string) (*Session, error) {
 	// Session files can come from elsewhere (import, older versions)
 	session.Sanitize()
 
-	// Debug: Log compaction state after load
-	if config.Debug && config.DebugLog != nil && session.CompactionMarker > 0 {
-		config.DebugLog.Printf("[storage] Loaded session with compaction: marker=%d, summary=%q",
+	if session.CompactionMarker > 0 {
+		config.Debugf("[storage] Loaded session with compaction: marker=%d, summary=%q",
 			session.CompactionMarker, session.CompactedSummary)
 	}
 

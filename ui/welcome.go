@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -310,28 +309,6 @@ func validateOllamaURL(url string) tea.Cmd {
 		}
 
 		return urlValidatedMsg{valid: true, err: nil}
-	}
-}
-
-func loadModels(url string) tea.Cmd {
-	return func() tea.Msg {
-		client, err := ollama.NewClient(url, "", "")
-		if err != nil {
-			return modelsLoadedMsg{models: nil, err: err}
-		}
-
-		ctx := context.Background()
-		modelInfos, err := client.ListModels(ctx)
-		if err != nil {
-			return modelsLoadedMsg{models: nil, err: err}
-		}
-
-		models := make([]string, len(modelInfos))
-		for i, info := range modelInfos {
-			models[i] = info.Name
-		}
-
-		return modelsLoadedMsg{models: models, err: nil}
 	}
 }
 
@@ -1999,7 +1976,7 @@ func (m WelcomeModel) updateConfigureProviderScreen(msg tea.KeyMsg) (tea.Model, 
 		// Store API key
 		m.providerApiKeys[prov.ID] = apiKey
 
-		// Ping provider to validate (business logic in provider package!)
+		// Ping provider to validate
 		m.loading = true
 		m.err = ""
 		return m, provider.PingProvider(prov.ID, prov.BaseURL, apiKey)

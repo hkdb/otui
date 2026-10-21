@@ -88,11 +88,8 @@ func (pm *ProcessManager) StartPlugin(ctx context.Context, config PluginConfig) 
 			return fmt.Errorf("failed to connect to remote plugin %s: %w", config.ID, err)
 		}
 
-		switch {
-		case globalconfig.DebugLog != nil:
-			globalconfig.DebugLog.Printf("[MCP] Connected to remote plugin '%s' at %s (auth: %s)",
-				config.ID, config.ServerURL, config.AuthType)
-		}
+		globalconfig.Debugf("[MCP] Connected to remote plugin '%s' at %s (auth: %s)",
+			config.ID, config.ServerURL, config.AuthType)
 
 	default:
 		// Local plugin - existing stdio logic
@@ -178,10 +175,7 @@ func (pm *ProcessManager) StopPlugin(ctx context.Context, pluginID string) error
 	}
 	closePlugin(pluginID, proc.Client, cmd)
 
-	switch {
-	case globalconfig.DebugLog != nil:
-		globalconfig.DebugLog.Printf("[MCP] StopPlugin: Plugin '%s' stopped and removed from map", pluginID)
-	}
+	globalconfig.Debugf("[MCP] StopPlugin: Plugin '%s' stopped and removed from map", pluginID)
 
 	return nil
 }
@@ -238,9 +232,7 @@ func (pm *ProcessManager) Shutdown(ctx context.Context) error {
 	}
 	pm.mu.Unlock()
 
-	if globalconfig.DebugLog != nil {
-		globalconfig.DebugLog.Printf("[MCP] Shutdown: Starting parallel shutdown of %d plugins", len(pluginIDs))
-	}
+	globalconfig.Debugf("[MCP] Shutdown: Starting parallel shutdown of %d plugins", len(pluginIDs))
 
 	// Shutdown all plugins in PARALLEL for faster shutdown
 	var wg sync.WaitGroup
@@ -250,13 +242,9 @@ func (pm *ProcessManager) Shutdown(ctx context.Context) error {
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
-			if globalconfig.DebugLog != nil {
-				globalconfig.DebugLog.Printf("[MCP] Shutdown: Stopping plugin '%s' (parallel)", id)
-			}
+			globalconfig.Debugf("[MCP] Shutdown: Stopping plugin '%s' (parallel)", id)
 			if err := pm.StopPlugin(ctx, id); err != nil {
-				if globalconfig.DebugLog != nil {
-					globalconfig.DebugLog.Printf("[MCP] Shutdown: Error stopping plugin '%s': %v", id, err)
-				}
+				globalconfig.Debugf("[MCP] Shutdown: Error stopping plugin '%s': %v", id, err)
 				errChan <- err
 			}
 		}(pluginID)
@@ -266,9 +254,7 @@ func (pm *ProcessManager) Shutdown(ctx context.Context) error {
 	wg.Wait()
 	close(errChan)
 
-	if globalconfig.DebugLog != nil {
-		globalconfig.DebugLog.Printf("[MCP] Shutdown: All plugins stopped (parallel shutdown complete)")
-	}
+	globalconfig.Debugf("[MCP] Shutdown: All plugins stopped (parallel shutdown complete)")
 
 	// Collect errors
 	var errs []error
@@ -287,10 +273,7 @@ func (pm *ProcessManager) Shutdown(ctx context.Context) error {
 // terminates its process group so children started by npx/uvx/docker go too
 func closePlugin(pluginID string, c *client.Client, cmd *exec.Cmd) {
 	if c != nil {
-		switch {
-		case globalconfig.DebugLog != nil:
-			globalconfig.DebugLog.Printf("[MCP] closePlugin: Attempting to close client for '%s' (1s timeout)", pluginID)
-		}
+		globalconfig.Debugf("[MCP] closePlugin: Attempting to close client for '%s' (1s timeout)", pluginID)
 
 		closeDone := make(chan error, 1)
 		go func() {
@@ -309,16 +292,10 @@ func closePlugin(pluginID string, c *client.Client, cmd *exec.Cmd) {
 		defer pluginCmds.Delete(cmd)
 	}
 	if cmd != nil && cmd.Process != nil {
-		switch {
-		case globalconfig.DebugLog != nil:
-			globalconfig.DebugLog.Printf("[MCP] closePlugin: Terminating process group for '%s' (PID: %d)", pluginID, cmd.Process.Pid)
-		}
+		globalconfig.Debugf("[MCP] closePlugin: Terminating process group for '%s' (PID: %d)", pluginID, cmd.Process.Pid)
 
 		if err := terminateProcessGroup(cmd); err != nil {
-			switch {
-			case globalconfig.DebugLog != nil:
-				globalconfig.DebugLog.Printf("[MCP] closePlugin: Error terminating process for '%s': %v", pluginID, err)
-			}
+			globalconfig.Debugf("[MCP] closePlugin: Error terminating process for '%s': %v", pluginID, err)
 		}
 	}
 }
@@ -326,7 +303,7 @@ func closePlugin(pluginID string, c *client.Client, cmd *exec.Cmd) {
 // drainStderr reads a local plugin's stderr until it closes, logging it to
 // the debug log (or discarding it)
 func drainStderr(pluginID string, r io.Reader) {
-	if globalconfig.DebugLog == nil {
+	if !globalconfig.DebugEnabled() {
 		_, _ = io.Copy(io.Discard, r)
 		return
 	}
@@ -338,7 +315,7 @@ func drainStderr(pluginID string, r io.Reader) {
 		if runes := []rune(line); len(runes) > 500 {
 			line = string(runes[:500]) + "…"
 		}
-		globalconfig.DebugLog.Printf("[MCP] %s stderr: %s", pluginID, line)
+		globalconfig.Debugf("[MCP] %s stderr: %s", pluginID, line)
 	}
 	// Line too long or read error - keep the pipe drained
 	_, _ = io.Copy(io.Discard, r)
@@ -399,10 +376,7 @@ func (pm *ProcessManager) createHeadersClient(ctx context.Context, config Plugin
 		return nil, fmt.Errorf("failed to start SSE transport: %w", err)
 	}
 
-	switch {
-	case globalconfig.DebugLog != nil:
-		globalconfig.DebugLog.Printf("[MCP] Started SSE transport for %s (auth: %s)", config.ID, config.AuthType)
-	}
+	globalconfig.Debugf("[MCP] Started SSE transport for %s (auth: %s)", config.ID, config.AuthType)
 
 	return mcpClient, nil
 }
@@ -471,11 +445,8 @@ func (pm *ProcessManager) createOAuthClient(ctx context.Context, config PluginCo
 		return nil, fmt.Errorf("failed to start SSE transport: %w", err)
 	}
 
-	switch {
-	case globalconfig.DebugLog != nil:
-		globalconfig.DebugLog.Printf("[MCP] Created OAuth client for %s (ClientID: %s, Scopes: %v, TokenStore: FileTokenStore)",
-			config.ID, clientID, scopes)
-	}
+	globalconfig.Debugf("[MCP] Created OAuth client for %s (ClientID: %s, Scopes: %v, TokenStore: FileTokenStore)",
+		config.ID, clientID, scopes)
 
 	return mcpClient, nil
 }
@@ -507,10 +478,7 @@ func (pm *ProcessManager) createStreamableHttpClient(ctx context.Context, config
 		return nil, fmt.Errorf("failed to start HTTP transport: %w", err)
 	}
 
-	switch {
-	case globalconfig.DebugLog != nil:
-		globalconfig.DebugLog.Printf("[MCP] Started streamable HTTP transport for %s", config.ID)
-	}
+	globalconfig.Debugf("[MCP] Started streamable HTTP transport for %s", config.ID)
 
 	return mcpClient, nil
 }
@@ -520,14 +488,11 @@ func (pm *ProcessManager) createLocalClient(ctx context.Context, config PluginCo
 	env := configToEnv(config.Env, config.Config)
 	var capturedCmd *exec.Cmd
 
-	switch {
-	case globalconfig.DebugLog != nil:
-		// Names and counts only: values can be API keys
-		globalconfig.DebugLog.Printf("[MCP] StartPlugin: Plugin '%s' - Env vars: %v", config.ID, globalconfig.EnvNames(env))
-		globalconfig.DebugLog.Printf("[MCP] StartPlugin: Plugin '%s' - Runtime='%s', EntryPoint='%s', %d args",
-			config.ID, config.Runtime, config.EntryPoint, len(config.Args))
-		globalconfig.DebugLog.Printf("[MCP] StartPlugin: Plugin '%s' - Creating client with custom command func", config.ID)
-	}
+	// Names and counts only: values can be API keys
+	globalconfig.Debugf("[MCP] StartPlugin: Plugin '%s' - Env vars: %v", config.ID, globalconfig.EnvNames(env))
+	globalconfig.Debugf("[MCP] StartPlugin: Plugin '%s' - Runtime='%s', EntryPoint='%s', %d args",
+		config.ID, config.Runtime, config.EntryPoint, len(config.Args))
+	globalconfig.Debugf("[MCP] StartPlugin: Plugin '%s' - Creating client with custom command func", config.ID)
 
 	cmdFunc := func(ctx context.Context, command string, env []string, args []string) (*exec.Cmd, error) {
 		cmd := exec.CommandContext(ctx, command, args...)
@@ -535,10 +500,7 @@ func (pm *ProcessManager) createLocalClient(ctx context.Context, config PluginCo
 		setProcessGroup(cmd)
 		capturedCmd = cmd
 
-		switch {
-		case globalconfig.DebugLog != nil:
-			globalconfig.DebugLog.Printf("[MCP] StartPlugin: Created process for '%s' (will have PID after start)", config.ID)
-		}
+		globalconfig.Debugf("[MCP] StartPlugin: Created process for '%s' (will have PID after start)", config.ID)
 
 		return cmd, nil
 	}
@@ -556,8 +518,8 @@ func (pm *ProcessManager) createLocalClient(ctx context.Context, config PluginCo
 
 	// Log PID
 	switch {
-	case capturedCmd != nil && capturedCmd.Process != nil && globalconfig.DebugLog != nil:
-		globalconfig.DebugLog.Printf("[MCP] Started local plugin with PID %d", capturedCmd.Process.Pid)
+	case capturedCmd != nil && capturedCmd.Process != nil:
+		globalconfig.Debugf("[MCP] Started local plugin with PID %d", capturedCmd.Process.Pid)
 	}
 
 	return mcpClient, capturedCmd, nil

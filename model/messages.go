@@ -7,7 +7,7 @@ import (
 	"otui/storage"
 )
 
-// IterationStep records a single step in multi-step execution (Phase 2)
+// IterationStep records a single step in multi-step execution
 // Each step = one LLM response (may have 0+ tool calls)
 type IterationStep struct {
 	StepNumber int    // 1, 2, 3...
@@ -23,7 +23,7 @@ type IterationStep struct {
 	ShortName string // e.g., "read_dir"
 }
 
-// IterationSummaryMsg contains summary of all steps (Phase 2)
+// IterationSummaryMsg contains summary of all steps
 type IterationSummaryMsg struct {
 	Steps      []IterationStep
 	TotalSteps int
@@ -57,7 +57,7 @@ type StreamErrorMsg struct {
 	RequestID uint64
 }
 
-// Tool execution messages (Phase 6)
+// Tool execution messages
 type ToolCallsDetectedMsg struct {
 	ToolCalls       []ToolCall
 	InitialResponse string
@@ -67,9 +67,9 @@ type ToolCallsDetectedMsg struct {
 
 type ToolExecutionCompleteMsg struct {
 	FullResponse     string
-	IterationSummary IterationSummaryMsg // Phase 2
+	IterationSummary IterationSummaryMsg
 
-	// Phase 2: Multi-step continuation
+	// Multi-step continuation
 	HasMoreSteps        bool       // Continue with another step
 	NextToolCalls       []ToolCall // Tools to execute in next step
 	NextContext         []Message  // Context for next iteration
@@ -220,12 +220,12 @@ type ToolPermissionResponseMsg struct {
 
 // CompactionRequestMsg is sent when compaction approval is needed
 type CompactionRequestMsg struct {
-	MarkerIndex       int
-	CurrentTokens     int
-	ContextWindow     int
-	MessageCount      int
-	UserMessageCount  int
-	AssistantCount    int
+	MarkerIndex      int
+	CurrentTokens    int
+	ContextWindow    int
+	MessageCount     int
+	UserMessageCount int
+	AssistantCount   int
 }
 
 // CompactionResponseMsg is sent when user responds to compaction request

@@ -41,7 +41,7 @@ type FilePickerState struct {
 func NewFilePickerState(config FilePickerConfig) FilePickerState {
 	fp := filepicker.New()
 	fp.AllowedTypes = config.AllowedTypes
-	fp.Height = 10
+	fp.SetHeight(10)
 	fp.DirAllowed = true
 	fp.FileAllowed = true
 	fp.ShowPermissions = false
@@ -92,11 +92,6 @@ func (fps *FilePickerState) Reset() {
 }
 
 func RenderFilePickerModal(state FilePickerState, width, height int) string {
-	if otuiconfig.DebugLog != nil {
-		otuiconfig.DebugLog.Printf("RENDER: Success=%v, CleaningUp=%v, Processing=%v, Active=%v",
-			state.Success != nil, state.CleaningUp, state.Processing, state.Active)
-	}
-
 	if state.Success != nil {
 		return renderFilePickerSuccess(*state.Success, state.Config.Title, state.SuccessFooter, width, height)
 	}

@@ -205,9 +205,7 @@ func renderModelSelector(a AppView, models []ollama.ModelInfo, selectedIdx int, 
 	var sections []string
 	sections = append(sections, titleSection)
 	sections = append(sections, headerSection)
-	for _, line := range modelLines {
-		sections = append(sections, line)
-	}
+	sections = append(sections, modelLines...)
 	sections = append(sections, footerSection)
 
 	content := strings.Join(sections, "\n")

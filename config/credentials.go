@@ -225,18 +225,8 @@ func (c *CredentialStore) loadSSHEncrypted(dataDir string) (map[string]string, e
 
 	// Reinitialize if manager doesn't exist OR if we now have a passphrase
 	if c.encManager == nil || c.passphrase != "" {
-		// Security: Commented out to avoid logging passphrase state
-		// Uncomment for debugging passphrase-related issues
-		// if Debug && DebugLog != nil {
-		// 	DebugLog.Printf("[CredentialStore] loadSSHEncrypted: Reinitializing EncryptionManager (encManager==nil: %v, passphrase set: %v)", c.encManager == nil, c.passphrase != "")
-		// }
 		c.encManager = NewEncryptionManager(EncryptionSSHKey, c.sshKeyPath)
 		c.encManager.SetPassphrase(c.passphrase)
-		// Security: Commented out to avoid logging passphrase length
-		// Uncomment for debugging passphrase-related issues
-		// if Debug && DebugLog != nil {
-		// 	DebugLog.Printf("[CredentialStore] loadSSHEncrypted: Set passphrase on EncryptionManager (len=%d)", len(c.passphrase))
-		// }
 		if err := c.encManager.Initialize(); err != nil {
 			return nil, fmt.Errorf("failed to initialize encryption: %w", err)
 		}

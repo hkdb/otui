@@ -50,10 +50,8 @@ func (m *Model) CalculateTokenUsage() storage.TokenUsage {
 	}
 
 	// Debug: Log message counts
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[compaction] CalculateTokenUsage: total_ui_messages=%d, user_assistant_count=%d, compaction_marker=%d",
-			len(m.Messages), len(storageMessages), m.CurrentSession.CompactionMarker)
-	}
+	config.Debugf("[compaction] CalculateTokenUsage: total_ui_messages=%d, user_assistant_count=%d, compaction_marker=%d",
+		len(m.Messages), len(storageMessages), m.CurrentSession.CompactionMarker)
 
 	// Total tokens in all messages
 	totalTokens := counter.CountMessages(storageMessages)
@@ -63,20 +61,16 @@ func (m *Model) CalculateTokenUsage() storage.TokenUsage {
 	compactionMarker := m.CurrentSession.CompactionMarker
 	if compactionMarker > 0 && compactionMarker <= len(storageMessages) {
 		activeMessages = storageMessages[compactionMarker:]
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[compaction] Applying compaction marker %d: keeping %d of %d messages",
-				compactionMarker, len(activeMessages), len(storageMessages))
-		}
+		config.Debugf("[compaction] Applying compaction marker %d: keeping %d of %d messages",
+			compactionMarker, len(activeMessages), len(storageMessages))
 	}
 	activeTokens := counter.CountMessages(activeMessages)
 
 	// Compacted tokens
 	compactedTokens := totalTokens - activeTokens
 
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[compaction] Token usage: total=%d active=%d compacted=%d",
-			totalTokens, activeTokens, compactedTokens)
-	}
+	config.Debugf("[compaction] Token usage: total=%d active=%d compacted=%d",
+		totalTokens, activeTokens, compactedTokens)
 
 	return storage.TokenUsage{
 		TotalTokens:      totalTokens,
@@ -141,10 +135,8 @@ func (m *Model) GetContextUsagePercentage() float64 {
 	m.usageCacheValid = true
 	m.usageMu.Unlock()
 
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[compaction] Context usage recalculated: %.1f%% (%d / %d tokens, %d messages)",
-			percentage*100, usage.ActiveTokens, metadata.ContextWindow, messageCount)
-	}
+	config.Debugf("[compaction] Context usage recalculated: %.1f%% (%d / %d tokens, %d messages)",
+		percentage*100, usage.ActiveTokens, metadata.ContextWindow, messageCount)
 
 	return percentage
 }
@@ -193,10 +185,8 @@ func (m *Model) SuggestCompactionPoint(keepPercentage float64) int {
 	for i := len(ua) - 1; i >= 0; i-- {
 		currentTokens += counter.CountTokens(ua[i].Content)
 		if currentTokens >= targetTokens {
-			if config.Debug && config.DebugLog != nil {
-				config.DebugLog.Printf("[compaction] Suggested marker: %d (keeps %d tokens, target was %d)",
-					i, currentTokens, targetTokens)
-			}
+			config.Debugf("[compaction] Suggested marker: %d (keeps %d tokens, target was %d)",
+				i, currentTokens, targetTokens)
 			return i
 		}
 	}
@@ -259,9 +249,7 @@ Summary:`, conversationText.String())
 		return "", fmt.Errorf("LLM returned empty summary")
 	}
 
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[compaction] Generated summary: %s", summaryText)
-	}
+	config.Debugf("[compaction] Generated summary: %s", summaryText)
 
 	return summaryText, nil
 }
@@ -349,9 +337,7 @@ func (job compactionJob) run() CompactionCompleteMsg {
 
 	case job.previousSummary != "":
 		// Keep the earlier summary rather than replacing it with a generic one
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[compaction] LLM summary failed, keeping previous summary: %v", err)
-		}
+		config.Debugf("[compaction] LLM summary failed, keeping previous summary: %v", err)
 		msg.Summary = fmt.Sprintf("Compacted %d more messages (%d user, %d assistant) on %s",
 			compactedCount, userCount, assistantCount, time.Now().Format("Jan 2, 2006"))
 		msg.LLMSummary = fmt.Sprintf("%s\n\n(%d more messages - %d user, %d assistant - were compacted after this summary.)",
@@ -359,9 +345,7 @@ func (job compactionJob) run() CompactionCompleteMsg {
 
 	default:
 		// Fallback to simple summary if LLM summary fails
-		if config.Debug && config.DebugLog != nil {
-			config.DebugLog.Printf("[compaction] LLM summary failed, using fallback: %v", err)
-		}
+		config.Debugf("[compaction] LLM summary failed, using fallback: %v", err)
 		msg.Summary = fmt.Sprintf("Compacted %d messages (%d user, %d assistant) on %s",
 			compactedCount, userCount, assistantCount, time.Now().Format("Jan 2, 2006"))
 		msg.LLMSummary = fmt.Sprintf(
@@ -394,10 +378,8 @@ func (m *Model) ApplyCompaction(msg CompactionCompleteMsg) error {
 	m.CurrentSession.LLMSummary = msg.LLMSummary
 	m.CurrentSession.TokenUsage = m.CalculateTokenUsage()
 
-	if config.Debug && config.DebugLog != nil {
-		config.DebugLog.Printf("[compaction] Session compacted: marker=%d summary=%s",
-			msg.Marker, msg.Summary)
-	}
+	config.Debugf("[compaction] Session compacted: marker=%d summary=%s",
+		msg.Marker, msg.Summary)
 
 	// Mark session as dirty so it gets saved
 	m.SessionDirty = true
@@ -462,8 +444,8 @@ func (m *Model) ShouldAutoCompact() bool {
 	percentage := m.GetContextUsagePercentage()
 	shouldCompact := percentage >= m.Config.Compaction.AutoCompactThreshold
 
-	if config.Debug && config.DebugLog != nil && shouldCompact {
-		config.DebugLog.Printf("[compaction] Auto-compact triggered: %.1f%% >= %.1f%%",
+	if shouldCompact {
+		config.Debugf("[compaction] Auto-compact triggered: %.1f%% >= %.1f%%",
 			percentage*100, m.Config.Compaction.AutoCompactThreshold*100)
 	}
 

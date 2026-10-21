@@ -2,7 +2,6 @@ package model
 
 import (
 	"context"
-	"otui/config"
 	"otui/ollama"
 
 	mcptypes "github.com/mark3labs/mcp-go/mcp"
@@ -64,28 +63,3 @@ const MetadataSourceFallback = "fallback"
 
 // StreamCallback is called for each chunk of streamed response.
 type StreamCallback func(chunk string, toolCalls []ToolCall) error
-
-// ShouldBlockOnOllamaValidation returns true if Ollama validation errors should prevent saving settings.
-// This is business logic that determines when Ollama must be reachable vs when it's optional.
-//
-// Ollama validation should only block if:
-// 1. Ollama is the default provider (user intends to use it), AND
-// 2. Ollama is enabled in the provider list
-//
-// OpenRouter-only users should be able to save settings even when Ollama is unreachable.
-func ShouldBlockOnOllamaValidation(cfg *config.Config) bool {
-	// If Ollama is not the default provider, validation failure should not block
-	if cfg.DefaultProvider != "ollama" && cfg.DefaultProvider != "" {
-		return false
-	}
-
-	// Check if Ollama is explicitly disabled in providers list
-	for _, p := range cfg.Providers {
-		if p.ID == "ollama" && !p.Enabled {
-			return false
-		}
-	}
-
-	// Ollama is default or no default set - validation should block
-	return true
-}

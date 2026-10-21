@@ -265,9 +265,7 @@ func RenderThreeSectionModal(title string, messageLines []string, footer string,
 	contentLines = append(contentLines, safeRepeat(" ", modalWidth)) // Top padding
 
 	// Add message lines (already formatted by caller)
-	for _, line := range messageLines {
-		contentLines = append(contentLines, line)
-	}
+	contentLines = append(contentLines, messageLines...)
 
 	contentLines = append(contentLines, safeRepeat(" ", modalWidth)) // Bottom padding
 

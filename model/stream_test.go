@@ -131,11 +131,11 @@ func TestStreamCancelledEndsWithoutFinal(t *testing.T) {
 }
 
 func TestStreamRemovesControlSequences(t *testing.T) {
-	p := &scriptProvider{chunks: []string{"\x1b]52;c;aGk=\x07ok", "\r\x1b[2K done‮"}, delay: time.Millisecond}
+	p := &scriptProvider{chunks: []string{"\x1b]52;c;aGk=\x07ok", "\r\x1b[2K done\u202e"}, delay: time.Millisecond}
 	msg, text := drainStream(t, streamFor(context.Background(), p, StreamTimeouts{time.Second, time.Second}))
 	f := msg.(finished)
 	for _, s := range []string{text, f.text} {
-		if strings.ContainsAny(s, "\x1b\x07\r‮") {
+		if strings.ContainsAny(s, "\x1b\x07\r\u202e") {
 			t.Errorf("control sequences reached the UI: %q", s)
 		}
 	}

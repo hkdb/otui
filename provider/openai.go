@@ -177,7 +177,7 @@ func (p *OpenAIProvider) ListModels(ctx context.Context) ([]ollama.ModelInfo, er
 			Name:         m.ID,         // OpenAI models don't have vendor prefixes
 			InternalName: m.ID,         // Same as display name
 			Size:         0,            // OpenAI doesn't provide size info
-			Provider:     p.providerID, // CRITICAL: Must match provider ID
+			Provider:     p.providerID, // Must match the provider ID (selecting the model switches to it)
 		})
 	}
 
